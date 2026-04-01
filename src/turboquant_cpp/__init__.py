@@ -9,6 +9,7 @@ Usage:
         quantize_scalar, dequantize_scalar,
         polar_quantize_block, polar_dequantize_block,
         polar_quantize, polar_dequantize,
+        polar_quantize_f32, polar_dequantize_f32,
         compression_ratio,
     )
 """
@@ -23,6 +24,8 @@ try:
         polar_dequantize_block,
         polar_quantize,
         polar_dequantize,
+        polar_quantize_f32,
+        polar_dequantize_f32,
         compression_ratio,
     )
     CPP_AVAILABLE = True

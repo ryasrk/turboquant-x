@@ -1,32 +1,28 @@
 #pragma once
-// Lloyd-Max optimal scalar quantization for TurboQuant.
-//
-// After Walsh-Hadamard rotation, KV cache values follow N(0, σ²).
-// Lloyd-Max codebooks are provably optimal for this case.
+// Lloyd-Max optimal scalar quantization codebooks (float precision).
+// Branchless quantization for 2/3/4-bit modes with AVX2 acceleration.
 
 #include <cstdint>
 #include <vector>
 
 namespace turboquant {
 
-/// Precomputed Lloyd-Max codebook with centroids and decision boundaries.
 struct Codebook {
     int n_bits;
-    std::vector<double> centroids;   // size = 2^n_bits
-    std::vector<double> boundaries;  // size = 2^n_bits - 1
+    std::vector<float> centroids;
+    std::vector<float> boundaries;
 };
 
-/// Compute Lloyd-Max optimal codebook for N(0,1) distribution.
+/// Compute Lloyd-Max codebook for N(0,1).  Internal computation uses double.
 Codebook lloyd_max_codebook(int n_bits, int n_iterations = 50, double tol = 1e-8);
 
-/// Get precomputed codebook for 2, 3, or 4 bits.
+/// Get precomputed codebook (2, 3, or 4-bit).
 const Codebook& get_codebook(int n_bits);
 
-/// Quantize continuous values to nearest centroid index.
-/// Uses binary search on boundaries for O(n log k).
-void quantize_scalar(const double* x, uint8_t* indices, int n, const Codebook& cb);
+/// Branchless scalar quantization — AVX2 accelerated for TURBO4.
+void quantize_scalar(const float* x, uint8_t* indices, int n, const Codebook& cb);
 
-/// Reconstruct values from centroid indices (lookup).
-void dequantize_scalar(const uint8_t* indices, double* out, int n, const Codebook& cb);
+/// Dequantize: look up centroid values from indices.
+void dequantize_scalar(const uint8_t* indices, float* out, int n, const Codebook& cb);
 
 }  // namespace turboquant

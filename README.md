@@ -6,12 +6,13 @@ Local LLM inference server with **7.76x KV cache compression** and near-zero spe
 
 | | Standard (Q8_0) | TurboQuant K8/V4 |
 |---|:---:|:---:|
-| **GPU Speed** | 44.78 tok/s | 47.10 tok/s (**+5.2%**) |
-| **CPU Speed** | 8.3 tok/s | 8.6 tok/s (+3.2%) |
-| **KV Cache RAM** | 281 MB | 35 MB (**-87%**) |
+| **GPU Speed** | 43.10 tok/s | 44.85 tok/s (**+4.1%**) |
+| **CPU Speed** | 9.05 tok/s | 9.08 tok/s (+0.2%) |
+| **KV Cache RAM** | 284 MB | 33 MB (**-88%**) |
 | **Compression** | 1.0x | **7.76x** |
-| **Compress / Decompress** | — | **31 ms / 26 ms** |
+| **Compress / Decompress** | — | **30 ms / 24 ms** |
 | **Quality (MSE)** | 0.000 | 0.010 |
+| **Multi-Turn Overhead** | — | **+0.1%** (was -6.2% with Python) |
 
 *Tested on RTX 4060 Laptop (8 GB), Ryzen 9 8945H, Qwen2.5-7B Q4_K_M, 4096 context, C++ backend enabled*
 
@@ -256,11 +257,11 @@ curl http://localhost:8000/v1/models
 
 ## Compression Presets
 
-| Preset | K-bits | V-bits | Compression | MSE | Speed Impact | Best For |
-|--------|:---:|:---:|:---:|:---:|:---:|----------|
-| **Quality** | 8 | 4 | 7.76x | 0.010 | -1.5% (GPU) | Production default — best quality/speed tradeoff |
-| **Aggressive** | 8 | 2 | 7.76x | 0.124 | +1.6% (GPU) | Memory-constrained, simple tasks |
-| **Symmetric** | 4 | 4 | 7.53x | 0.021 | +1.8% (GPU) | Research, balanced K/V compression |
+| Preset | K-bits | V-bits | Compression | MSE | GPU Speed | CPU Speed | Best For |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|----------|
+| **Quality** | 8 | 4 | 7.76x | 0.010 | +4.1% | +0.2% | Production default — best quality/speed tradeoff |
+| **Aggressive** | 8 | 2 | 7.76x | 0.124 | +3.8% | +0.9% | Memory-constrained, simple tasks |
+| **Symmetric** | 4 | 4 | 7.53x | 0.021 | +3.5% | +1.4% | Balanced K/V compression |
 
 **Why asymmetric K/V?** Keys are used in attention score computation (dot product + softmax amplifies errors). Values are just weighted-averaged — quantization noise averages out. Keeping K at 8-bit while compressing V to 4-bit gives optimal quality/compression.
 
@@ -272,8 +273,10 @@ Optional C++ backend that accelerates the PolarQuant compression pipeline:
 
 | Operation | Python (NumPy) | C++ Backend | Speedup |
 |-----------|:---:|:---:|:---:|
-| Compress (K8/V4) | 254 ms | 31 ms | **8.1x** |
-| Decompress (K8/V4) | 198 ms | 26 ms | **7.6x** |
+| Compress (K8/V4) | 254 ms | 30 ms | **8.4x** |
+| Decompress (K8/V4) | 198 ms | 24 ms | **8.2x** |
+| Compress (K4/V4) | 493 ms | 58 ms | **8.4x** |
+| Decompress (K4/V4) | 375 ms | 33 ms | **11.3x** |
 
 Optimizations:
 - **Fast Walsh-Hadamard Transform** — O(d log d) butterfly algorithm replaces O(d²) matrix multiply (18x fewer FLOPs for d=128)
@@ -291,39 +294,42 @@ Build instructions in [Step 4](#step-4-build-c-backend-optional--8x-faster-compr
 
 ### GPU Mode (RTX 4060 Laptop, 8 GB VRAM, C++ Backend)
 
-| Config | Speed (tok/s) | System RAM | Compress | Decompress | Compression |
-|--------|:---:|:---:|:---:|:---:|:---:|
-| Standard Q8_0 | 44.78 | 281 MB | — | — | 1.0x |
-| **TurboQuant K8/V4** | **47.10 (+5.2%)** | 35 MB (-87%) | 31 ms | 26 ms | **7.76x** |
-| TurboQuant K8/V2 | 46.74 (+4.4%) | 26 MB (-91%) | 31 ms | 26 ms | **7.76x** |
-| TurboQuant K4/V4 | 45.59 (+1.8%) | 24 MB (-91%) | 58 ms | 33 ms | **7.53x** |
+| Config | Speed (tok/s) | System RAM | Compress | Decompress | MSE | Compression |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|
+| Standard Q8_0 | 43.10 | 284 MB | — | — | 0.000 | 1.0x |
+| **TurboQuant K8/V4** | **44.85 (+4.1%)** | 33 MB (-88%) | 30 ms | 24 ms | 0.010 | **7.76x** |
+| TurboQuant K8/V2 | 44.73 (+3.8%) | 23 MB (-92%) | 33 ms | 22 ms | 0.124 | **7.76x** |
+| TurboQuant K4/V4 | 44.59 (+3.5%) | 24 MB (-92%) | 58 ms | 33 ms | 0.021 | **7.53x** |
 
 ### CPU Mode (Ryzen 9 8945H, 16 threads)
 
-| Config | Speed (tok/s) | System RAM | Compression |
-|--------|:---:|:---:|:---:|
-| Standard Q8_0 | 8.30 | 410 MB | 1.0x |
-| **TurboQuant K8/V4** | 8.56 (+3.2%) | 162 MB (-60%) | **7.76x** |
-| TurboQuant K8/V2 | 8.78 (+5.8%) | 158 MB (-61%) | **7.76x** |
+| Config | Speed (tok/s) | System RAM | Compress | Decompress | MSE | Compression |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|
+| Standard Q8_0 | 9.05 | 410 MB | — | — | 0.000 | 1.0x |
+| **TurboQuant K8/V4** | 9.08 (+0.2%) | 160 MB (-61%) | 33 ms | 24 ms | 0.010 | **7.76x** |
+| TurboQuant K8/V2 | 9.13 (+0.9%) | 153 MB (-63%) | 31 ms | 21 ms | 0.124 | **7.76x** |
+| TurboQuant K4/V4 | 9.18 (+1.4%) | 151 MB (-63%) | 59 ms | 33 ms | 0.021 | **7.53x** |
 
-> TurboQuant is **faster** on CPU because the smaller compressed KV cache improves L2/L3 cache utilization.
+> TurboQuant is **faster** on CPU because the smaller compressed KV cache improves L2/L3 cache utilization. Compression times are identical (~30ms) regardless of GPU/CPU mode since the C++ engine runs on CPU.
 
 ### GPU vs CPU
 
 | Mode | CPU | GPU | GPU Speedup |
 |------|:---:|:---:|:---:|
-| Standard Q8_0 | 8.30 tok/s | 44.78 tok/s | **5.4x** |
-| TurboQuant K8/V4 | 8.56 tok/s | 47.10 tok/s | **5.5x** |
+| Standard Q8_0 | 9.05 tok/s | 43.10 tok/s | **4.8x** |
+| TurboQuant K8/V4 | 9.08 tok/s | 44.85 tok/s | **4.9x** |
 
 ### Multi-Turn (5-turn conversation, GPU)
 
 | Metric | Standard | TurboQuant K8/V4 |
 |--------|:---:|:---:|
-| Avg Speed | 46.9 tok/s | 44.0 tok/s (-6.2%) |
+| Avg Speed | 46.21 tok/s | 46.25 tok/s (**+0.1%**) |
+| Turn 4 (worst) | 46.28 tok/s | 46.14 tok/s (-0.3%) |
 | Compression | 1.0x | 7.76x (constant) |
+| Avg MSE | 0.000 | 0.010 |
 | Output Quality | baseline | identical responses |
 
-Multi-turn overhead is from compress/decompress between turns. With the C++ backend, this drops to ~31ms compress + ~26ms decompress per turn.
+With the C++ backend, multi-turn overhead is **eliminated** — compress/decompress adds only ~30ms per turn. The old Python backend had -6.2% average overhead (up to -15% on later turns).
 
 ---
 

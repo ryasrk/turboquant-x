@@ -15,7 +15,9 @@ Design:
 from __future__ import annotations
 
 import logging
+import os
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from numpy.typing import NDArray
 
@@ -33,6 +35,8 @@ try:
         CPP_AVAILABLE,
         polar_quantize as _cpp_polar_quantize,
         polar_dequantize as _cpp_polar_dequantize,
+        polar_quantize_f32 as _cpp_polar_quantize_f32,
+        polar_dequantize_f32 as _cpp_polar_dequantize_f32,
     )
 except ImportError:
     CPP_AVAILABLE = False
@@ -54,8 +58,13 @@ def _cpp_compress_to_dataclass(
     seed: int,
     block_size: int,
 ) -> CompressedTensor:
-    """Compress via C++ and convert dict output to Python dataclasses."""
-    result = _cpp_polar_quantize(tensor, n_bits=n_bits, seed=seed, block_size=block_size)
+    """Compress via C++ zero-copy float32 path and convert dict to dataclasses.
+
+    numpy astype(float32) is SIMD-accelerated (~10 GB/s), much faster than
+    per-element conversion in the C++ bindings.
+    """
+    tensor_f32 = tensor.astype(np.float32, copy=False)
+    result = _cpp_polar_quantize_f32(tensor_f32, n_bits=n_bits, seed=seed, block_size=block_size)
     blocks = tuple(
         CompressedBlock(
             indices=np.asarray(b["indices"], dtype=np.uint8),
@@ -75,7 +84,7 @@ def _cpp_compress_to_dataclass(
 
 
 def _cpp_decompress_from_dataclass(compressed: CompressedTensor) -> NDArray[np.float64]:
-    """Convert Python dataclass to dict and decompress via C++."""
+    """Decompress via C++ zero-copy float32 path, convert result to float64."""
     ct_dict = {
         "blocks": [
             {
@@ -91,7 +100,8 @@ def _cpp_decompress_from_dataclass(compressed: CompressedTensor) -> NDArray[np.f
         "n_bits": compressed.n_bits,
         "block_size": compressed.block_size,
     }
-    return _cpp_polar_dequantize(ct_dict)
+    result_f32 = _cpp_polar_dequantize_f32(ct_dict)
+    return result_f32.astype(np.float64)
 
 
 @dataclass(frozen=True)
@@ -179,19 +189,33 @@ class TurboQuantCompressor:
         n_layers = keys.shape[0]
         cfg = self._config
 
-        compressed_keys: list[CompressedTensor] = []
-        compressed_values: list[CompressedTensor] = []
+        # Parallel layer compression — only for large data where thread
+        # pool overhead is amortized.  C++ already uses OpenMP internally
+        # for block-level parallelism, so threading mainly helps with
+        # Python glue overhead between layers.
+        total_bytes = keys.nbytes + values.nbytes
+        use_parallel = n_layers > 4 and total_bytes > 50_000_000  # 50 MB
+        max_workers = min(os.cpu_count() or 4, n_layers, 8)
 
-        for layer_idx in range(n_layers):
+        def _compress_layer_pair(layer_idx: int) -> tuple[CompressedTensor, CompressedTensor]:
             k_seed = cfg.seed + layer_idx * 1000
             v_seed = cfg.seed + layer_idx * 1000 + 500
+            k_comp = self.compress_layer(keys[layer_idx], cfg.k_bits, k_seed)
+            v_comp = self.compress_layer(values[layer_idx], cfg.v_bits, v_seed)
+            return k_comp, v_comp
 
-            compressed_keys.append(
-                self.compress_layer(keys[layer_idx], cfg.k_bits, k_seed)
-            )
-            compressed_values.append(
-                self.compress_layer(values[layer_idx], cfg.v_bits, v_seed)
-            )
+        if use_parallel and max_workers > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                results = list(pool.map(_compress_layer_pair, range(n_layers)))
+            compressed_keys = [r[0] for r in results]
+            compressed_values = [r[1] for r in results]
+        else:
+            compressed_keys = []
+            compressed_values = []
+            for layer_idx in range(n_layers):
+                k, v = _compress_layer_pair(layer_idx)
+                compressed_keys.append(k)
+                compressed_values.append(v)
 
         return CompressedKV(
             keys=tuple(compressed_keys),
@@ -206,20 +230,32 @@ class TurboQuantCompressor:
         self, compressed: CompressedKV
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Decompress full KV cache back to original arrays."""
-        keys: list[NDArray[np.float64]] = []
-        values: list[NDArray[np.float64]] = []
+        n_layers = compressed.n_layers
+        # Estimate size from original shapes for threshold
+        k_elements = 1
+        for s in compressed.original_k_shape:
+            k_elements *= s
+        total_bytes = k_elements * 8 * 2  # float64, K+V
+        use_parallel = n_layers > 4 and total_bytes > 50_000_000
+        max_workers = min(os.cpu_count() or 4, n_layers, 8)
 
-        for layer_idx in range(compressed.n_layers):
-            keys.append(
-                self.decompress_layer(
-                    compressed.keys[layer_idx], compressed.config.k_bits
-                )
-            )
-            values.append(
-                self.decompress_layer(
-                    compressed.values[layer_idx], compressed.config.v_bits
-                )
-            )
+        def _decompress_layer_pair(layer_idx: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+            k = self.decompress_layer(compressed.keys[layer_idx], compressed.config.k_bits)
+            v = self.decompress_layer(compressed.values[layer_idx], compressed.config.v_bits)
+            return k, v
+
+        if use_parallel and max_workers > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                results = list(pool.map(_decompress_layer_pair, range(n_layers)))
+            keys = [r[0] for r in results]
+            values = [r[1] for r in results]
+        else:
+            keys = []
+            values = []
+            for layer_idx in range(n_layers):
+                k, v = _decompress_layer_pair(layer_idx)
+                keys.append(k)
+                values.append(v)
 
         return np.stack(keys, axis=0), np.stack(values, axis=0)
 

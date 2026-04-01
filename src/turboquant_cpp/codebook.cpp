@@ -4,7 +4,11 @@
 #include <cmath>
 #include <stdexcept>
 
-// Standard normal PDF and CDF (no external dependency needed)
+#ifdef __AVX2__
+#include <immintrin.h>
+#endif
+
+// Standard normal PDF and CDF (no external dependency)
 namespace {
 
 constexpr double INV_SQRT_2PI = 0.3989422804014327;
@@ -28,9 +32,8 @@ Codebook lloyd_max_codebook(int n_bits, int n_iterations, double tol) {
     }
 
     int n_levels = 1 << n_bits;
+    // Internal computation in double for precision
     std::vector<double> centroids(n_levels);
-
-    // Initialize uniformly in [-3, 3]
     for (int i = 0; i < n_levels; ++i) {
         centroids[i] = -3.0 + 6.0 * i / (n_levels - 1);
     }
@@ -38,18 +41,16 @@ Codebook lloyd_max_codebook(int n_bits, int n_iterations, double tol) {
     std::vector<double> boundaries(n_levels - 1);
 
     for (int iter = 0; iter < n_iterations; ++iter) {
-        // Boundaries = midpoints
         for (int i = 0; i < n_levels - 1; ++i) {
             boundaries[i] = (centroids[i] + centroids[i + 1]) / 2.0;
         }
 
-        // Extended boundaries with ±∞ sentinels
         std::vector<double> b(n_levels + 1);
-        b[0] = -1e30;  // Approximate -∞
+        b[0] = -1e30;
         for (int i = 0; i < n_levels - 1; ++i) {
             b[i + 1] = boundaries[i];
         }
-        b[n_levels] = 1e30;  // Approximate +∞
+        b[n_levels] = 1e30;
 
         std::vector<double> new_centroids(n_levels);
         double max_change = 0.0;
@@ -60,7 +61,6 @@ Codebook lloyd_max_codebook(int n_bits, int n_iterations, double tol) {
             if (cdf_diff < 1e-15) {
                 new_centroids[i] = (lo + hi) / 2.0;
             } else {
-                // Conditional expectation E[X | lo < X < hi] for N(0,1)
                 double pdf_diff = norm_pdf(lo) - norm_pdf(hi);
                 new_centroids[i] = pdf_diff / cdf_diff;
             }
@@ -72,52 +72,48 @@ Codebook lloyd_max_codebook(int n_bits, int n_iterations, double tol) {
         if (max_change < tol) break;
     }
 
-    // Final boundaries
     for (int i = 0; i < n_levels - 1; ++i) {
         boundaries[i] = (centroids[i] + centroids[i + 1]) / 2.0;
     }
 
-    return Codebook{n_bits, std::move(centroids), std::move(boundaries)};
+    // Convert to float for storage
+    std::vector<float> f_centroids(n_levels);
+    std::vector<float> f_boundaries(n_levels - 1);
+    for (int i = 0; i < n_levels; ++i) {
+        f_centroids[i] = static_cast<float>(centroids[i]);
+    }
+    for (int i = 0; i < n_levels - 1; ++i) {
+        f_boundaries[i] = static_cast<float>(boundaries[i]);
+    }
+
+    return Codebook{n_bits, std::move(f_centroids), std::move(f_boundaries)};
 }
 
-// Precomputed codebooks (exact values from Python)
+// Precomputed codebooks (float precision — matches Python within float32 ULP)
 static const Codebook TURBO2{
     2,
-    {-1.5104176085002023, -0.4527800346370284,
-      0.4527800346370285,  1.5104176085002028},
-    {-0.9815988215686153, 0.0, 0.9815988215686157},
+    {-1.5104176f, -0.45278004f, 0.45278004f, 1.5104176f},
+    {-0.9815988f, 0.0f, 0.9815988f},
 };
 
 static const Codebook TURBO3{
     3,
-    {-2.1519457045434560, -1.3439092785115518,
-     -0.7560052812106792, -0.2450941789459803,
-      0.2450941789459804,  0.7560052812106796,
-      1.3439092785115505,  2.1519457045434582},
-    {-1.7479274915275038, -1.0499572798611156,
-     -0.5005497300783297,  0.0,
-      0.5005497300783299,  1.0499572798611150,
-      1.7479274915275043},
+    {-2.1519457f, -1.3439093f, -0.7560053f, -0.24509418f,
+      0.24509418f,  0.7560053f,  1.3439093f,  2.1519457f},
+    {-1.7479275f, -1.0499573f, -0.5005497f, 0.0f,
+      0.5005497f,  1.0499573f,  1.7479275f},
 };
 
 static const Codebook TURBO4{
     4,
-    {-2.7329730276314383, -2.0694504218818746,
-     -1.6184883483594745, -1.2566476802931554,
-     -0.9427007640381189, -0.6570370151078325,
-     -0.3882235722082744, -0.1284549100577299,
-      0.1284549100577301,  0.3882235722082740,
-      0.6570370151078336,  0.9427007640381218,
-      1.2566476802931565,  1.6184883483594787,
-      2.0694504218818760,  2.7329730276314304},
-    {-2.4012117247566565, -1.8439693851206744,
-     -1.4375680143263150, -1.0996742221656373,
-     -0.7998688895729758, -0.5226302936580535,
-     -0.2583392411330021,  0.0,
-      0.2583392411330021,  0.5226302936580538,
-      0.7998688895729778,  1.0996742221656390,
-      1.4375680143263176,  1.8439693851206773,
-      2.4012117247566529},
+    {-2.7329730f, -2.0694504f, -1.6184883f, -1.2566477f,
+     -0.9427008f, -0.6570370f, -0.3882236f, -0.12845491f,
+      0.12845491f,  0.3882236f,  0.6570370f,  0.9427008f,
+      1.2566477f,  1.6184883f,  2.0694504f,  2.7329730f},
+    {-2.4012117f, -1.8439694f, -1.4375680f, -1.0996742f,
+     -0.7998689f, -0.5226303f, -0.25833923f, 0.0f,
+      0.25833923f,  0.5226303f,  0.7998689f,  1.0996742f,
+      1.4375680f,  1.8439694f,  2.4012117f},
 };
 
 const Codebook& get_codebook(int n_bits) {
@@ -132,22 +128,118 @@ const Codebook& get_codebook(int n_bits) {
     }
 }
 
-void quantize_scalar(const double* x, uint8_t* indices, int n,
+// -----------------------------------------------------------------------
+// Branchless scalar quantization — AVX2 accelerated for TURBO4 (15 bounds)
+// Instead of binary search O(n log k), we sum comparison results O(n * k)
+// which is branchless and SIMD-friendly.
+// For k=15, branchless beats binary search due to branch mispredictions.
+// -----------------------------------------------------------------------
+
+#ifdef __AVX2__
+static void quantize_scalar_avx2_15(const float* x, uint8_t* indices, int n,
+                                     const float* bounds) {
+    // Broadcast all 15 boundaries into AVX registers
+    __m256 b0  = _mm256_set1_ps(bounds[0]);
+    __m256 b1  = _mm256_set1_ps(bounds[1]);
+    __m256 b2  = _mm256_set1_ps(bounds[2]);
+    __m256 b3  = _mm256_set1_ps(bounds[3]);
+    __m256 b4  = _mm256_set1_ps(bounds[4]);
+    __m256 b5  = _mm256_set1_ps(bounds[5]);
+    __m256 b6  = _mm256_set1_ps(bounds[6]);
+    __m256 b7  = _mm256_set1_ps(bounds[7]);
+    __m256 b8  = _mm256_set1_ps(bounds[8]);
+    __m256 b9  = _mm256_set1_ps(bounds[9]);
+    __m256 b10 = _mm256_set1_ps(bounds[10]);
+    __m256 b11 = _mm256_set1_ps(bounds[11]);
+    __m256 b12 = _mm256_set1_ps(bounds[12]);
+    __m256 b13 = _mm256_set1_ps(bounds[13]);
+    __m256 b14 = _mm256_set1_ps(bounds[14]);
+
+    int i = 0;
+    for (; i + 7 < n; i += 8) {
+        __m256 val = _mm256_loadu_ps(&x[i]);
+
+        // _CMP_GE_OQ: val >= bound_k → all bits set (0xFFFFFFFF = -1 as int32)
+        // Subtract each comparison from accumulator (subtracting -1 = adding 1)
+        __m256i sum = _mm256_setzero_si256();
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b0,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b1,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b2,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b3,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b4,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b5,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b6,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b7,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b8,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b9,  _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b10, _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b11, _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b12, _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b13, _CMP_GE_OQ)));
+        sum = _mm256_sub_epi32(sum, _mm256_castps_si256(_mm256_cmp_ps(val, b14, _CMP_GE_OQ)));
+
+        // Extract 32-bit indices and pack to uint8
+        alignas(32) int32_t idx32[8];
+        _mm256_store_si256(reinterpret_cast<__m256i*>(idx32), sum);
+        for (int j = 0; j < 8; ++j) {
+            indices[i + j] = static_cast<uint8_t>(idx32[j]);
+        }
+    }
+
+    // Scalar remainder
+    for (; i < n; ++i) {
+        float val = x[i];
+        uint8_t idx = 0;
+        idx += (val >= bounds[0]);  idx += (val >= bounds[1]);
+        idx += (val >= bounds[2]);  idx += (val >= bounds[3]);
+        idx += (val >= bounds[4]);  idx += (val >= bounds[5]);
+        idx += (val >= bounds[6]);  idx += (val >= bounds[7]);
+        idx += (val >= bounds[8]);  idx += (val >= bounds[9]);
+        idx += (val >= bounds[10]); idx += (val >= bounds[11]);
+        idx += (val >= bounds[12]); idx += (val >= bounds[13]);
+        idx += (val >= bounds[14]);
+        indices[i] = idx;
+    }
+}
+#endif
+
+void quantize_scalar(const float* x, uint8_t* indices, int n,
                      const Codebook& cb) {
-    // Binary search on boundaries (equivalent to np.searchsorted)
     int n_bounds = static_cast<int>(cb.boundaries.size());
-    for (int i = 0; i < n; ++i) {
-        // std::lower_bound gives first boundary >= x[i]
-        auto it = std::lower_bound(cb.boundaries.begin(), cb.boundaries.end(),
-                                   x[i]);
-        indices[i] = static_cast<uint8_t>(it - cb.boundaries.begin());
+
+#ifdef __AVX2__
+    if (n_bounds == 15) {
+        quantize_scalar_avx2_15(x, indices, n, cb.boundaries.data());
+        return;
+    }
+#endif
+
+    // Branchless for any small codebook (2/3/4-bit)
+    if (n_bounds <= 15) {
+        const float* bounds = cb.boundaries.data();
+        for (int i = 0; i < n; ++i) {
+            float val = x[i];
+            uint8_t idx = 0;
+            for (int b = 0; b < n_bounds; ++b) {
+                idx += (val >= bounds[b]);
+            }
+            indices[i] = idx;
+        }
+    } else {
+        // Binary search fallback for large codebooks
+        for (int i = 0; i < n; ++i) {
+            auto it = std::lower_bound(cb.boundaries.begin(),
+                                       cb.boundaries.end(), x[i]);
+            indices[i] = static_cast<uint8_t>(it - cb.boundaries.begin());
+        }
     }
 }
 
-void dequantize_scalar(const uint8_t* indices, double* out, int n,
+void dequantize_scalar(const uint8_t* indices, float* out, int n,
                        const Codebook& cb) {
+    const float* centroids = cb.centroids.data();
     for (int i = 0; i < n; ++i) {
-        out[i] = cb.centroids[indices[i]];
+        out[i] = centroids[indices[i]];
     }
 }
 
