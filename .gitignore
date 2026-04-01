@@ -8,6 +8,7 @@ __pycache__/
 dist/
 build/
 *.egg
+*.so
 
 # Models (large binary files)
 models/*.gguf

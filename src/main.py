@@ -131,7 +131,7 @@ def build_kv_config(config: dict[str, Any]) -> KVCacheConfig:
     kv = config.get("kv_cache", {})
     return KVCacheConfig(
         cache_type_k=CacheType(kv.get("cache_type_k", "q8_0")),
-        cache_type_v=CacheType(kv.get("cache_type_v", "q8_0")),
+        cache_type_v=CacheType(kv.get("cache_type_v", "turbo4")),
         flash_attention=kv.get("flash_attention", True),
     )
 

@@ -14,6 +14,7 @@ Design:
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 from dataclasses import dataclass
 from numpy.typing import NDArray
@@ -21,10 +22,76 @@ from numpy.typing import NDArray
 from src.turboquant.polar_quant import (
     CompressedTensor,
     CompressedBlock,
-    polar_quantize,
-    polar_dequantize,
+    polar_quantize as _py_polar_quantize,
+    polar_dequantize as _py_polar_dequantize,
     compression_ratio,
 )
+
+# Try C++ backend — fall back to pure Python if not built
+try:
+    from src.turboquant_cpp import (
+        CPP_AVAILABLE,
+        polar_quantize as _cpp_polar_quantize,
+        polar_dequantize as _cpp_polar_dequantize,
+    )
+except ImportError:
+    CPP_AVAILABLE = False
+
+_logger = logging.getLogger(__name__)
+if CPP_AVAILABLE:
+    _logger.info("Using C++ backend for PolarQuant compression")
+else:
+    _logger.info("C++ backend not available, using pure-Python PolarQuant")
+
+
+# ------------------------------------------------------------------
+# C++ ↔ Python dataclass adapters
+# ------------------------------------------------------------------
+
+def _cpp_compress_to_dataclass(
+    tensor: NDArray[np.float64],
+    n_bits: int,
+    seed: int,
+    block_size: int,
+) -> CompressedTensor:
+    """Compress via C++ and convert dict output to Python dataclasses."""
+    result = _cpp_polar_quantize(tensor, n_bits=n_bits, seed=seed, block_size=block_size)
+    blocks = tuple(
+        CompressedBlock(
+            indices=np.asarray(b["indices"], dtype=np.uint8),
+            norm=np.float32(b["norm"]),
+            n_bits=b["n_bits"],
+            block_size=b["block_size"],
+            seed=b["seed"],
+        )
+        for b in result["blocks"]
+    )
+    return CompressedTensor(
+        blocks=blocks,
+        original_shape=tuple(result["original_shape"]),
+        n_bits=result["n_bits"],
+        block_size=result["block_size"],
+    )
+
+
+def _cpp_decompress_from_dataclass(compressed: CompressedTensor) -> NDArray[np.float64]:
+    """Convert Python dataclass to dict and decompress via C++."""
+    ct_dict = {
+        "blocks": [
+            {
+                "indices": np.asarray(b.indices, dtype=np.uint8),
+                "norm": float(b.norm),
+                "n_bits": b.n_bits,
+                "block_size": b.block_size,
+                "seed": b.seed,
+            }
+            for b in compressed.blocks
+        ],
+        "original_shape": tuple(compressed.original_shape),
+        "n_bits": compressed.n_bits,
+        "block_size": compressed.block_size,
+    }
+    return _cpp_polar_dequantize(ct_dict)
 
 
 @dataclass(frozen=True)
@@ -170,10 +237,16 @@ class TurboQuantCompressor:
 
         If n_bits == 8, use simple 8-bit uniform quantization (no PolarQuant).
         If n_bits in {2, 3, 4}, use full PolarQuant pipeline.
+        Uses C++ backend when available for 10-50x speedup.
         """
         if n_bits == 8:
             return self._quantize_8bit(tensor)
-        return polar_quantize(
+
+        if CPP_AVAILABLE:
+            return _cpp_compress_to_dataclass(
+                tensor, n_bits, layer_seed, self._config.block_size
+            )
+        return _py_polar_quantize(
             tensor, n_bits=n_bits, seed=layer_seed, block_size=self._config.block_size
         )
 
@@ -185,7 +258,10 @@ class TurboQuantCompressor:
         """Decompress a single layer."""
         if n_bits == 8:
             return self._dequantize_8bit(compressed)
-        return polar_dequantize(compressed)
+
+        if CPP_AVAILABLE:
+            return _cpp_decompress_from_dataclass(compressed)
+        return _py_polar_dequantize(compressed)
 
     # ------------------------------------------------------------------
     # 8-bit uniform quantization (q8_0 pass-through)
