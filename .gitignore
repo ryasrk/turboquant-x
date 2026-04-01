@@ -1,0 +1,30 @@
+# Virtual environment
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Models (large binary files)
+models/*.gguf
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test/coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Benchmark results (optional — uncomment to track)
+# benchmarks/results/
