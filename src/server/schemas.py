@@ -72,8 +72,10 @@ class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy"]
     model_loaded: bool
     model_name: str = ""
+    inference_mode: str = "standard"
     gpu_memory: dict | None = None
     kv_cache_config: dict | None = None
+    turboquant_config: dict | None = None
     uptime_s: float = 0.0
 
 

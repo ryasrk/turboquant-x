@@ -1,4 +1,4 @@
-# TurboQuant Chat Server Configuration
+# TurboQuant-X Server Configuration
 
 model:
   name: "qwen2.5-7b-instruct"
@@ -7,10 +7,25 @@ model:
   n_gpu_layers: -1
   chat_format: "chatml"
 
+# Inference mode: "standard" or "turboquant"
+#   standard   — llama.cpp with Q8_0 KV cache (no Python-level compression)
+#   turboquant — llama.cpp with Q8_0 KV cache + Python-level TurboQuant
+#                compression/decompression between turns
+inference_mode: "standard"
+
 kv_cache:
   cache_type_k: "q8_0"
-  cache_type_v: "turbo4"
+  cache_type_v: "q8_0"
   flash_attention: true
+
+# TurboQuant compression settings (only used when inference_mode = "turboquant")
+# Presets: "quality" (K8/V4), "aggressive" (K8/V2), "symmetric" (K4/V4)
+# Set preset OR individual k_bits/v_bits. Explicit values override the preset.
+turboquant:
+  preset: "quality"
+  # k_bits: 8
+  # v_bits: 4
+  block_size: 128
 
 server:
   host: "0.0.0.0"

@@ -26,11 +26,18 @@ import yaml
 
 from src.engine.kv_cache import CacheType, KVCacheConfig
 from src.engine.model_config import ModelConfig
-from src.server.app import create_app
+from src.server.app import create_app, InferenceMode
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path("config/default.yaml")
+
+# Named presets for TurboQuant compression
+TURBOQUANT_PRESETS: dict[str, dict[str, int]] = {
+    "quality": {"k_bits": 8, "v_bits": 4, "block_size": 128},
+    "aggressive": {"k_bits": 8, "v_bits": 2, "block_size": 128},
+    "symmetric": {"k_bits": 4, "v_bits": 4, "block_size": 128},
+}
 
 
 def load_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
@@ -96,6 +103,14 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
     if env_val := os.environ.get("TURBOQUANT_LOG_LEVEL"):
         result["logging"]["level"] = env_val
 
+    # Inference mode override
+    if env_val := os.environ.get("TURBOQUANT_INFERENCE_MODE"):
+        result["inference_mode"] = env_val
+
+    # TurboQuant preset override
+    if env_val := os.environ.get("TURBOQUANT_PRESET"):
+        result.setdefault("turboquant", {})["preset"] = env_val
+
     return result
 
 
@@ -116,9 +131,51 @@ def build_kv_config(config: dict[str, Any]) -> KVCacheConfig:
     kv = config.get("kv_cache", {})
     return KVCacheConfig(
         cache_type_k=CacheType(kv.get("cache_type_k", "q8_0")),
-        cache_type_v=CacheType(kv.get("cache_type_v", "turbo4")),
+        cache_type_v=CacheType(kv.get("cache_type_v", "q8_0")),
         flash_attention=kv.get("flash_attention", True),
     )
+
+
+def build_inference_mode(config: dict[str, Any]) -> InferenceMode:
+    """Determine inference mode from config."""
+    raw = config.get("inference_mode", "standard").lower()
+    try:
+        return InferenceMode(raw)
+    except ValueError:
+        logger.warning("Unknown inference_mode '%s', falling back to standard", raw)
+        return InferenceMode.STANDARD
+
+
+def build_turboquant_config(config: dict[str, Any]) -> dict[str, int]:
+    """Build TurboQuant compression settings from config.
+
+    If a preset name is specified, its values are used as the base,
+    then any explicit k_bits/v_bits/block_size overrides are applied on top.
+    """
+    tq = config.get("turboquant", {})
+    preset_name = tq.get("preset", "").lower()
+
+    if preset_name and preset_name in TURBOQUANT_PRESETS:
+        base = dict(TURBOQUANT_PRESETS[preset_name])
+        logger.info("Using TurboQuant preset: %s", preset_name)
+    else:
+        if preset_name:
+            logger.warning(
+                "Unknown TurboQuant preset '%s', valid: %s. Using defaults.",
+                preset_name,
+                ", ".join(TURBOQUANT_PRESETS),
+            )
+        base = {"k_bits": 8, "v_bits": 4, "block_size": 128}
+
+    # Explicit values override preset defaults
+    if "k_bits" in tq:
+        base["k_bits"] = tq["k_bits"]
+    if "v_bits" in tq:
+        base["v_bits"] = tq["v_bits"]
+    if "block_size" in tq:
+        base["block_size"] = tq["block_size"]
+
+    return base
 
 
 def setup_logging(config: dict[str, Any]) -> None:
@@ -157,6 +214,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Server port (overrides config)",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["standard", "turboquant"],
+        default=None,
+        help="Inference mode (overrides config)",
+    )
+    parser.add_argument(
+        "--preset",
+        type=str,
+        choices=["quality", "aggressive", "symmetric"],
+        default=None,
+        help="TurboQuant preset: quality (K8/V4), aggressive (K8/V2), symmetric (K4/V4)",
+    )
     return parser.parse_args(argv)
 
 
@@ -173,25 +244,42 @@ def main(argv: list[str] | None = None) -> None:
         config.setdefault("server", {})["host"] = args.host
     if args.port:
         config.setdefault("server", {})["port"] = args.port
+    if args.mode:
+        config["inference_mode"] = args.mode
+    if args.preset:
+        config.setdefault("turboquant", {})["preset"] = args.preset
+        # Auto-enable turboquant mode when a preset is specified
+        if not args.mode:
+            config["inference_mode"] = "turboquant"
 
     # Setup
     setup_logging(config)
 
     model_config = build_model_config(config)
     kv_config = build_kv_config(config)
+    inference_mode = build_inference_mode(config)
+    turboquant_cfg = build_turboquant_config(config)
 
     server_cfg = config.get("server", {})
     host = server_cfg.get("host", "0.0.0.0")
     port = server_cfg.get("port", 8000)
     cors_origins = server_cfg.get("cors_origins", ["http://localhost:3000"])
 
-    logger.info("Starting TurboQuant Chat Server")
+    logger.info("Starting TurboQuant-X Server")
     logger.info("Model: %s (%s)", model_config.model_name, model_config.model_path)
+    logger.info("Inference mode: %s", inference_mode.value)
     logger.info("KV Cache: K=%s, V=%s", kv_config.cache_type_k.value, kv_config.cache_type_v.value)
+    if inference_mode == InferenceMode.TURBOQUANT:
+        logger.info(
+            "TurboQuant: K=%d-bit, V=%d-bit, block_size=%d",
+            turboquant_cfg["k_bits"],
+            turboquant_cfg["v_bits"],
+            turboquant_cfg["block_size"],
+        )
     logger.info("Server: %s:%d", host, port)
 
     # Create and run app
-    app = create_app(model_config, kv_config, cors_origins)
+    app = create_app(model_config, kv_config, cors_origins, inference_mode, turboquant_cfg)
 
     import uvicorn
     uvicorn.run(app, host=host, port=port)

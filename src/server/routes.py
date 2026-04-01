@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from src.server.app import get_engine, get_uptime
+from src.server.app import get_engine, get_turbo_engine, get_inference_mode, get_uptime, InferenceMode
 from src.server.schemas import (
     ChatRequest,
     ChatResponse,
@@ -163,7 +163,11 @@ async def health_check():
     try:
         engine = get_engine()
         model_loaded = engine.is_loaded
-        stats = engine.get_stats()
+        turbo = get_turbo_engine()
+        if turbo is not None:
+            stats = turbo.get_stats()
+        else:
+            stats = engine.get_stats()
         status = "healthy" if model_loaded else "degraded"
     except RuntimeError:
         model_loaded = False
@@ -185,6 +189,7 @@ async def health_check():
         status=status,
         model_loaded=model_loaded,
         model_name=stats.get("model_name", ""),
+        inference_mode=get_inference_mode().value,
         gpu_memory=gpu_info,
         kv_cache_config={
             "cache_type_k": stats.get("kv_cache_k", "unknown"),
@@ -193,6 +198,7 @@ async def health_check():
         }
         if stats
         else None,
+        turboquant_config=stats.get("turbo_quant") if stats else None,
         uptime_s=round(get_uptime(), 1),
     )
 

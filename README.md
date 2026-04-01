@@ -62,8 +62,19 @@ This downloads **Qwen2.5-7B-Instruct Q4_K_M** (~4.4GB) to `models/`.
 ### Start the server
 
 ```bash
+# Standard inference (no TurboQuant compression)
 python -m src.main
+
+# TurboQuant with default "quality" preset (K8/V4)
+python -m src.main --mode turboquant
+
+# TurboQuant with a named preset
+python -m src.main --preset quality      # K8/V4 — best quality/speed tradeoff
+python -m src.main --preset aggressive   # K8/V2 — max compression, lower quality
+python -m src.main --preset symmetric    # K4/V4 — equal K/V precision
 ```
+
+> Using `--preset` automatically enables TurboQuant mode.
 
 With a custom config:
 
@@ -75,7 +86,78 @@ With environment variable overrides:
 
 ```bash
 TURBOQUANT_PORT=9000 TURBOQUANT_N_CTX=4096 python -m src.main
+TURBOQUANT_PRESET=aggressive python -m src.main --mode turboquant
 ```
+
+### Send a message
+
+#### Non-streaming request
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Hello, what is TurboQuant?"}
+    ],
+    "max_tokens": 512,
+    "temperature": 0.7,
+    "stream": false
+  }'
+```
+
+#### Streaming request (SSE)
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "Explain KV cache compression in 3 sentences."}
+    ],
+    "max_tokens": 256,
+    "stream": true
+  }'
+```
+
+#### Health check
+
+```bash
+curl http://localhost:8000/health
+```
+
+#### List models
+
+```bash
+curl http://localhost:8000/v1/models
+```
+
+#### Using the OpenAI Python client
+
+The API is OpenAI-compatible, so you can use the official client:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
+response = client.chat.completions.create(
+    model="qwen2.5-7b-instruct",
+    messages=[{"role": "user", "content": "Hello!"}],
+    max_tokens=256,
+)
+print(response.choices[0].message.content)
+```
+
+#### Request parameters
+
+| Parameter | Type | Default | Range |
+|-----------|------|---------|-------|
+| `messages` | array | required | 1–100 messages |
+| `max_tokens` | int | 512 | 1–4096 |
+| `temperature` | float | 0.7 | 0.0–2.0 |
+| `top_p` | float | 0.95 | 0.0–1.0 |
+| `stream` | bool | false | — |
 
 ### Environment variables
 
@@ -86,6 +168,8 @@ TURBOQUANT_PORT=9000 TURBOQUANT_N_CTX=4096 python -m src.main
 | `TURBOQUANT_HOST` | Server bind address | `0.0.0.0` |
 | `TURBOQUANT_PORT` | Server port | `8000` |
 | `TURBOQUANT_LOG_LEVEL` | Logging level | `INFO` |
+| `TURBOQUANT_INFERENCE_MODE` | Inference mode (`standard` / `turboquant`) | `standard` |
+| `TURBOQUANT_PRESET` | TurboQuant preset (`quality` / `aggressive` / `symmetric`) | `quality` |
 
 ## API Endpoints
 
@@ -109,10 +193,17 @@ model:
   n_gpu_layers: -1      # -1 = offload all layers to GPU
   chat_format: "chatml"
 
+inference_mode: "standard"   # "standard" or "turboquant"
+
 kv_cache:
   cache_type_k: "q8_0"
-  cache_type_v: "turbo4"
+  cache_type_v: "q8_0"
   flash_attention: true
+
+# TurboQuant presets: "quality" (K8/V4), "aggressive" (K8/V2), "symmetric" (K4/V4)
+turboquant:
+  preset: "quality"
+  block_size: 128
 
 server:
   host: "0.0.0.0"
