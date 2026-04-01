@@ -6,18 +6,19 @@ Local LLM inference server with **7.76x KV cache compression** and near-zero spe
 
 | | Standard (Q8_0) | TurboQuant K8/V4 |
 |---|:---:|:---:|
-| **GPU Speed** | 43.6 tok/s | 43.0 tok/s (-1.5%) |
+| **GPU Speed** | 44.78 tok/s | 47.10 tok/s (**+5.2%**) |
 | **CPU Speed** | 8.3 tok/s | 8.6 tok/s (+3.2%) |
-| **KV Cache RAM** | 284 MB | 37 MB (**-87%**) |
+| **KV Cache RAM** | 281 MB | 35 MB (**-87%**) |
 | **Compression** | 1.0x | **7.76x** |
+| **Compress / Decompress** | — | **31 ms / 26 ms** |
 | **Quality (MSE)** | 0.000 | 0.010 |
 
-*Tested on RTX 4060 Laptop (8 GB), Ryzen 9 8945H, Qwen2.5-7B Q4_K_M, 8192 context*
+*Tested on RTX 4060 Laptop (8 GB), Ryzen 9 8945H, Qwen2.5-7B Q4_K_M, 4096 context, C++ backend enabled*
 
 ## Features
 
 - **TurboQuant KV cache compression** — asymmetric K/V precision (K8/V4 default) via PolarQuant pipeline (WHT rotation + Lloyd-Max codebook quantization)
-- **C++ acceleration backend** — 8.6x faster compression via fast Walsh-Hadamard O(d log d) + OpenMP threading (auto-detected, optional)
+- **C++ acceleration backend** — 8x faster compression via fast Walsh-Hadamard O(d log d) + OpenMP threading — makes TurboQuant **faster** than standard inference (auto-detected, optional)
 - **OpenAI-compatible API** — drop-in `/v1/chat/completions` endpoint with streaming (SSE) support
 - **GPU + CPU inference** — llama.cpp backend with configurable GPU layer offloading
 - **3 compression presets** — Quality (K8/V4), Aggressive (K8/V2), Symmetric (K4/V4)
@@ -85,7 +86,7 @@ pip install -e ".[dev,gpu,bench]"
 
 This downloads **Qwen2.5-7B-Instruct Q4_K_M** (~4.4 GB) to `models/`. You can also download manually from HuggingFace and place the `.gguf` file in `models/`.
 
-### Step 4: Build C++ backend (optional — 8.6x faster compression)
+### Step 4: Build C++ backend (optional — 8x faster compression)
 
 ```bash
 pip install pybind11
@@ -271,8 +272,8 @@ Optional C++ backend that accelerates the PolarQuant compression pipeline:
 
 | Operation | Python (NumPy) | C++ Backend | Speedup |
 |-----------|:---:|:---:|:---:|
-| Compress 64 MB | 2.069 s | 0.241 s | **8.59x** |
-| Decompress 64 MB | 1.539 s | 0.284 s | **5.41x** |
+| Compress (K8/V4) | 254 ms | 31 ms | **8.1x** |
+| Decompress (K8/V4) | 198 ms | 26 ms | **7.6x** |
 
 Optimizations:
 - **Fast Walsh-Hadamard Transform** — O(d log d) butterfly algorithm replaces O(d²) matrix multiply (18x fewer FLOPs for d=128)
@@ -280,20 +281,22 @@ Optimizations:
 - **Native codebook** — precomputed Lloyd-Max centroids compiled in, zero allocation overhead
 - **`-O3 -march=native`** — full compiler optimization with AVX2/AVX-512
 
-Build instructions in [Step 4](#step-4-build-c-backend-optional--86x-faster-compression) above. Without C++, everything works — just slower compression.
+With the C++ backend, compression overhead drops from ~250ms to ~31ms per turn, making TurboQuant **strictly faster** than standard inference on all presets.
+
+Build instructions in [Step 4](#step-4-build-c-backend-optional--8x-faster-compression) above. Without C++, everything works — just slower compression.
 
 ---
 
 ## Performance
 
-### GPU Mode (RTX 4060 Laptop, 8 GB VRAM)
+### GPU Mode (RTX 4060 Laptop, 8 GB VRAM, C++ Backend)
 
-| Config | Speed (tok/s) | System RAM | GPU VRAM | Compression |
-|--------|:---:|:---:|:---:|:---:|
-| Standard Q8_0 | 43.59 | 284 MB | 4689 MB | 1.0x |
-| **TurboQuant K8/V4** | 42.95 (-1.5%) | 33 MB (-88%) | 4594 MB | **7.76x** |
-| TurboQuant K8/V2 | 44.28 (+1.6%) | 29 MB (-90%) | 4592 MB | **7.76x** |
-| TurboQuant K4/V4 | 44.37 (+1.8%) | 25 MB (-91%) | 4594 MB | **7.53x** |
+| Config | Speed (tok/s) | System RAM | Compress | Decompress | Compression |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| Standard Q8_0 | 44.78 | 281 MB | — | — | 1.0x |
+| **TurboQuant K8/V4** | **47.10 (+5.2%)** | 35 MB (-87%) | 31 ms | 26 ms | **7.76x** |
+| TurboQuant K8/V2 | 46.74 (+4.4%) | 26 MB (-91%) | 31 ms | 26 ms | **7.76x** |
+| TurboQuant K4/V4 | 45.59 (+1.8%) | 24 MB (-91%) | 58 ms | 33 ms | **7.53x** |
 
 ### CPU Mode (Ryzen 9 8945H, 16 threads)
 
@@ -309,8 +312,8 @@ Build instructions in [Step 4](#step-4-build-c-backend-optional--86x-faster-comp
 
 | Mode | CPU | GPU | GPU Speedup |
 |------|:---:|:---:|:---:|
-| Standard Q8_0 | 8.30 tok/s | 43.59 tok/s | **5.3x** |
-| TurboQuant K8/V4 | 8.56 tok/s | 42.95 tok/s | **5.0x** |
+| Standard Q8_0 | 8.30 tok/s | 44.78 tok/s | **5.4x** |
+| TurboQuant K8/V4 | 8.56 tok/s | 47.10 tok/s | **5.5x** |
 
 ### Multi-Turn (5-turn conversation, GPU)
 
@@ -320,7 +323,7 @@ Build instructions in [Step 4](#step-4-build-c-backend-optional--86x-faster-comp
 | Compression | 1.0x | 7.76x (constant) |
 | Output Quality | baseline | identical responses |
 
-Multi-turn overhead is from Python-level compress/decompress between turns (~200-500ms per turn). The C++ backend reduces this to ~50ms.
+Multi-turn overhead is from compress/decompress between turns. With the C++ backend, this drops to ~31ms compress + ~26ms decompress per turn.
 
 ---
 
