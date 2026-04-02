@@ -230,8 +230,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default=str(DEFAULT_CONFIG_PATH),
-        help="Path to YAML config file",
+        default=os.environ.get("TURBOQUANT_CONFIG", str(DEFAULT_CONFIG_PATH)),
+        help="Path to YAML config file (env: TURBOQUANT_CONFIG)",
     )
     parser.add_argument(
         "--host",
@@ -248,7 +248,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["standard", "turboquant"],
+        choices=["standard", "turboquant", "zero-quant"],
         default=None,
         help="Inference mode (overrides config)",
     )
