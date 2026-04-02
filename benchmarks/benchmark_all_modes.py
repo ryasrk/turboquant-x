@@ -366,16 +366,7 @@ def main() -> None:
         chat_format="chatml",
     )
 
-    zq_cfg = ZeroQuantConfig(
-        shallow_fraction=0.25,
-        deep_fraction=0.25,
-        shallow_k_bits=8,
-        shallow_v_bits=8,
-        middle_k_bits=4,
-        middle_v_bits=2,
-        deep_k_bits=8,
-        deep_v_bits=8,
-    )
+    zq_cfg = ZeroQuantConfig()  # uses defaults from ZeroQuantConfig (middle_v_bits=3)
 
     all_results = []
 
