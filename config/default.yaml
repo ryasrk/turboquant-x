@@ -8,8 +8,9 @@ model:
   gpu_safety_margin: 0.92  # VRAM fraction to use for model layers (0.85-0.95 range)
                             # Higher = more GPU layers, slightly higher OOM risk
   chat_format: "chatml"
-  n_threads: -1          # -1 = auto (cpu_count // 2). For 70B: set to 14
-  n_threads_batch: -1    # -1 = auto (cpu_count, all cores). For zero-quant: set to 28
+  n_threads: -1          # -1 = auto (cpu_count // 2 = 14 on i7-14700KF)
+                          # For LLaMA-2-70B: set to 20 (all physical cores)
+  n_threads_batch: -1    # -1 = auto (cpu_count = 28) for fast prompt eval
   n_batch: 512           # Prompt eval batch size. For 70B: use 1024
 
 # Inference mode: "standard" | "turboquant" | "zero-quant"

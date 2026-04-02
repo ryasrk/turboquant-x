@@ -60,6 +60,8 @@ class ModelConfig:
     n_threads: int = -1
     n_batch: int = 512
     n_threads_batch: int = -1  # CPU threads for prompt eval (-1 = auto: cpu_count, all cores)
+    use_mlock: bool = False    # Lock model weights in RAM (prevents OS paging to SSD)
+                               # Set True if model fits in RAM and you want consistent speed
 
     def __post_init__(self) -> None:
         if self.n_ctx < 128:

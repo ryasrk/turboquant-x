@@ -15,8 +15,9 @@ model:
   gpu_safety_margin: 0.94  # Aggressive: use 94% of VRAM → ~14 GPU layers
                             # Set to 0.88 if you get OOM errors
   chat_format: "llama-2"
-  n_threads: 14         # Physical cores (28 logical / 2)
-  n_threads_batch: 28   # All logical cores for prompt eval (biggest win on 70B CPU)
+  n_threads: 20         # All 20 physical cores (i7-14700KF: 8 P-core + 12 E-core)
+                        # -1 auto would give 14 (28//2), missing 6 physical cores
+  n_threads_batch: 28   # All 28 logical threads for prompt eval (HT helps batch)
   n_batch: 1024         # Larger batch for faster prompt phase on CPU
 
 # Recommended mode for LLaMA-2-70B on this hardware:

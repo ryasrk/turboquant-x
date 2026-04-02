@@ -159,6 +159,7 @@ def build_model_config(config: dict[str, Any]) -> ModelConfig:
         n_threads=model.get("n_threads", -1),
         n_batch=model.get("n_batch", 512),
         n_threads_batch=model.get("n_threads_batch", -1),
+        use_mlock=model.get("use_mlock", False),
     )
 
 

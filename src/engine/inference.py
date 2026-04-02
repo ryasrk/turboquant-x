@@ -133,6 +133,7 @@ class InferenceEngine:
                 n_threads=n_threads,
                 n_threads_batch=n_threads_batch,
                 n_batch=self._model_config.n_batch,
+                use_mlock=self._model_config.use_mlock,
                 verbose=False,
                 **kv_params,
             )
