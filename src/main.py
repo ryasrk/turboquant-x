@@ -88,6 +88,10 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         result["model"]["n_ctx"] = int(env_val)
     if env_val := os.environ.get("TURBOQUANT_N_GPU_LAYERS"):
         result["model"]["n_gpu_layers"] = int(env_val)
+    if env_val := os.environ.get("TURBOQUANT_N_THREADS"):
+        result["model"]["n_threads"] = int(env_val)
+    if env_val := os.environ.get("TURBOQUANT_N_BATCH"):
+        result["model"]["n_batch"] = int(env_val)
 
     # KV cache overrides
     if env_val := os.environ.get("TURBOQUANT_CACHE_TYPE_K"):
@@ -145,6 +149,8 @@ def build_model_config(config: dict[str, Any]) -> ModelConfig:
         n_ctx=n_ctx,
         n_gpu_layers=n_gpu_layers,
         chat_format=model.get("chat_format", "chatml"),
+        n_threads=model.get("n_threads", -1),
+        n_batch=model.get("n_batch", 512),
     )
 
 

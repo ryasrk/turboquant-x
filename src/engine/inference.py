@@ -99,11 +99,19 @@ class InferenceEngine:
         # Build constructor kwargs
         kv_params = to_llama_params(self._kv_config)
 
+        # Resolve n_threads: -1 → half of logical CPU cores (avoids HT overhead)
+        import os as _os
+        n_threads = self._model_config.n_threads
+        if n_threads == -1:
+            n_threads = max(1, (_os.cpu_count() or 4) // 2)
+
         logger.info(
-            "Loading model %s (ctx=%d, gpu_layers=%d, KV: K=%s V=%s)",
+            "Loading model %s (ctx=%d, gpu_layers=%d, threads=%d, batch=%d, KV: K=%s V=%s)",
             self._model_config.model_name,
             self._model_config.n_ctx,
             self._model_config.n_gpu_layers,
+            n_threads,
+            self._model_config.n_batch,
             self._kv_config.cache_type_k.value,
             self._kv_config.cache_type_v.value,
         )
@@ -116,6 +124,8 @@ class InferenceEngine:
                 n_ctx=self._model_config.n_ctx,
                 n_gpu_layers=self._model_config.n_gpu_layers,
                 chat_format=self._model_config.chat_format,
+                n_threads=n_threads,
+                n_batch=self._model_config.n_batch,
                 verbose=False,
                 **kv_params,
             )

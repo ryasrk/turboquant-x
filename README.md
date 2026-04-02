@@ -455,7 +455,7 @@ logging:
   level: "INFO"
 ```
 
-> **`n_gpu_layers: -1` (auto-detect):** At startup, TurboQuant-X reads the GGUF binary header to get architecture and layer count, queries free VRAM via `nvidia-smi`, and computes the optimal number of layers that fit in GPU memory (leaving 10% headroom for compute). The resolved value is logged and exposed in `/health` → `layer_distribution`.
+> **`n_gpu_layers: -1` (auto-detect):** At startup, TurboQuant-X reads the GGUF binary header to get architecture and layer count, queries free VRAM via `nvidia-smi`, and computes the optimal number of layers that fit in GPU memory (leaving 10% headroom for compute). The resolved value is logged and exposed in `/health` → `layer_distribution`.\n\n> **LLaMA-2-70B on 8 GB VRAM:** With 80 layers and a 37 GB model, only ~12 layers fit on GPU (15%). For better throughput, tune `n_threads` (set to physical core count, e.g. 14) and `n_batch: 1024`. Reduce `n_ctx` to `2048` to free 1–2 more GPU layers:\n> ```yaml\n> model:\n>   name: \"llama-2-70b-chat\"\n>   path: \"./models/llama-2-70b-chat.Q4_K_S.gguf\"\n>   n_ctx: 2048              # Halved from 4096 → fits 1-2 more GPU layers\n>   n_gpu_layers: -1         # Auto: resolves to ~13 layers\n>   chat_format: \"llama-2\"\n>   n_threads: 14            # Physical core count (28 logical / 2)\n>   n_batch: 1024            # Larger batch = faster prompt phase\n> ```
 
 ### Environment Variables
 
@@ -465,6 +465,8 @@ logging:
 | `TURBOQUANT_MODEL_NAME` | Model registry key | `qwen3.5-35b-a3b` |
 | `TURBOQUANT_N_CTX` | Context window size | `8192` |
 | `TURBOQUANT_N_GPU_LAYERS` | GPU layer offload (-1=auto-detect, 0=CPU, N=exact) | `-1` |
+| `TURBOQUANT_N_THREADS` | CPU threads for generation (-1=auto: cpu_count//2) | `-1` |
+| `TURBOQUANT_N_BATCH` | Prompt eval batch size (1024 recommended for 70B) | `512` |
 | `TURBOQUANT_CACHE_TYPE_K` | KV cache K type | `q8_0` |
 | `TURBOQUANT_CACHE_TYPE_V` | KV cache V type | `q8_0` |
 | `TURBOQUANT_HOST` | Server bind address | `0.0.0.0` |

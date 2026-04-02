@@ -47,6 +47,8 @@ class ModelConfig:
         n_gpu_layers: Number of layers to offload to GPU (-1 = all).
         chat_format: Chat template format (e.g., "chatml").
         weight_size_gb: Approximate model weight size in GB.
+        n_threads: CPU threads for token generation (-1 = auto: half of cpu_count).
+        n_batch: Batch size for prompt evaluation (larger = faster prompt, more RAM).
     """
 
     model_path: str
@@ -55,6 +57,8 @@ class ModelConfig:
     n_gpu_layers: int = -1
     chat_format: str = "chatml"
     weight_size_gb: float = 4.8
+    n_threads: int = -1
+    n_batch: int = 512
 
     def __post_init__(self) -> None:
         if self.n_ctx < 128:
@@ -63,6 +67,8 @@ class ModelConfig:
             raise ValueError(f"n_ctx must be <= 131072, got {self.n_ctx}")
         if self.n_gpu_layers < -1:
             raise ValueError(f"n_gpu_layers must be >= -1, got {self.n_gpu_layers}")
+        if self.n_batch < 1:
+            raise ValueError(f"n_batch must be >= 1, got {self.n_batch}")
 
 
 def get_default_config(
