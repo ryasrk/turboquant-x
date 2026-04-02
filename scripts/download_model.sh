@@ -5,8 +5,10 @@
 set -euo pipefail
 
 MODEL_DIR="${1:-models}"
-REPO_ID="Smoffyy/Qwen2.5-7B-Instruct-Pure-GGUF"
-FILENAME="Qwen2.5-7B-q4_k_m.gguf"
+# REPO_ID="Smoffyy/Qwen2.5-7B-Instruct-Pure-GGUF"
+REPO_ID="Smoffyy/Qwen3.5-35B-A3B-Instruct-Pure-GGUF"
+# FILENAME="Qwen2.5-7B-q4_k_m.gguf"
+FILENAME="Qwen3.5-35B-A3B-q4_k_m.gguf"
 
 mkdir -p "$MODEL_DIR"
 

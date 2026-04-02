@@ -8,11 +8,13 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.engine.inference import InferenceEngine
 from src.engine.kv_cache import KVCacheConfig
@@ -213,5 +215,14 @@ def create_app(
         app.include_router(router)
     except ImportError:
         logger.warning("Routes module not found — running without API endpoints")
+
+    # Serve chat UI at root
+    _static_dir = Path(__file__).parent.parent / "static"
+    if _static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+        @app.get("/", include_in_schema=False)
+        async def serve_chat_ui() -> FileResponse:
+            return FileResponse(str(_static_dir / "chat.html"))
 
     return app
