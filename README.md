@@ -14,7 +14,7 @@ Local LLM inference server with **7.76x KV cache compression** and near-zero spe
 | **Quality (MSE)** | 0.000 | 0.010 |
 | **Multi-Turn Overhead** | — | **+0.1%** (was -6.2% with Python) |
 
-*Tested on RTX 4060 Laptop (8 GB), Ryzen 9 8945H, Qwen2.5-7B Q4_K_M, 4096 context, C++ backend enabled*
+*Tested on RTX 4060 Ti 8 GB, Ryzen 9 8945H, Qwen2.5-7B Q4_K_M, 4096 context, C++ backend enabled*
 
 ## Features
 
@@ -84,11 +84,17 @@ pip install -e ".[dev,gpu,bench]"
 
 ### Step 3: Download a model
 
+Download **Qwen3.5-35B-A3B Q4_K_M** (~20 GB) manually from HuggingFace or via `huggingface-cli`, then place the `.gguf` file in `models/`:
+
+```bash
+huggingface-cli download Qwen/Qwen3.5-35B-A3B-GGUF Qwen3.5-35B-A3B-q4_k_m.gguf --local-dir models/
+```
+
+Alternatively, use the legacy downloader for Qwen2.5-7B (smaller, faster):
+
 ```bash
 ./scripts/download_model.sh
 ```
-
-This downloads **Qwen2.5-7B-Instruct Q4_K_M** (~4.4 GB) to `models/`. You can also download manually from HuggingFace and place the `.gguf` file in `models/`.
 
 ### Step 4: Build C++ backend (optional — 8x faster compression)
 
@@ -134,8 +140,10 @@ python -m src.main --mode turboquant --port 9000
 Expected startup output:
 ```
 2026-04-01 20:37:50 [INFO] Starting TurboQuant-X Server
-2026-04-01 20:37:50 [INFO] Model: qwen2.5-7b-instruct
+2026-04-01 20:37:50 [INFO] Model: qwen3.5-35b-a3b
 2026-04-01 20:37:50 [INFO] Inference mode: turboquant
+2026-04-01 20:37:50 [INFO] n_gpu_layers=-1 → auto-detecting from VRAM ...
+2026-04-01 20:37:50 [INFO] Optimal n_gpu_layers: 12 (30.0% on GPU, 28 CPU layers)
 2026-04-01 20:37:51 [INFO] Using C++ backend for PolarQuant compression
 2026-04-01 20:37:58 [INFO] Model loaded in 7.2s
 INFO:     Uvicorn running on http://0.0.0.0:8000
@@ -187,7 +195,7 @@ Response:
 {
   "id": "chatcmpl-d5dbada23915",
   "object": "chat.completion",
-  "model": "qwen2.5-7b-instruct",
+  "model": "qwen3.5-35b-a3b",
   "choices": [{
     "index": 0,
     "message": { "role": "assistant", "content": "..." },
@@ -224,7 +232,7 @@ from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
 response = client.chat.completions.create(
-    model="qwen2.5-7b-instruct",
+    model="qwen3.5-35b-a3b",
     messages=[{"role": "user", "content": "Hello!"}],
     max_tokens=256,
 )
@@ -453,8 +461,8 @@ logging:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `TURBOQUANT_MODEL_PATH` | Path to GGUF model file | `./models/qwen2.5-7b-instruct-q4_k_m.gguf` |
-| `TURBOQUANT_MODEL_NAME` | Model registry key | `qwen2.5-7b-instruct` |
+| `TURBOQUANT_MODEL_PATH` | Path to GGUF model file | `./models/Qwen3.5-35B-A3B-q4_k_m.gguf` |
+| `TURBOQUANT_MODEL_NAME` | Model registry key | `qwen3.5-35b-a3b` |
 | `TURBOQUANT_N_CTX` | Context window size | `8192` |
 | `TURBOQUANT_N_GPU_LAYERS` | GPU layer offload (-1=auto-detect, 0=CPU, N=exact) | `-1` |
 | `TURBOQUANT_CACHE_TYPE_K` | KV cache K type | `q8_0` |
