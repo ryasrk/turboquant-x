@@ -215,6 +215,28 @@ def build_turboquant_config(config: dict[str, Any]) -> dict[str, int]:
     return base
 
 
+def build_zero_quant_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Build Zero-Quant depth-adaptive compression settings from config.
+
+    Reads the ``zero_quant`` section and returns a plain dict that
+    ``create_app`` forwards to :class:`~src.turboquant.zero_quant.ZeroQuantConfig`.
+    Missing keys fall back to the ``ZeroQuantConfig`` defaults.
+    """
+    zq = config.get("zero_quant", {})
+    return {
+        "shallow_fraction": zq.get("shallow_fraction", 0.25),
+        "deep_fraction": zq.get("deep_fraction", 0.25),
+        "shallow_k_bits": zq.get("shallow_k_bits", 8),
+        "shallow_v_bits": zq.get("shallow_v_bits", 8),
+        "middle_k_bits": zq.get("middle_k_bits", 4),
+        "middle_v_bits": zq.get("middle_v_bits", 2),
+        "deep_k_bits": zq.get("deep_k_bits", 8),
+        "deep_v_bits": zq.get("deep_v_bits", 8),
+        "block_size": zq.get("block_size", 128),
+        "use_kv_coquant": zq.get("use_kv_coquant", False),
+    }
+
+
 def setup_logging(config: dict[str, Any]) -> None:
     """Configure logging from config."""
     log_cfg = config.get("logging", {})
@@ -296,6 +318,7 @@ def main(argv: list[str] | None = None) -> None:
     kv_config = build_kv_config(config)
     inference_mode = build_inference_mode(config)
     turboquant_cfg = build_turboquant_config(config)
+    zero_quant_cfg = build_zero_quant_config(config)
 
     server_cfg = config.get("server", {})
     host = server_cfg.get("host", "0.0.0.0")
@@ -313,10 +336,21 @@ def main(argv: list[str] | None = None) -> None:
             turboquant_cfg["v_bits"],
             turboquant_cfg["block_size"],
         )
+    elif inference_mode == InferenceMode.ZERO_QUANT:
+        logger.info(
+            "ZeroQuant: shallow K%d/V%d | middle K%d/V%d | deep K%d/V%d | coquant=%s",
+            zero_quant_cfg["shallow_k_bits"],
+            zero_quant_cfg["shallow_v_bits"],
+            zero_quant_cfg["middle_k_bits"],
+            zero_quant_cfg["middle_v_bits"],
+            zero_quant_cfg["deep_k_bits"],
+            zero_quant_cfg["deep_v_bits"],
+            zero_quant_cfg["use_kv_coquant"],
+        )
     logger.info("Server: %s:%d", host, port)
 
     # Create and run app
-    app = create_app(model_config, kv_config, cors_origins, inference_mode, turboquant_cfg)
+    app = create_app(model_config, kv_config, cors_origins, inference_mode, turboquant_cfg, zero_quant_cfg)
 
     import uvicorn
     uvicorn.run(app, host=host, port=port)

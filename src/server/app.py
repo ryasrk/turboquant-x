@@ -103,11 +103,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     elif _inference_mode == InferenceMode.ZERO_QUANT:
         try:
             from src.engine.zero_quant_engine import ZeroQuantEngine
+            from src.turboquant.zero_quant import ZeroQuantConfig
 
-            zq_cfg = getattr(app.state, "zero_quant_config", {})
-            _turbo_engine = ZeroQuantEngine(model_config, kv_config, zero_quant_config=zq_cfg)
+            zq_dict = getattr(app.state, "zero_quant_config", {})
+            zq_config = ZeroQuantConfig(
+                shallow_fraction=zq_dict.get("shallow_fraction", 0.25),
+                deep_fraction=zq_dict.get("deep_fraction", 0.25),
+                shallow_k_bits=zq_dict.get("shallow_k_bits", 8),
+                shallow_v_bits=zq_dict.get("shallow_v_bits", 8),
+                middle_k_bits=zq_dict.get("middle_k_bits", 4),
+                middle_v_bits=zq_dict.get("middle_v_bits", 2),
+                deep_k_bits=zq_dict.get("deep_k_bits", 8),
+                deep_v_bits=zq_dict.get("deep_v_bits", 8),
+                block_size=zq_dict.get("block_size", 128),
+                use_kv_coquant=zq_dict.get("use_kv_coquant", False),
+            )
+            _turbo_engine = ZeroQuantEngine(model_config, zq_config)
             _engine = _turbo_engine.engine
-            logger.info("Using Zero-Quant inference mode (n_threads_batch=%d)", model_config.n_threads_batch)
+            avg_bits = zq_config.average_bits(28)  # rough estimate for log
+            logger.info(
+                "Using Zero-Quant inference mode (depth-adaptive, avg %.1f bits/value)",
+                avg_bits,
+            )
         except Exception as e:
             logger.warning(
                 "Failed to create Zero-Quant engine: %s. Falling back to standard mode.", e
@@ -146,6 +163,7 @@ def create_app(
     cors_origins: list[str] | None = None,
     inference_mode: InferenceMode = InferenceMode.STANDARD,
     turboquant_config: dict[str, Any] | None = None,
+    zero_quant_config: dict[str, Any] | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -173,6 +191,7 @@ def create_app(
     app.state.kv_config = kv_config or KVCacheConfig()
     app.state.inference_mode = inference_mode
     app.state.turboquant_config = turboquant_config or {}
+    app.state.zero_quant_config = zero_quant_config or {}
 
     # CORS middleware
     origins = cors_origins or ["http://localhost:3000", "http://localhost:8000"]

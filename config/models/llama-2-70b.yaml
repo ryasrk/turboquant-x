@@ -34,6 +34,21 @@ turboquant:
   preset: "quality"
   block_size: 128
 
+# Zero-Quant depth-adaptive config for LLaMA-2-70B (80 layers)
+# Zone boundaries: shallow 0-19, middle 20-59, deep 60-79
+# Avg KV bits ≈ 5.5K / 5.0V — about 40% smaller than Q8_0 KV at same context
+zero_quant:
+  shallow_fraction: 0.25
+  deep_fraction: 0.25
+  shallow_k_bits: 8
+  shallow_v_bits: 8
+  middle_k_bits: 4
+  middle_v_bits: 2
+  deep_k_bits: 8
+  deep_v_bits: 8
+  block_size: 128
+  use_kv_coquant: false
+
 server:
   host: "0.0.0.0"
   port: 8000

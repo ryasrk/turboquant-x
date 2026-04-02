@@ -35,6 +35,22 @@ turboquant:
   # v_bits: 4
   block_size: 128
 
+# Zero-Quant depth-adaptive compression (only used when inference_mode = "zero-quant")
+# Layers are grouped into three zones by depth; each zone uses independent K/V bits.
+# Based on: arXiv:2405.17799 (activation sparsity), 2406.05955 (TurboSparse),
+#           2511.06174 (co-quantization), 2601.05047 (memory bottleneck).
+zero_quant:
+  shallow_fraction: 0.25   # first 25%% of layers — dense activations, protect
+  deep_fraction: 0.25      # last 25%% of layers — output-critical, protect
+  shallow_k_bits: 8        # high precision for dense-activation shallow zone
+  shallow_v_bits: 8
+  middle_k_bits: 4         # aggressive compression for sparse middle zone
+  middle_v_bits: 2
+  deep_k_bits: 8           # high precision for output-critical deep zone
+  deep_v_bits: 8
+  block_size: 128
+  use_kv_coquant: false    # joint K-V codebook (paper 3); false = standard
+
 server:
   host: "0.0.0.0"
   port: 8000
