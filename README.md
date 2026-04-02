@@ -342,6 +342,18 @@ Build instructions in [Step 4](#step-4-build-c-backend-optional--8x-faster-compr
 
 ## Performance
 
+### KV Cache Compression Quality (40 layers × 32 heads × 256 seq_len)
+
+| Preset | Compression | Cosine Sim | Top-1 Match | Top-5 Match |
+|--------|:-----------:|:----------:|:-----------:|:-----------:|
+| Quality K8/V4 | **7.76x** | 0.9952 | 98.3% | **100.0%** |
+| Aggressive K8/V2 | **7.76x** | 0.9397 | 98.2% | **100.0%** |
+| Symmetric K4/V4 | **7.53x** | 0.9908 | 84.5% | 99.9% |
+
+**Metrics:** `Cosine Sim` = cosine similarity between attention output vectors before/after decompression. `Top-1/Top-5 Match` = fraction of queries where the highest-attention token position is unchanged / still in the top-5 after compression.
+
+Reproduce: `python -m benchmarks.benchmark_quality` (no GPU/model loading required).
+
 ### GPU Mode (RTX 4060 Laptop, 8 GB VRAM, C++ Backend)
 
 | Config | Speed (tok/s) | System RAM | Compress | Decompress | MSE | Compression |
@@ -534,6 +546,11 @@ python -m benchmarks.benchmark_compare --runs 2 --max-tokens 64 --n-ctx 4096 --n
 
 # Multi-turn conversation
 python -m benchmarks.benchmark_multiturn --turns 5 --max-tokens 128 --n-gpu-layers -1 --n-ctx 4096
+
+# KV cache compression quality (Compression, Cosine Sim, Top-1/Top-5 Match)
+# No model loading required — runs in ~25s on CPU
+python -m benchmarks.benchmark_quality
+python -m benchmarks.benchmark_quality --n-layers 40 --seq-len 512 --trials 5 --json benchmarks/results/quality_report.json
 
 # Perplexity impact
 python -m benchmarks.benchmark_ppl --n-ctx 4096

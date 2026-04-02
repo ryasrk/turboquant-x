@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-04-02T02:50:30.611895+00:00",
+  "args": {
+    "n_layers": 40,
+    "n_heads": 32,
+    "head_dim": 128,
+    "seq_len": 256,
+    "trials": 3,
+    "queries": 8,
+    "seed": 42,
+    "json": "benchmarks/results/quality_report.json",
+    "preset": null
+  },
+  "results": [
+    {
+      "preset": "Quality (K8/V4)",
+      "k_bits": 8,
+      "v_bits": 4,
+      "compression_ratio": 7.76,
+      "cosine_similarity": 0.9952,
+      "top1_match_pct": 98.3,
+      "top5_match_pct": 100.0,
+      "avg_compress_ms": 745.1,
+      "avg_decompress_ms": 476.0,
+      "trials": 3,
+      "n_layers": 40,
+      "n_heads": 32,
+      "seq_len": 256,
+      "head_dim": 128
+    },
+    {
+      "preset": "Aggressive (K8/V2)",
+      "k_bits": 8,
+      "v_bits": 2,
+      "compression_ratio": 7.76,
+      "cosine_similarity": 0.9397,
+      "top1_match_pct": 98.2,
+      "top5_match_pct": 100.0,
+      "avg_compress_ms": 847.4,
+      "avg_decompress_ms": 469.8,
+      "trials": 3,
+      "n_layers": 40,
+      "n_heads": 32,
+      "seq_len": 256,
+      "head_dim": 128
+    },
+    {
+      "preset": "Symmetric (K4/V4)",
+      "k_bits": 4,
+      "v_bits": 4,
+      "compression_ratio": 7.53,
+      "cosine_similarity": 0.9908,
+      "top1_match_pct": 84.5,
+      "top5_match_pct": 99.9,
+      "avg_compress_ms": 1456.1,
+      "avg_decompress_ms": 753.8,
+      "trials": 3,
+      "n_layers": 40,
+      "n_heads": 32,
+      "seq_len": 256,
+      "head_dim": 128
+    }
+  ]
+}
