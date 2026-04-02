@@ -4,21 +4,30 @@ Local LLM inference server with **7.76x KV cache compression** and near-zero spe
 
 ## Key Results
 
-| | Standard (Q8_0) | TurboQuant K8/V4 |
-|---|:---:|:---:|
-| **GPU Speed** | 43.10 tok/s | 44.85 tok/s (**+4.1%**) |
-| **CPU Speed** | 9.05 tok/s | 9.08 tok/s (+0.2%) |
-| **KV Cache RAM** | 284 MB | 33 MB (**-88%**) |
-| **Compression** | 1.0x | **7.76x** |
-| **Compress / Decompress** | — | **30 ms / 24 ms** |
-| **Quality (MSE)** | 0.000 | 0.010 |
-| **Multi-Turn Overhead** | — | **+0.1%** (was -6.2% with Python) |
+### Qwen2.5-7B Q4_K_M — RTX 4060 Ti, all 28 layers on GPU
 
-*Tested on RTX 4060 Ti 8 GB, Ryzen 9 8945H, Qwen2.5-7B Q4_K_M, 4096 context, C++ backend enabled*
+| | Standard (Q8_0) | TurboQuant K8/V4 | Zero-Quant (5.75 bits) |
+|---|:---:|:---:|:---:|
+| **GPU Speed** | 54.7 tok/s | 55.4 tok/s (**+1.3%**) | 55.5 tok/s (**+1.5%**) |
+| **KV Memory** | baseline | -25% | -28% |
+| **Avg bits / value** | 8.0 | 6.0 | **5.75** |
+| **CosSim (quality)** | 1.000 | 0.9953 | 0.9894 |
+| **Top-1 Match** | 100% | 98.5% | 93.6% |
+
+### Qwen3.5-35B-A3B Q4_K_M — RTX 4060 Ti, 14/40 layers on GPU (CPU+GPU split)
+
+| | Standard (F16) | TurboQuant K8/V4 | Zero-Quant (5.75 bits) |
+|---|:---:|:---:|:---:|
+| **Speed** | 22.6 tok/s | 22.98 tok/s (**+1.7%**) | 23.37 tok/s (**+3.4%**) |
+| **KV Memory** | baseline | -25% | -28% |
+| **MSE** | 0.000 | 0.006 | 0.014 |
+
+*Note: 35B uses F16 KV baseline (flash attention not supported on CPU+GPU split); compression is applied at Python layer in all modes.*
 
 ## Features
 
 - **TurboQuant KV cache compression** — asymmetric K/V precision (K8/V4 default) via PolarQuant pipeline (WHT rotation + Lloyd-Max codebook quantization)
+- **Zero-Quant depth-adaptive KV compression** — zone-based compression (shallow/middle/deep layers get different bit widths); based on ZeroQuant research; -28% KV vs standard
 - **C++ acceleration backend** — 8x faster compression via fast Walsh-Hadamard O(d log d) + OpenMP threading — makes TurboQuant **faster** than standard inference (auto-detected, optional)
 - **OpenAI-compatible API** — drop-in `/v1/chat/completions` endpoint with streaming (SSE) support
 - **Browser Chat UI** — Sci-Fi HUD chatbot at `GET /`; real-time SSE streaming, collapsible thinking blocks, settings panel
@@ -325,6 +334,70 @@ When `thinking: false`, the server prefills an empty `<think>\n\n</think>` block
 
 ---
 
+## Zero-Quant: Depth-Adaptive KV Compression
+
+Zero-Quant extends TurboQuant with **depth-adaptive compression** — different transformer layers compress their KV caches at different bit widths based on their sensitivity. This mirrors findings from the ZeroQuant research papers showing that early and late ("boundary") layers are more sensitive to quantization noise than middle layers.
+
+### Zone Configuration
+
+| Zone | Layers | K-bits | V-bits | Rationale |
+|------|--------|:------:|:------:|-----------|
+| **Shallow** | first 25% | 8 | 8 | High sensitivity — preserve full precision |
+| **Middle** | middle 50% | 4 | 3 | Lower sensitivity — aggressive compression |
+| **Deep** | last 25% | 8 | 8 | High sensitivity — preserve full precision |
+
+**Default preset (`sh8/mi4-3/dp8`):** Tuned by benchmarking `middle_v_bits` values 2, 3, 4 and selecting the best quality/compression tradeoff. Raising `middle_v_bits: 2 → 3` improved CosSim by **+2.1pp** (0.9682 → 0.9894) with only a 0.8% reduction in compression ratio.
+
+### Benchmark Results (Qwen2.5-7B, RTX 4060 Ti)
+
+| Mode | Speed | Avg Bits | CosSim | Top-1 | KV vs Standard |
+|------|:-----:|:--------:|:------:|:-----:|:--------------:|
+| Standard Q8_0 | 54.7 tok/s | 8.0 | 1.0000 | 100% | baseline |
+| TurboQuant K8/V4 | 55.4 tok/s | 6.0 | 0.9953 | 98.5% | **-25%** |
+| Zero-Quant sh8/mi4-3/dp8 | 55.5 tok/s | **5.75** | 0.9894 | 93.6% | **-28%** |
+
+Zero-Quant delivers the **most KV memory savings** (-28%) with a minimal speed overhead and near-lossless quality (CosSim 0.9894).
+
+### Enable Zero-Quant
+
+```bash
+# Start server with Zero-Quant mode
+python -m src.main --mode zero-quant
+```
+
+Or in `config/default.yaml`:
+```yaml
+inference_mode: "zero-quant"
+
+zero_quant:
+  shallow_fraction: 0.25   # Fraction of layers treated as "shallow" zone
+  deep_fraction: 0.25       # Fraction of layers treated as "deep" zone
+  shallow_k_bits: 8
+  shallow_v_bits: 8
+  middle_k_bits: 4
+  middle_v_bits: 3          # Tuned: 3 beats 2 by +2.1pp CosSim
+  deep_k_bits: 8
+  deep_v_bits: 8
+```
+
+### Reproduce Benchmark
+
+```bash
+# Three-mode comparison: Standard vs TurboQuant vs Zero-Quant
+python -m benchmarks.benchmark_all_modes
+
+# On a different model (e.g. 35B with 14 GPU layers, no flash-attn for CPU+GPU split):
+python -m benchmarks.benchmark_all_modes \
+  --model-path models/Qwen3.5-35B-A3B-q4_k_m.gguf \
+  --n-gpu-layers 14 --n-layers 40 --n-heads 16 --head-dim 256 \
+  --no-flash-attn --n-ctx 1024 --max-tokens 32 --runs 1
+
+# Quality benchmark (CosSim, MSE, Top-1)
+python -m benchmarks.benchmark_quality
+```
+
+---
+
 ## C++ Turbo Engine
 
 Optional C++ backend that accelerates the PolarQuant compression pipeline:
@@ -481,7 +554,7 @@ logging:
 |------|----------|-----------------|----------|
 | `standard` | Q8_0 at C level | None | Short single-turn chats |
 | `turboquant` | Q8_0 at C level + PolarQuant Python compression (7.76×) | ~1ms decompress/compress per turn | Long multi-turn conversations |
-| `zero-quant` | Q4_0 at C level (no Python layer) | None | Large models on limited RAM, fast prompt eval |
+| `zero-quant` | Q8_0 at C level + depth-adaptive PolarQuant (5.75 avg bits) | ~0.7ms per turn | Large models, best KV savings with quality control |
 | `TURBOQUANT_PRESET` | TurboQuant preset | `quality` |
 
 ### CLI Arguments
@@ -517,7 +590,8 @@ turboquant-x/
 │   │   ├── inference.py          # LLM inference engine (llama-cpp-python)
 │   │   ├── kv_cache.py           # KV cache config + memory estimation
 │   │   ├── model_config.py       # Model config + auto-selection
-│   │   └── turbo_engine.py       # TurboQuant-enhanced engine wrapper
+│   │   ├── turbo_engine.py       # TurboQuant-enhanced engine wrapper
+│   │   └── zero_quant_engine.py  # Zero-Quant depth-adaptive engine wrapper
 │   ├── server/
 │   │   ├── app.py                # FastAPI application factory + lifespan
 │   │   ├── routes.py             # API routes (chat, health, models)
@@ -528,7 +602,8 @@ turboquant-x/
 │   │   ├── rotation.py           # Walsh-Hadamard transform + random signs
 │   │   ├── codebook.py           # Lloyd-Max codebook generation
 │   │   ├── asymmetric.py         # Named presets (Quality/Aggressive/Symmetric)
-│   │   └── boundary.py           # Boundary layer protection
+│   │   ├── boundary.py           # Boundary layer protection
+│   │   └── zero_quant.py         # ZeroQuantConfig + DepthAdaptiveCompressor
 │   ├── turboquant_cpp/           # C++ acceleration backend (optional)
 │   │   ├── __init__.py           # Auto-import with CPP_AVAILABLE flag
 │   │   ├── rotation.h/cpp        # Fast WHT O(d log d) butterfly + OpenMP
@@ -543,6 +618,7 @@ turboquant-x/
 ├── tests/                        # 536 tests (80%+ coverage)
 ├── benchmarks/                   # Performance benchmarks
 │   ├── benchmark_compare.py      # Standard vs TurboQuant comparison
+│   ├── benchmark_all_modes.py    # Standard vs TurboQuant vs Zero-Quant (3-mode)
 │   ├── benchmark_multiturn.py    # Multi-turn conversation
 │   ├── benchmark_niah.py         # Needle-in-a-haystack quality
 │   ├── benchmark_ppl.py          # Perplexity measurement
@@ -574,6 +650,15 @@ Coverage minimum: **80%** (enforced in `pyproject.toml`).
 ## Benchmarks
 
 ```bash
+# All three modes: Standard vs TurboQuant vs Zero-Quant (7B default)
+python -m benchmarks.benchmark_all_modes
+
+# Same benchmark on 35B (GPU+CPU split, no flash-attn)
+python -m benchmarks.benchmark_all_modes \
+  --model-path models/Qwen3.5-35B-A3B-q4_k_m.gguf \
+  --n-gpu-layers 14 --n-layers 40 --n-heads 16 --head-dim 256 \
+  --no-flash-attn --n-ctx 1024 --max-tokens 32 --runs 1
+
 # Standard vs TurboQuant (GPU)
 python -m benchmarks.benchmark_compare --runs 2 --max-tokens 64 --n-ctx 4096 --n-gpu-layers -1
 

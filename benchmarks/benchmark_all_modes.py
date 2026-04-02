@@ -82,11 +82,18 @@ PROMPTS = [
 # ---------------------------------------------------------------------------
 
 
-def run_standard(model_config: ModelConfig, max_tokens: int, runs: int) -> dict:
+def run_standard(model_config: ModelConfig, max_tokens: int, runs: int, flash_attention: bool = True) -> dict:
+    # Q8_0 KV requires flash_attn; fall back to F16 when flash_attn is disabled
+    if flash_attention:
+        kv_type = CacheType.Q8_0
+        kv_label = "q8_0"
+    else:
+        kv_type = CacheType.F16
+        kv_label = "f16"
     kv_config = KVCacheConfig(
-        cache_type_k=CacheType.Q8_0,
-        cache_type_v=CacheType.Q8_0,
-        flash_attention=True,
+        cache_type_k=kv_type,
+        cache_type_v=kv_type,
+        flash_attention=flash_attention,
     )
     engine = InferenceEngine(model_config, kv_config)
 
@@ -100,9 +107,9 @@ def run_standard(model_config: ModelConfig, max_tokens: int, runs: int) -> dict:
 
     result.update(
         {
-            "label": "Standard (Q8_0/Q8_0)",
-            "kv_k": "q8_0",
-            "kv_v": "q8_0",
+            "label": f"Standard ({kv_label}/{kv_label})",
+            "kv_k": kv_label,
+            "kv_v": kv_label,
             "avg_bits": 8.0,
             "compression_ratio": 1.0,
             "mse": 0.0,
@@ -125,10 +132,15 @@ def run_turboquant(
     runs: int,
     k_bits: int = 8,
     v_bits: int = 4,
+    n_layers: int = 28,
+    n_heads: int = 28,
+    head_dim: int = 128,
+    flash_attention: bool = True,
 ) -> dict:
     q_cfg = QuantConfig(k_bits=k_bits, v_bits=v_bits, block_size=128)
     engine = TurboQuantEngine(
-        model_config, q_cfg, n_layers=28, n_heads=28, head_dim=128
+        model_config, q_cfg, n_layers=n_layers, n_heads=n_heads, head_dim=head_dim,
+        flash_attention=flash_attention,
     )
 
     r_before, g_before = _ram_mb(), _gpu_mb()
@@ -161,9 +173,14 @@ def run_zero_quant(
     max_tokens: int,
     runs: int,
     zq_cfg: ZeroQuantConfig | None = None,
+    n_layers: int = 28,
+    n_heads: int = 28,
+    head_dim: int = 128,
+    flash_attention: bool = True,
 ) -> dict:
     cfg = zq_cfg or ZeroQuantConfig()
-    engine = ZeroQuantEngine(model_config, cfg, n_layers=28, n_heads=28, head_dim=128)
+    engine = ZeroQuantEngine(model_config, cfg, n_layers=n_layers, n_heads=n_heads, head_dim=head_dim,
+                             flash_attention=flash_attention)
 
     r_before, g_before = _ram_mb(), _gpu_mb()
     engine.load_model()
@@ -173,7 +190,7 @@ def run_zero_quant(
     engine.unload()
     gc.collect()
 
-    avg_bits = cfg.average_bits(28)
+    avg_bits = cfg.average_bits(n_layers)
     result.update(
         {
             "label": f"Zero-Quant (avg {avg_bits:.1f} bits)",
@@ -348,8 +365,13 @@ def parse_args() -> argparse.Namespace:
         default="models/qwen2.5-7b-instruct-q4_k_m.gguf",
         help="Path to GGUF model",
     )
+    p.add_argument("--model-name", default="", help="Model name (auto-detected from path if empty)")
     p.add_argument("--n-ctx", type=int, default=4096)
     p.add_argument("--n-gpu-layers", type=int, default=-1)
+    p.add_argument("--n-layers", type=int, default=28, help="Transformer layer count (architecture)")
+    p.add_argument("--n-heads", type=int, default=28, help="Attention head count (architecture)")
+    p.add_argument("--head-dim", type=int, default=128, help="Attention head dimension (architecture)")
+    p.add_argument("--no-flash-attn", action="store_true", help="Disable flash attention (needed for some MoE models)")
     p.add_argument("--max-tokens", type=int, default=64)
     p.add_argument("--runs", type=int, default=2)
     return p.parse_args()
@@ -358,9 +380,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    model_name = args.model_name or Path(args.model_path).stem
+    flash_attn = not args.no_flash_attn
+
     model_config = ModelConfig(
         model_path=args.model_path,
-        model_name="qwen2.5-7b-instruct",
+        model_name=model_name,
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
         chat_format="chatml",
@@ -371,13 +396,23 @@ def main() -> None:
     all_results = []
 
     print(f"\n[1/3] Standard inference...")
-    all_results.append(run_standard(model_config, args.max_tokens, args.runs))
+    all_results.append(run_standard(model_config, args.max_tokens, args.runs, flash_attention=flash_attn))
 
     print(f"[2/3] TurboQuant K8/V4 (quality preset)...")
-    all_results.append(run_turboquant(model_config, args.max_tokens, args.runs, k_bits=8, v_bits=4))
+    all_results.append(run_turboquant(
+        model_config, args.max_tokens, args.runs,
+        k_bits=8, v_bits=4,
+        n_layers=args.n_layers, n_heads=args.n_heads, head_dim=args.head_dim,
+        flash_attention=flash_attn,
+    ))
 
-    print(f"[3/3] Zero-Quant depth-adaptive (avg {zq_cfg.average_bits(28):.1f} bits)...")
-    all_results.append(run_zero_quant(model_config, args.max_tokens, args.runs, zq_cfg))
+    avg_bits = zq_cfg.average_bits(args.n_layers)
+    print(f"[3/3] Zero-Quant depth-adaptive (avg {avg_bits:.1f} bits)...")
+    all_results.append(run_zero_quant(
+        model_config, args.max_tokens, args.runs, zq_cfg,
+        n_layers=args.n_layers, n_heads=args.n_heads, head_dim=args.head_dim,
+        flash_attention=flash_attn,
+    ))
 
     print_report(all_results, args.model_path, args.n_ctx)
 

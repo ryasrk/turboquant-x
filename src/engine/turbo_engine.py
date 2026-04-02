@@ -87,13 +87,16 @@ class TurboQuantEngine:
         n_layers: int = 28,
         n_heads: int = 28,
         head_dim: int = 128,
+        flash_attention: bool = True,
     ) -> None:
         # Use Q8_0 for K, Q8_0 for V at the C level (baseline).
+        # Q8_0 KV requires flash_attn; fall back to F16 when it is disabled.
         # TurboQuant compression happens at Python level.
+        kv_type = CacheType.Q8_0 if flash_attention else CacheType.F16
         kv_config = KVCacheConfig(
-            cache_type_k=CacheType.Q8_0,
-            cache_type_v=CacheType.Q8_0,
-            flash_attention=True,
+            cache_type_k=kv_type,
+            cache_type_v=kv_type,
+            flash_attention=flash_attention,
         )
         self._engine = InferenceEngine(model_config, kv_config)
         self._quant_config = quant_config or QuantConfig()
