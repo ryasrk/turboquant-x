@@ -1,0 +1,35 @@
+# TurboQuant-X — Model Config: Qwen2.5-7B-Instruct (Q4_K_M, 4.4 GB)
+# Usage:  TURBOQUANT_CONFIG=config/models/qwen2.5-7b.yaml python -m src.main
+#         Or copy these values into config/default.yaml
+#
+# Hardware notes (RTX 4060 Ti 8 GB, 32 GB RAM):
+#   - 4.4 GB model fits entirely in VRAM → all 28 layers on GPU
+#   - Fastest model on this rig: ~30-50 tok/s
+
+model:
+  name: "qwen2.5-7b-instruct"
+  path: "./models/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+  n_ctx: 8192           # Full context: 7B model has low KV cache overhead
+  n_gpu_layers: -1      # auto: all 28 layers fit on GPU (4.4 GB < 7 GB budget)
+  chat_format: "chatml"
+  n_threads: -1         # auto: cpu_count // 2 (CPU rarely needed — all on GPU)
+  n_batch: 512
+
+inference_mode: "turboquant"
+
+kv_cache:
+  cache_type_k: "q8_0"
+  cache_type_v: "q8_0"
+  flash_attention: true
+
+turboquant:
+  preset: "quality"
+  block_size: 128
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8000"
