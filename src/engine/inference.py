@@ -184,12 +184,28 @@ class InferenceEngine:
 
         return text, stats
 
+    def _apply_thinking(
+        self, messages: list[dict[str, str]], thinking: bool
+    ) -> list[dict[str, str]]:
+        """Return messages with Qwen3 thinking control applied.
+
+        When thinking is disabled, appends a partial assistant message with
+        an empty <think></think> block. This prefills the model's response
+        start, causing it to skip the chain-of-thought reasoning phase.
+
+        Does not mutate the input list.
+        """
+        if thinking:
+            return messages
+        return [*messages, {"role": "assistant", "content": "<think>\n\n</think>\n\n"}]
+
     def chat(
         self,
         messages: list[dict[str, str]],
         max_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.95,
+        thinking: bool = True,
     ) -> tuple[dict[str, str], GenerationStats]:
         """Chat completion (non-streaming).
 
@@ -198,6 +214,9 @@ class InferenceEngine:
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
+            thinking: Enable Qwen3 chain-of-thought thinking block.
+                      When False, injects an empty <think></think> prefix
+                      so the model skips the reasoning phase.
 
         Returns:
             Tuple of (response_message, stats).
@@ -205,11 +224,12 @@ class InferenceEngine:
         """
         self._ensure_loaded()
 
+        effective_messages = self._apply_thinking(messages, thinking)
         start = time.monotonic()
 
         with self._lock:
             result = self._model.create_chat_completion(
-                messages=messages,
+                messages=effective_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
@@ -237,12 +257,16 @@ class InferenceEngine:
         max_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.95,
+        thinking: bool = True,
     ) -> Generator[str, None, GenerationStats | None]:
         """Chat completion with streaming.
 
         Yields content chunks as strings.
         The generator's return value (accessible via StopIteration.value)
         contains the GenerationStats.
+
+        Args:
+            thinking: Enable Qwen3 chain-of-thought thinking block.
 
         Usage:
             gen = engine.chat_stream(messages)
@@ -251,12 +275,13 @@ class InferenceEngine:
         """
         self._ensure_loaded()
 
+        effective_messages = self._apply_thinking(messages, thinking)
         start = time.monotonic()
         completion_tokens = 0
 
         with self._lock:
             stream = self._model.create_chat_completion(
-                messages=messages,
+                messages=effective_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,

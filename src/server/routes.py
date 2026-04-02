@@ -70,6 +70,7 @@ def _sync_response(messages: list[dict], request: ChatRequest) -> ChatResponse:
         max_tokens=request.max_tokens,
         temperature=request.temperature,
         top_p=request.top_p,
+        thinking=request.effective_thinking,
     )
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -124,6 +125,7 @@ def _stream_response(
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             top_p=request.top_p,
+            thinking=request.effective_thinking,
         )
 
         for token in stream:
@@ -185,6 +187,21 @@ async def health_check():
             "used_percent": round(gpu_mem.used_percent, 1),
         }
 
+    # GPU/CPU layer distribution report
+    layer_report = None
+    try:
+        from src.utils.gpu_layers import layer_distribution_report
+
+        if model_loaded:
+            engine_ref = get_engine()
+            layer_report = layer_distribution_report(
+                model_path=engine_ref.model_config.model_path,
+                n_gpu_layers=engine_ref.model_config.n_gpu_layers,
+                n_ctx=engine_ref.model_config.n_ctx,
+            )
+    except Exception:
+        pass
+
     return HealthResponse(
         status=status,
         model_loaded=model_loaded,
@@ -200,6 +217,7 @@ async def health_check():
         else None,
         turboquant_config=stats.get("turbo_quant") if stats else None,
         uptime_s=round(get_uptime(), 1),
+        layer_distribution=layer_report,
     )
 
 

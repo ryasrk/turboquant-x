@@ -75,6 +75,8 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         "kv_cache": dict(config.get("kv_cache", {})),
         "server": dict(config.get("server", {})),
         "logging": dict(config.get("logging", {})),
+        "inference_mode": config.get("inference_mode", "standard"),
+        "turboquant": dict(config.get("turboquant", {})),
     }
 
     # Model overrides
@@ -115,13 +117,33 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_model_config(config: dict[str, Any]) -> ModelConfig:
-    """Build ModelConfig from config dict."""
+    """Build ModelConfig from config dict.
+
+    When n_gpu_layers is -1 (the sentinel for "auto"), calls
+    compute_optimal_gpu_layers() to derive the best distribution between
+    GPU and CPU based on available VRAM and model size.
+    """
     model = config.get("model", {})
+    model_path = model.get("path", "models/qwen2.5-7b-instruct-q4_k_m.gguf")
+    n_ctx = model.get("n_ctx", 8192)
+    n_gpu_layers_cfg = model.get("n_gpu_layers", -1)
+
+    if n_gpu_layers_cfg == -1:
+        try:
+            from src.utils.gpu_layers import compute_optimal_gpu_layers
+            n_gpu_layers = compute_optimal_gpu_layers(model_path, n_ctx=n_ctx)
+            logger.info("Auto GPU layers: %d (resolved from VRAM + model size)", n_gpu_layers)
+        except Exception as exc:
+            logger.warning("GPU layer auto-detection failed: %s. Defaulting to 0.", exc)
+            n_gpu_layers = 0
+    else:
+        n_gpu_layers = n_gpu_layers_cfg
+
     return ModelConfig(
-        model_path=model.get("path", "models/qwen2.5-7b-instruct-q4_k_m.gguf"),
+        model_path=model_path,
         model_name=model.get("name", "qwen2.5-7b-instruct"),
-        n_ctx=model.get("n_ctx", 8192),
-        n_gpu_layers=model.get("n_gpu_layers", -1),
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
         chat_format=model.get("chat_format", "chatml"),
     )
 

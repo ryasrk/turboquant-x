@@ -21,6 +21,9 @@ Local LLM inference server with **7.76x KV cache compression** and near-zero spe
 - **TurboQuant KV cache compression** — asymmetric K/V precision (K8/V4 default) via PolarQuant pipeline (WHT rotation + Lloyd-Max codebook quantization)
 - **C++ acceleration backend** — 8x faster compression via fast Walsh-Hadamard O(d log d) + OpenMP threading — makes TurboQuant **faster** than standard inference (auto-detected, optional)
 - **OpenAI-compatible API** — drop-in `/v1/chat/completions` endpoint with streaming (SSE) support
+- **Browser Chat UI** — Sci-Fi HUD chatbot at `GET /`; real-time SSE streaming, collapsible thinking blocks, settings panel
+- **Qwen3 thinking mode** — toggle chain-of-thought reasoning per request via `thinking` field or `chat_template_kwargs.enable_thinking`
+- **Auto GPU layer distribution** — GGUF binary parser computes optimal `n_gpu_layers` from free VRAM at startup (`n_gpu_layers: -1`)
 - **GPU + CPU inference** — llama.cpp backend with configurable GPU layer offloading
 - **3 compression presets** — Quality (K8/V4), Aggressive (K8/V2), Symmetric (K4/V4)
 - **YAML + env var + CLI config** — layered configuration with clear precedence
@@ -230,28 +233,75 @@ print(response.choices[0].message.content)
 
 #### Request Parameters
 
-| Parameter | Type | Default | Range |
-|-----------|------|---------|-------|
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
 | `messages` | array | required | 1–100 messages |
-| `max_tokens` | int | 512 | 1–4096 |
+| `max_tokens` | int | 512 | 1–4096 tokens |
 | `temperature` | float | 0.7 | 0.0–2.0 |
 | `top_p` | float | 0.95 | 0.0–1.0 |
-| `stream` | bool | false | — |
+| `stream` | bool | false | SSE streaming |
+| `thinking` | bool | true | Enable Qwen3 chain-of-thought reasoning |
+| `chat_template_kwargs` | object | null | vLLM-compatible override — `{"enable_thinking": false}` takes precedence over `thinking` |
 
 ### Other Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Server health, model status, GPU memory, TurboQuant config |
+| `GET` | `/` | Browser Chat UI (Sci-Fi HUD, streaming, thinking mode toggle) |
+| `GET` | `/health` | Server health, model status, GPU memory, TurboQuant config, layer distribution |
 | `GET` | `/v1/models` | List loaded models |
 
 ```bash
-# Health check
+# Health check (includes layer_distribution when n_gpu_layers=-1)
 curl http://localhost:8000/health
 
 # List models
 curl http://localhost:8000/v1/models
 ```
+
+---
+
+## Chat UI
+
+Open a browser at `http://localhost:8000/` to access the built-in Sci-Fi HUD chatbot.
+
+**Features:**
+- Real-time SSE streaming with blinking cursor
+- **◈ Thinking** toggle — enable/disable Qwen3 chain-of-thought reasoning
+- Collapsible `<think>…</think>` blocks rendered inline
+- Settings panel: system prompt, `max_tokens`, `temperature`, `top_p` (persisted in `localStorage`)
+- Model name and inference mode badges pulled from `/health`
+
+No build step required — served as a single HTML file from `src/static/chat.html`.
+
+---
+
+## Qwen3 Thinking Mode
+
+Qwen3-family models (e.g. `Qwen3.5-35B-A3B`) support chain-of-thought reasoning via a special `<think>…</think>` block.
+
+**Enable thinking (default):**
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "What is 17 * 43?"}], "thinking": true}'
+```
+
+**Disable thinking (fast mode):**
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello!"}], "thinking": false}'
+```
+
+**vLLM-compatible override** (`chat_template_kwargs` takes precedence over `thinking`):
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [...], "chat_template_kwargs": {"enable_thinking": false}}'
+```
+
+When `thinking: false`, the server prefills an empty `<think>\n\n</think>` block, telling the model to skip chain-of-thought and respond directly.
 
 ---
 
@@ -339,13 +389,13 @@ With the C++ backend, multi-turn overhead is **eliminated** — compress/decompr
 
 ```yaml
 model:
-  name: "qwen2.5-7b-instruct"
-  path: "./models/qwen2.5-7b-instruct-q4_k_m.gguf"
-  n_ctx: 8192
-  n_gpu_layers: -1      # -1 = all GPU, 0 = all CPU
+  name: "qwen3.5-35b-a3b"                              # Registry key shown in /v1/models
+  path: "./models/Qwen3.5-35B-A3B-q4_k_m.gguf"        # Path to GGUF file
+  n_ctx: 4096
+  n_gpu_layers: -1      # -1 = auto-detect from VRAM, 0 = all CPU, N = exactly N layers
   chat_format: "chatml"
 
-inference_mode: "standard"   # "standard" or "turboquant"
+inference_mode: "turboquant"   # "standard" or "turboquant"
 
 kv_cache:
   cache_type_k: "q8_0"
@@ -353,8 +403,7 @@ kv_cache:
   flash_attention: true
 
 turboquant:
-  k_bits: 8               # Key cache: 2, 3, 4, or 8
-  v_bits: 4               # Value cache: 2, 3, 4, or 8
+  preset: "quality"       # quality | aggressive | symmetric
   block_size: 128          # PolarQuant block size
 
 server:
@@ -369,6 +418,8 @@ logging:
   level: "INFO"
 ```
 
+> **`n_gpu_layers: -1` (auto-detect):** At startup, TurboQuant-X reads the GGUF binary header to get architecture and layer count, queries free VRAM via `nvidia-smi`, and computes the optimal number of layers that fit in GPU memory (leaving 10% headroom for compute). The resolved value is logged and exposed in `/health` → `layer_distribution`.
+
 ### Environment Variables
 
 | Variable | Description | Default |
@@ -376,7 +427,7 @@ logging:
 | `TURBOQUANT_MODEL_PATH` | Path to GGUF model file | `./models/qwen2.5-7b-instruct-q4_k_m.gguf` |
 | `TURBOQUANT_MODEL_NAME` | Model registry key | `qwen2.5-7b-instruct` |
 | `TURBOQUANT_N_CTX` | Context window size | `8192` |
-| `TURBOQUANT_N_GPU_LAYERS` | GPU layer offload (-1=all, 0=CPU) | `-1` |
+| `TURBOQUANT_N_GPU_LAYERS` | GPU layer offload (-1=auto-detect, 0=CPU, N=exact) | `-1` |
 | `TURBOQUANT_CACHE_TYPE_K` | KV cache K type | `q8_0` |
 | `TURBOQUANT_CACHE_TYPE_V` | KV cache V type | `q8_0` |
 | `TURBOQUANT_HOST` | Server bind address | `0.0.0.0` |
@@ -436,8 +487,11 @@ turboquant-x/
 │   │   ├── codebook.h/cpp        # Precomputed Lloyd-Max centroids
 │   │   ├── polar_quant.h/cpp     # Block + tensor compress (OpenMP parallel)
 │   │   └── bindings.cpp          # pybind11 → Python interface
-│   └── utils/
-│       └── memory.py             # GPU memory monitoring (pynvml / nvidia-smi)
+│   ├── utils/
+│   │   ├── memory.py             # GPU memory monitoring (pynvml / nvidia-smi)
+│   │   └── gpu_layers.py         # GGUF binary parser + optimal GPU layer calculator
+│   └── static/
+│       └── chat.html             # Sci-Fi HUD browser chatbot (served at GET /)
 ├── tests/                        # 536 tests (80%+ coverage)
 ├── benchmarks/                   # Performance benchmarks
 │   ├── benchmark_compare.py      # Standard vs TurboQuant comparison

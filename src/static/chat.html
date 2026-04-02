@@ -146,6 +146,28 @@
       gap: 10px;
     }
 
+    /* ── Thinking toggle ───────────────────────────────────────── */
+    #thinking-btn {
+      background: rgba(57,255,20,0.08);
+      border: 1px solid rgba(57,255,20,0.5);
+      color: var(--safe);
+      cursor: pointer;
+      padding: 5px 12px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      transition: box-shadow 0.15s, opacity 0.15s;
+      clip-path: polygon(4px 0%,100% 0%,100% calc(100% - 4px),calc(100% - 4px) 100%,0% 100%,0% 4px);
+    }
+    #thinking-btn:hover { box-shadow: 0 0 10px rgba(57,255,20,0.4); }
+    #thinking-btn.off {
+      background: rgba(255,109,0,0.06);
+      border-color: rgba(255,109,0,0.4);
+      color: var(--alert);
+    }
+    #thinking-btn.off:hover { box-shadow: 0 0 10px rgba(255,109,0,0.4); }
+
     #model-badge {
       font-size: 10px;
       color: var(--holo2);
@@ -256,8 +278,42 @@
       font-family: var(--font-mono);
     }
 
-    /* ── Typing cursor ─────────────────────────────────────────── */
-    .cursor {
+    /* ── Think block ────────────────────────────────────────────── */
+    .think-block {
+      margin-bottom: 8px;
+      border: 1px solid rgba(125,249,255,0.2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .think-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      background: rgba(0,180,255,0.06);
+      cursor: pointer;
+      user-select: none;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--holo2);
+    }
+    .think-header:hover { background: rgba(0,180,255,0.1); }
+    .think-chevron { transition: transform 0.2s; font-style: normal; }
+    .think-block.collapsed .think-chevron { transform: rotate(-90deg); }
+    .think-body {
+      padding: 8px 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: pre-wrap;
+      background: rgba(0,0,0,0.2);
+      border-top: 1px solid rgba(125,249,255,0.1);
+      line-height: 1.55;
+    }
+    .think-block.collapsed .think-body { display: none; }
+    .msg-answer { white-space: pre-wrap; word-break: break-word; }
+
+    /* ── Typing cursor ─────────────────────────────────────────── */    .cursor {
       display: inline-block;
       width: 7px; height: 13px;
       background: var(--holo);
@@ -524,8 +580,7 @@
   </div>
   <div class="header-right">
     <span id="model-badge">loading…</span>
-    <span id="mode-badge">—</span>
-    <button class="icon-btn" id="settings-btn">[ settings ]</button>
+    <span id="mode-badge">—</span>    <button id="thinking-btn" title="Toggle chain-of-thought thinking">◈ Thinking ON</button>    <button class="icon-btn" id="settings-btn">[ settings ]</button>
   </div>
 </header>
 
@@ -603,6 +658,7 @@ const state = {
   settings: loadSettings(),
   streaming: false,
   totalTokens: 0,
+  thinking: true,   // Qwen3 thinking mode
 };
 
 function loadSettings() {
@@ -638,6 +694,7 @@ const temperatureEl   = document.getElementById('temperature-input');
 const topPEl          = document.getElementById('top-p-input');
 const modelBadge    = document.getElementById('model-badge');
 const modeBadge     = document.getElementById('mode-badge');
+const thinkingBtn   = document.getElementById('thinking-btn');
 const tokenCount    = document.getElementById('token-count');
 const uptimeDisp    = document.getElementById('uptime-disp');
 const toast         = document.getElementById('toast');
@@ -693,6 +750,18 @@ sendBtn.addEventListener('click', () => { if (!state.streaming) sendMessage(); }
 
 clearBtn.addEventListener('click', clearSession);
 
+// ── Thinking toggle ────────────────────────────────────────────────────
+thinkingBtn.addEventListener('click', () => {
+  state.thinking = !state.thinking;
+  if (state.thinking) {
+    thinkingBtn.textContent = '◈ Thinking ON';
+    thinkingBtn.classList.remove('off');
+  } else {
+    thinkingBtn.textContent = '◈ Thinking OFF';
+    thinkingBtn.classList.add('off');
+  }
+});
+
 // ── Settings toggle ────────────────────────────────────────────────────
 settingsBtn.addEventListener('click', () => settingsOverlay.classList.add('open'));
 settingsClose.addEventListener('click', () => settingsOverlay.classList.remove('open'));
@@ -740,6 +809,42 @@ function appendMessage(role, content, streaming = false) {
   return bubble;
 }
 
+// ── Render think blocks ────────────────────────────────────────────────
+function renderAssistantContent(bubble, text) {
+  bubble.innerHTML = '';
+  const thinkMatch = text.match(/^<think>([\s\S]*?)<\/think>\s*([\s\S]*)$/);
+  if (thinkMatch) {
+    const thinkContent = thinkMatch[1].trim();
+    const answer       = thinkMatch[2].trim();
+
+    if (thinkContent) {
+      const block = document.createElement('div');
+      block.className = 'think-block collapsed';
+      block.innerHTML = `
+        <div class="think-header">
+          <i class="think-chevron">▼</i>
+          <span>chain-of-thought</span>
+        </div>
+        <div class="think-body"></div>`;
+      block.querySelector('.think-body').textContent = thinkContent;
+      block.querySelector('.think-header').addEventListener('click', () => {
+        block.classList.toggle('collapsed');
+      });
+      bubble.appendChild(block);
+    }
+
+    const answerEl = document.createElement('div');
+    answerEl.className = 'msg-answer';
+    answerEl.textContent = answer;
+    bubble.appendChild(answerEl);
+  } else {
+    const answerEl = document.createElement('div');
+    answerEl.className = 'msg-answer';
+    answerEl.textContent = text;
+    bubble.appendChild(answerEl);
+  }
+}
+
 // ── Send message ───────────────────────────────────────────────────────
 async function sendMessage() {
   const text = inputEl.value.trim();
@@ -773,6 +878,7 @@ async function sendMessage() {
         temperature: state.settings.temperature,
         top_p:       state.settings.topP,
         stream:      true,
+        thinking:    state.thinking,
       }),
     });
 
@@ -809,9 +915,10 @@ async function sendMessage() {
       }
     }
 
-    // Remove blinking cursor
+    // Remove blinking cursor and render final content
     const cursor = bubble.querySelector('.cursor');
     if (cursor) cursor.remove();
+    renderAssistantContent(bubble, assistantText);
 
     state.history.push({ role: 'assistant', content: assistantText });
     state.totalTokens += assistantText.split(/\s+/).length; // rough estimate

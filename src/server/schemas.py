@@ -21,6 +21,24 @@ class ChatRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
     stream: bool = False
+    thinking: bool = True  # Qwen3: enable/disable chain-of-thought thinking block
+    chat_template_kwargs: dict | None = Field(
+        default=None,
+        description="Extra template vars (e.g. {\"enable_thinking\": false}). "
+                    "enable_thinking overrides the 'thinking' field.",
+    )
+
+    @property
+    def effective_thinking(self) -> bool:
+        """Resolve the final thinking flag from both fields.
+
+        chat_template_kwargs.enable_thinking takes precedence over thinking.
+        """
+        if self.chat_template_kwargs is not None:
+            v = self.chat_template_kwargs.get("enable_thinking")
+            if isinstance(v, bool):
+                return v
+        return self.thinking
 
 
 class UsageStats(BaseModel):
@@ -76,6 +94,7 @@ class HealthResponse(BaseModel):
     gpu_memory: dict | None = None
     kv_cache_config: dict | None = None
     turboquant_config: dict | None = None
+    layer_distribution: dict | None = None
     uptime_s: float = 0.0
 
 
