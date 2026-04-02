@@ -432,7 +432,7 @@ model:
   n_gpu_layers: -1      # -1 = auto-detect from VRAM, 0 = all CPU, N = exactly N layers
   chat_format: "chatml"
 
-inference_mode: "turboquant"   # "standard" or "turboquant"
+inference_mode: "turboquant"   # "standard" | "turboquant" | "zero-quant"
 
 kv_cache:
   cache_type_k: "q8_0"
@@ -466,6 +466,7 @@ logging:
 | `TURBOQUANT_N_CTX` | Context window size | `8192` |
 | `TURBOQUANT_N_GPU_LAYERS` | GPU layer offload (-1=auto-detect, 0=CPU, N=exact) | `-1` |
 | `TURBOQUANT_N_THREADS` | CPU threads for generation (-1=auto: cpu_count//2) | `-1` |
+| `TURBOQUANT_N_THREADS_BATCH` | CPU threads for prompt eval (-1=auto: cpu_count, all cores) | `-1` |
 | `TURBOQUANT_N_BATCH` | Prompt eval batch size (1024 recommended for 70B) | `512` |
 | `TURBOQUANT_CACHE_TYPE_K` | KV cache K type | `q8_0` |
 | `TURBOQUANT_CACHE_TYPE_V` | KV cache V type | `q8_0` |
@@ -473,6 +474,14 @@ logging:
 | `TURBOQUANT_PORT` | Server port | `8000` |
 | `TURBOQUANT_LOG_LEVEL` | Logging level | `INFO` |
 | `TURBOQUANT_INFERENCE_MODE` | Inference mode | `standard` |
+
+### Inference Modes
+
+| Mode | KV Cache | Python Overhead | Best For |
+|------|----------|-----------------|----------|
+| `standard` | Q8_0 at C level | None | Short single-turn chats |
+| `turboquant` | Q8_0 at C level + PolarQuant Python compression (7.76×) | ~1ms decompress/compress per turn | Long multi-turn conversations |
+| `zero-quant` | Q4_0 at C level (no Python layer) | None | Large models on limited RAM, fast prompt eval |
 | `TURBOQUANT_PRESET` | TurboQuant preset | `quality` |
 
 ### CLI Arguments
@@ -483,7 +492,7 @@ python -m src.main [OPTIONS]
   --config PATH    YAML config file (default: config/default.yaml)
   --host HOST      Server bind address
   --port PORT      Server port
-  --mode MODE      standard | turboquant
+  --mode MODE      standard | turboquant | zero-quant
   --preset PRESET  quality | aggressive | symmetric
 ```
 

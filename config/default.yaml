@@ -4,15 +4,18 @@ model:
   name: "qwen3.5-35b-a3b"
   path: "./models/Qwen3.5-35B-A3B-q4_k_m.gguf"
   n_ctx: 4096
-  n_gpu_layers: -1   # -1 = auto: optimal layers computed from VRAM at startup
+  n_gpu_layers: -1       # -1 = auto: optimal layers computed from VRAM at startup
   chat_format: "chatml"
-  n_threads: -1      # -1 = auto (cpu_count // 2). For 70B on CPU: set to 14-20
-  n_batch: 512       # Prompt eval batch size. For 70B: use 1024 for faster prompt processing
+  n_threads: -1          # -1 = auto (cpu_count // 2). For 70B: set to 14
+  n_threads_batch: -1    # -1 = auto (cpu_count, all cores). For zero-quant: set to 28
+  n_batch: 512           # Prompt eval batch size. For 70B: use 1024
 
-# Inference mode: "standard" or "turboquant"
-#   standard   — llama.cpp with Q8_0 KV cache (no Python-level compression)
-#   turboquant — llama.cpp with Q8_0 KV cache + TurboQuant
-#                compression/decompression between turns
+# Inference mode: "standard" | "turboquant" | "zero-quant"
+#   standard   — llama.cpp Q8_0 KV cache, no Python overhead, KV grows each turn
+#   turboquant — Q8_0 KV at C level + PolarQuant Python compression between turns
+#                (7.76x compression, frees VRAM for longer conversations)
+#   zero-quant — Q4_0 KV at C level, n_threads_batch=all cores for fast prompt eval,
+#                no Python compression overhead (lower per-turn latency)
 inference_mode: "turboquant"
 
 kv_cache:

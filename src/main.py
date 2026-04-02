@@ -90,6 +90,8 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         result["model"]["n_gpu_layers"] = int(env_val)
     if env_val := os.environ.get("TURBOQUANT_N_THREADS"):
         result["model"]["n_threads"] = int(env_val)
+    if env_val := os.environ.get("TURBOQUANT_N_THREADS_BATCH"):
+        result["model"]["n_threads_batch"] = int(env_val)
     if env_val := os.environ.get("TURBOQUANT_N_BATCH"):
         result["model"]["n_batch"] = int(env_val)
 
@@ -151,6 +153,7 @@ def build_model_config(config: dict[str, Any]) -> ModelConfig:
         chat_format=model.get("chat_format", "chatml"),
         n_threads=model.get("n_threads", -1),
         n_batch=model.get("n_batch", 512),
+        n_threads_batch=model.get("n_threads_batch", -1),
     )
 
 

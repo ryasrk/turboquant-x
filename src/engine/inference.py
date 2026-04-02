@@ -105,12 +105,18 @@ class InferenceEngine:
         if n_threads == -1:
             n_threads = max(1, (_os.cpu_count() or 4) // 2)
 
+        # Resolve n_threads_batch: -1 → all logical cores (faster prompt eval)
+        n_threads_batch = self._model_config.n_threads_batch
+        if n_threads_batch == -1:
+            n_threads_batch = _os.cpu_count() or n_threads
+
         logger.info(
-            "Loading model %s (ctx=%d, gpu_layers=%d, threads=%d, batch=%d, KV: K=%s V=%s)",
+            "Loading model %s (ctx=%d, gpu_layers=%d, threads=%d/%d, batch=%d, KV: K=%s V=%s)",
             self._model_config.model_name,
             self._model_config.n_ctx,
             self._model_config.n_gpu_layers,
             n_threads,
+            n_threads_batch,
             self._model_config.n_batch,
             self._kv_config.cache_type_k.value,
             self._kv_config.cache_type_v.value,
@@ -125,6 +131,7 @@ class InferenceEngine:
                 n_gpu_layers=self._model_config.n_gpu_layers,
                 chat_format=self._model_config.chat_format,
                 n_threads=n_threads,
+                n_threads_batch=n_threads_batch,
                 n_batch=self._model_config.n_batch,
                 verbose=False,
                 **kv_params,

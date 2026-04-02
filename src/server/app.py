@@ -29,11 +29,12 @@ class InferenceMode(str, Enum):
 
     STANDARD = "standard"
     TURBOQUANT = "turboquant"
+    ZERO_QUANT = "zero-quant"
 
 
 # Module-level engine references (set during lifespan)
 _engine: InferenceEngine | None = None
-_turbo_engine: Any = None  # TurboQuantEngine | None
+_turbo_engine: Any = None  # TurboQuantEngine | ZeroQuantEngine | None
 _inference_mode: InferenceMode = InferenceMode.STANDARD
 _start_time: float = 0.0
 
@@ -95,6 +96,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(
                 "Failed to create TurboQuant engine: %s. Falling back to standard mode.", e
+            )
+            _inference_mode = InferenceMode.STANDARD
+            _turbo_engine = None
+            _engine = InferenceEngine(model_config, kv_config)
+    elif _inference_mode == InferenceMode.ZERO_QUANT:
+        try:
+            from src.engine.zero_quant_engine import ZeroQuantEngine
+
+            zq_cfg = getattr(app.state, "zero_quant_config", {})
+            _turbo_engine = ZeroQuantEngine(model_config, kv_config, zero_quant_config=zq_cfg)
+            _engine = _turbo_engine.engine
+            logger.info("Using Zero-Quant inference mode (n_threads_batch=%d)", model_config.n_threads_batch)
+        except Exception as e:
+            logger.warning(
+                "Failed to create Zero-Quant engine: %s. Falling back to standard mode.", e
             )
             _inference_mode = InferenceMode.STANDARD
             _turbo_engine = None

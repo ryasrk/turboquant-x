@@ -9,9 +9,11 @@ model:
   n_gpu_layers: -1      # auto: ~12 layers on RTX 4060 Ti 8 GB
   chat_format: "chatml"
   n_threads: -1         # auto: cpu_count // 2 (= 14 on 28-core machine)
+  n_threads_batch: -1   # auto: cpu_count (= 28) for fast prompt eval
   n_batch: 512
 
 # Recommended inference settings for Qwen3.5-35B
+# Use "zero-quant" for lower first-token latency on short conversations
 inference_mode: "turboquant"
 
 kv_cache:

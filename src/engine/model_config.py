@@ -59,6 +59,7 @@ class ModelConfig:
     weight_size_gb: float = 4.8
     n_threads: int = -1
     n_batch: int = 512
+    n_threads_batch: int = -1  # CPU threads for prompt eval (-1 = auto: cpu_count, all cores)
 
     def __post_init__(self) -> None:
         if self.n_ctx < 128:
