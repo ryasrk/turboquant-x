@@ -56,8 +56,6 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.turboquant.compressor import QuantConfig, TurboQuantCompressor  # noqa: E402
-from src.turboquant.polar_quant import compression_ratio  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Preset configurations
@@ -67,6 +65,10 @@ PRESETS: dict[str, QuantConfig] = {
     "Aggressive (K8/V2)": QuantConfig(k_bits=8, v_bits=2),
     "Symmetric (K4/V4)":  QuantConfig(k_bits=4, v_bits=4),
 }
+
+# Process layers one-at-a-time when tensor would exceed this threshold
+# to avoid OOM on large seq_len (e.g. 8K context × 40 layers × 32 heads).
+_LAYER_BY_LAYER_THRESHOLD_BYTES = 2 * 1024 ** 3  # 2 GB
 
 
 # ---------------------------------------------------------------------------
@@ -95,54 +97,38 @@ def _attention_metrics(
     V_recon: NDArray[np.float64],  # (seq_len, head_dim)
     n_queries: int,
     rng: np.random.Generator,
-) -> tuple[float, float, float]:
-    """Compute (cosine_sim, top1_match, top5_match) for random queries."""
-    seq_len, head_dim = K_orig.shape
+) -> tuple[float, float, float, float]:
+    """Compute (cosine_sim, attn_score_acc, top1_match, top5_match)."""
+    head_dim = K_orig.shape[1]
     scale = 1.0 / (head_dim ** 0.5)
 
-    cos_sims, top1_hits, top5_hits = [], [], []
+    cos_sims, attn_accs, top1_hits, top5_hits = [], [], [], []
 
     for _ in range(n_queries):
         q = rng.standard_normal(head_dim)
 
         # --- original attention ---
-        scores_orig = scale * (K_orig @ q)          # (seq_len,)
-        attn_orig   = _softmax(scores_orig)
-        out_orig    = attn_orig @ V_orig             # (head_dim,)
-        top1_idx    = int(np.argmax(attn_orig))
+        attn_orig = _softmax(scale * (K_orig @ q))   # (seq_len,)
+        out_orig  = attn_orig @ V_orig                # (head_dim,)
+        top1_idx  = int(np.argmax(attn_orig))
 
         # --- reconstructed attention ---
-        scores_recon = scale * (K_recon @ q)
-        attn_recon   = _softmax(scores_recon)
-        out_recon    = attn_recon @ V_recon
+        attn_recon = _softmax(scale * (K_recon @ q))
+        out_recon  = attn_recon @ V_recon
 
         top5_idx = set(np.argsort(attn_recon)[-5:].tolist())
 
         cos_sims.append(_cosine(out_orig, out_recon))
+        attn_accs.append(_cosine(attn_orig, attn_recon))  # score distribution similarity
         top1_hits.append(1.0 if int(np.argmax(attn_recon)) == top1_idx else 0.0)
         top5_hits.append(1.0 if top1_idx in top5_idx else 0.0)
 
     return (
         float(np.mean(cos_sims)),
+        float(np.mean(attn_accs)),
         float(np.mean(top1_hits)),
         float(np.mean(top5_hits)),
     )
-
-
-# ---------------------------------------------------------------------------
-# Compression size helper
-# ---------------------------------------------------------------------------
-
-def _compressed_bytes(compressed_kv, config: QuantConfig) -> int:
-    """Approximate compressed byte count from CompressedKV."""
-    total = 0
-    for ct in (*compressed_kv.keys, *compressed_kv.values):
-        for block in ct.blocks:
-            if block.indices.size > 0:
-                # Each index uses n_bits rounded up to storage dtype
-                bits = config.k_bits if ct in compressed_kv.keys else config.v_bits
-                total += block.indices.nbytes
-    return total
 
 
 # ---------------------------------------------------------------------------
@@ -160,49 +146,93 @@ def run_preset(
     n_queries: int,
     rng: np.random.Generator,
 ) -> dict:
-    """Run quality benchmark for a single QuantConfig."""
+    """Run quality benchmark for a single QuantConfig.
+
+    Uses layer-by-layer processing when the full KV tensor would exceed
+    _LAYER_BY_LAYER_THRESHOLD_BYTES to avoid OOM at long seq_len.
+    """
     compressor = TurboQuantCompressor(config)
 
-    all_cos, all_top1, all_top5 = [], [], []
+    full_tensor_bytes = 2 * n_layers * n_heads * seq_len * head_dim * 8  # float64 K+V
+    layer_by_layer = full_tensor_bytes > _LAYER_BY_LAYER_THRESHOLD_BYTES
+
+    all_cos, all_attn_acc, all_top1, all_top5 = [], [], [], []
     compress_times, decompress_times = [], []
     actual_ratios: list[float] = []
 
-    for trial in range(n_trials):
-        # Sample realistic KV tensors in (n_layers, n_heads, seq_len, head_dim)
-        K = rng.standard_normal((n_layers, n_heads, seq_len, head_dim)).astype(np.float64)
-        V = rng.standard_normal((n_layers, n_heads, seq_len, head_dim)).astype(np.float64)
+    for _trial in range(n_trials):
+        if layer_by_layer:
+            # ---- memory-efficient: one layer at a time ----
+            t_compress_total = 0.0
+            t_decompress_total = 0.0
+            ratio_accum = 0.0
 
-        # --- Compress ---
-        t0 = time.perf_counter()
-        ckv = compressor.compress_kv(K, V)
-        compress_times.append(time.perf_counter() - t0)
+            for _layer in range(n_layers):
+                K = rng.standard_normal((1, n_heads, seq_len, head_dim)).astype(np.float64)
+                V = rng.standard_normal((1, n_heads, seq_len, head_dim)).astype(np.float64)
 
-        # --- Actual compression ratio (vs float64 original, matching turbo_engine) ---
-        original_bytes = K.nbytes + V.nbytes          # float64 baseline
-        compressed_sz = 0
-        for ct in (*ckv.keys, *ckv.values):
-            for block in ct.blocks:
-                compressed_sz += block.indices.nbytes  # uint8 indices
-                compressed_sz += 8                     # norm (float32) + seed overhead
-        if original_bytes > 0 and compressed_sz > 0:
-            actual_ratios.append(original_bytes / compressed_sz)
+                t0 = time.perf_counter()
+                ckv = compressor.compress_kv(K, V)
+                t_compress_total += time.perf_counter() - t0
 
-        # --- Decompress ---
-        t0 = time.perf_counter()
-        K_r, V_r = compressor.decompress_kv(ckv)
-        decompress_times.append(time.perf_counter() - t0)
-
-        # --- Attention metrics per (layer, head) ---
-        for l in range(n_layers):
-            for h in range(n_heads):
-                cos, t1, t5 = _attention_metrics(
-                    K[l, h], V[l, h], K_r[l, h], V_r[l, h],
-                    n_queries=n_queries,
-                    rng=rng,
+                orig_b = K.nbytes + V.nbytes
+                comp_b = sum(
+                    blk.indices.nbytes + 8
+                    for ct in (*ckv.keys, *ckv.values)
+                    for blk in ct.blocks
                 )
-                all_cos.append(cos)
-                all_top1.append(t1)
-                all_top5.append(t5)
+                if comp_b > 0:
+                    ratio_accum += orig_b / comp_b
+
+                t0 = time.perf_counter()
+                K_r, V_r = compressor.decompress_kv(ckv)
+                t_decompress_total += time.perf_counter() - t0
+
+                for h in range(n_heads):
+                    cos, acc, t1, t5 = _attention_metrics(
+                        K[0, h], V[0, h], K_r[0, h], V_r[0, h],
+                        n_queries=n_queries, rng=rng,
+                    )
+                    all_cos.append(cos)
+                    all_attn_acc.append(acc)
+                    all_top1.append(t1)
+                    all_top5.append(t5)
+
+            compress_times.append(t_compress_total)
+            decompress_times.append(t_decompress_total)
+            actual_ratios.append(ratio_accum / n_layers)
+        else:
+            # ---- all layers at once ----
+            K = rng.standard_normal((n_layers, n_heads, seq_len, head_dim)).astype(np.float64)
+            V = rng.standard_normal((n_layers, n_heads, seq_len, head_dim)).astype(np.float64)
+
+            t0 = time.perf_counter()
+            ckv = compressor.compress_kv(K, V)
+            compress_times.append(time.perf_counter() - t0)
+
+            orig_b = K.nbytes + V.nbytes
+            comp_b = sum(
+                blk.indices.nbytes + 8
+                for ct in (*ckv.keys, *ckv.values)
+                for blk in ct.blocks
+            )
+            if orig_b > 0 and comp_b > 0:
+                actual_ratios.append(orig_b / comp_b)
+
+            t0 = time.perf_counter()
+            K_r, V_r = compressor.decompress_kv(ckv)
+            decompress_times.append(time.perf_counter() - t0)
+
+            for l in range(n_layers):
+                for h in range(n_heads):
+                    cos, acc, t1, t5 = _attention_metrics(
+                        K[l, h], V[l, h], K_r[l, h], V_r[l, h],
+                        n_queries=n_queries, rng=rng,
+                    )
+                    all_cos.append(cos)
+                    all_attn_acc.append(acc)
+                    all_top1.append(t1)
+                    all_top5.append(t5)
 
     return {
         "preset": preset_name,
@@ -210,6 +240,7 @@ def run_preset(
         "v_bits": config.v_bits,
         "compression_ratio": round(float(np.mean(actual_ratios)), 2) if actual_ratios else None,
         "cosine_similarity": round(float(np.mean(all_cos)), 4),
+        "attn_score_accuracy": round(float(np.mean(all_attn_acc)), 4),
         "top1_match_pct": round(float(np.mean(all_top1)) * 100, 1),
         "top5_match_pct": round(float(np.mean(all_top5)) * 100, 1),
         "avg_compress_ms": round(float(np.mean(compress_times)) * 1000, 1),
@@ -219,6 +250,7 @@ def run_preset(
         "n_heads": n_heads,
         "seq_len": seq_len,
         "head_dim": head_dim,
+        "layer_by_layer": layer_by_layer,
     }
 
 
@@ -274,7 +306,7 @@ def print_table(results: list[dict]) -> None:
     """Print a formatted results table."""
     header = (
         f"\n{'Preset':<24} {'Compression':>13} {'Cosine Sim':>12} "
-        f"{'Top-1 Match':>12} {'Top-5 Match':>12} "
+        f"{'Attn Accuracy':>14} {'Top-1 Match':>12} {'Top-5 Match':>12} "
         f"{'Compress':>10} {'Decompress':>11}"
     )
     sep = "-" * len(header.rstrip())
@@ -284,6 +316,7 @@ def print_table(results: list[dict]) -> None:
         ratio = f"{r['compression_ratio']:.2f}x" if r["compression_ratio"] else "N/A"
         print(
             f"{r['preset']:<24} {ratio:>13} {r['cosine_similarity']:>12.4f} "
+            f"{r['attn_score_accuracy']:>14.4f} "
             f"{r['top1_match_pct']:>11.1f}% {r['top5_match_pct']:>11.1f}% "
             f"{r['avg_compress_ms']:>9.1f}ms {r['avg_decompress_ms']:>10.1f}ms"
         )
@@ -298,12 +331,16 @@ def main() -> int:
         {args.preset: PRESETS[args.preset]} if args.preset else PRESETS
     )
 
+    full_bytes = 2 * args.n_layers * args.n_heads * args.seq_len * args.head_dim * 8
+    strategy = "layer-by-layer" if full_bytes > _LAYER_BY_LAYER_THRESHOLD_BYTES else "batched"
+
     print(
         f"\nTurboQuant Quality Benchmark\n"
-        f"  Architecture : {args.n_layers} layers × {args.n_heads} heads × "
+        f"  Architecture : {args.n_layers} layers \u00d7 {args.n_heads} heads \u00d7 "
         f"head_dim={args.head_dim}\n"
-        f"  Sequence len : {args.seq_len} tokens\n"
+        f"  Sequence len : {args.seq_len:,} tokens\n"
         f"  Trials       : {args.trials}  |  Queries/head: {args.queries}\n"
+        f"  Strategy     : {strategy}\n"
     )
 
     results: list[dict] = []

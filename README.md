@@ -342,17 +342,34 @@ Build instructions in [Step 4](#step-4-build-c-backend-optional--8x-faster-compr
 
 ## Performance
 
-### KV Cache Compression Quality (40 layers × 32 heads × 256 seq_len)
+### KV Cache Compression Quality
 
-| Preset | Compression | Cosine Sim | Top-1 Match | Top-5 Match |
-|--------|:-----------:|:----------:|:-----------:|:-----------:|
-| Quality K8/V4 | **7.76x** | 0.9952 | 98.3% | **100.0%** |
-| Aggressive K8/V2 | **7.76x** | 0.9397 | 98.2% | **100.0%** |
-| Symmetric K4/V4 | **7.53x** | 0.9908 | 84.5% | 99.9% |
+#### 256-token context (40 layers × 32 heads)
 
-**Metrics:** `Cosine Sim` = cosine similarity between attention output vectors before/after decompression. `Top-1/Top-5 Match` = fraction of queries where the highest-attention token position is unchanged / still in the top-5 after compression.
+| Preset | Compression | Cosine Sim | Attn Score Acc | Top-1 Match | Top-5 Match |
+|--------|:-----------:|:----------:|:--------------:|:-----------:|:-----------:|
+| Quality K8/V4 | **7.76x** | 0.9952 | 1.0000 | 98.3% | **100.0%** |
+| Aggressive K8/V2 | **7.76x** | 0.9397 | 1.0000 | 98.2% | **100.0%** |
+| Symmetric K4/V4 | **7.53x** | 0.9908 | 0.9945 | 84.5% | 99.9% |
 
-Reproduce: `python -m benchmarks.benchmark_quality` (no GPU/model loading required).
+#### 8K-token context (40 layers × 32 heads, layer-by-layer)
+
+| Preset | Compression | Cosine Sim | Attn Score Acc | Top-1 Match | Top-5 Match |
+|--------|:-----------:|:----------:|:--------------:|:-----------:|:-----------:|
+| Quality K8/V4 | **7.76x** | 0.9952 | **0.9999** | 97.4% | **100.0%** |
+| Aggressive K8/V2 | **7.76x** | 0.9395 | **0.9999** | 97.2% | **100.0%** |
+| Symmetric K4/V4 | **7.53x** | 0.9903 | 0.9951 | 79.7% | 99.3% |
+
+**Metrics:** `Cosine Sim` = cosine similarity of attention output vectors before/after decompression. `Attn Score Acc` = cosine similarity between attention score *distributions* (softmax over all positions). `Top-1/Top-5 Match` = fraction of queries where the top-attended position is unchanged / still in top-5.
+
+Reproduce:
+```bash
+# 256-token (fast, ~25s)
+python -m benchmarks.benchmark_quality
+
+# 8K-token (layer-by-layer processing, ~4min)
+python -m benchmarks.benchmark_quality --seq-len 8192 --trials 1 --queries 4
+```
 
 ### GPU Mode (RTX 4060 Laptop, 8 GB VRAM, C++ Backend)
 

@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-04-02T03:00:41.048400+00:00",
+  "args": {
+    "n_layers": 40,
+    "n_heads": 32,
+    "head_dim": 128,
+    "seq_len": 8192,
+    "trials": 1,
+    "queries": 4,
+    "seed": 42,
+    "json": "benchmarks/results/quality_8k_report.json",
+    "preset": null
+  },
+  "results": [
+    {
+      "preset": "Quality (K8/V4)",
+      "k_bits": 8,
+      "v_bits": 4,
+      "compression_ratio": 7.76,
+      "cosine_similarity": 0.9952,
+      "attn_score_accuracy": 0.9999,
+      "top1_match_pct": 97.4,
+      "top5_match_pct": 100.0,
+      "avg_compress_ms": 26441.8,
+      "avg_decompress_ms": 13795.6,
+      "trials": 1,
+      "n_layers": 40,
+      "n_heads": 32,
+      "seq_len": 8192,
+      "head_dim": 128,
+      "layer_by_layer": true
+    },
+    {
+      "preset": "Aggressive (K8/V2)",
+      "k_bits": 8,
+      "v_bits": 2,
+      "compression_ratio": 7.76,
+      "cosine_similarity": 0.9395,
+      "attn_score_accuracy": 0.9999,
+      "top1_match_pct": 97.2,
+      "top5_match_pct": 100.0,
+      "avg_compress_ms": 26314.6,
+      "avg_decompress_ms": 13775.5,
+      "trials": 1,
+      "n_layers": 40,
+      "n_heads": 32,
+      "seq_len": 8192,
+      "head_dim": 128,
+      "layer_by_layer": true
+    },
+    {
+      "preset": "Symmetric (K4/V4)",
+      "k_bits": 4,
+      "v_bits": 4,
+      "compression_ratio": 7.53,
+      "cosine_similarity": 0.9903,
+      "attn_score_accuracy": 0.9951,
+      "top1_match_pct": 79.7,
+      "top5_match_pct": 99.3,
+      "avg_compress_ms": 36793.0,
+      "avg_decompress_ms": 20424.6,
+      "trials": 1,
+      "n_layers": 40,
+      "n_heads": 32,
+      "seq_len": 8192,
+      "head_dim": 128,
+      "layer_by_layer": true
+    }
+  ]
+}
