@@ -10,11 +10,12 @@ Complete technical documentation covering CPU inference, GPU inference, the C++ 
 2. [CPU Inference Mode](#2-cpu-inference-mode)
 3. [GPU Inference Mode](#3-gpu-inference-mode)
 4. [TurboQuant Compression Pipeline](#4-turboquant-compression-pipeline)
-5. [C++ Turbo Engine](#5-c-turbo-engine)
-6. [Server Architecture](#6-server-architecture)
-7. [Configuration Reference](#7-configuration-reference)
-8. [Performance Benchmarks](#8-performance-benchmarks)
-9. [Build & Development](#9-build--development)
+5. [Zero-Quant: Depth-Adaptive Compression](#5-zero-quant-depth-adaptive-compression)
+6. [C++ Turbo Engine](#6-c-turbo-engine)
+7. [Server Architecture](#7-server-architecture)
+8. [Configuration Reference](#8-configuration-reference)
+9. [Performance Benchmarks](#9-performance-benchmarks)
+10. [Build & Development](#10-build--development)
 
 ---
 
@@ -340,10 +341,134 @@ First 2 + last 2 transformer layers carry disproportionate importance. The `boun
 | `src/turboquant/codebook.py` | Lloyd-Max codebook generation + precomputed tables |
 | `src/turboquant/asymmetric.py` | Named presets (Quality, Aggressive, Symmetric) |
 | `src/turboquant/boundary.py` | Boundary layer protection for first/last layers |
+| `src/turboquant/zero_quant.py` | Zero-Quant depth-adaptive compression (see §5) |
 
 ---
 
-## 5. C++ Turbo Engine
+## 5. Zero-Quant: Depth-Adaptive Compression
+
+### Overview
+
+Zero-Quant extends the flat TurboQuant compression with **depth-adaptive zone-based bit allocation**. Instead of applying a single K/V bit width across all transformer layers, Zero-Quant partitions layers into zones and assigns bit widths based on each zone's sensitivity to quantization noise.
+
+The insight comes from ZeroQuant research: boundary layers (shallow and deep) carry disproportionate information and are highly sensitive to precision loss, while middle layers are sparser and tolerate aggressive compression.
+
+### Architecture
+
+```
+Layer Index:  0  1  2  3  4  5  6  7  8  9 10 11 12 13 ... 25 26 27
+              ├──────────┤  ├────────────────────────────┤  ├──────┤
+              Shallow 25%   Middle 50%                      Deep 25%
+              K8/V8         K4/V3 (or split)                K8/V8
+
+With split_middle=True (four-zone scheme):
+              ├──────────┤  ├────────────┤├──────────────┤  ├──────┤
+              Shallow 25%   Mid-Early     Mid-Late          Deep 25%
+              K8/V8         K4/V4         K4/V2             K8/V8
+```
+
+### Key Data Structures
+
+```python
+@dataclass(frozen=True)
+class ZeroQuantConfig:
+    n_layers: int             # Total transformer layers
+    shallow_fraction: float   # Zone size (default 0.25)
+    deep_fraction: float      # Zone size (default 0.25)
+    shallow_k_bits: int       # 8 — full precision for boundary
+    shallow_v_bits: int       # 8
+    middle_k_bits: int        # 4 — aggressive for middle
+    middle_v_bits: int        # 3
+    deep_k_bits: int          # 8 — full precision for boundary
+    deep_v_bits: int          # 8
+    split_middle: bool        # False — enable four-zone split
+    middle_early_v_bits: int  # 4 — only used when split_middle=True
+    middle_late_v_bits: int   # 2 — only used when split_middle=True
+
+@dataclass
+class ZoneCompressedKV:
+    shallow_kv: CompressedKV
+    middle_kv: CompressedKV
+    deep_kv: CompressedKV
+    middle_late_kv: CompressedKV | None  # Only when split_middle=True
+    middle_split_at: int                 # Boundary index within middle
+    zone_boundaries: tuple[int, int]     # (shallow_end, deep_start)
+```
+
+### Zone Boundary Calculation
+
+The `DepthAdaptiveCompressor` partitions layers deterministically:
+
+```python
+shallow_end = max(1, round(n_layers * shallow_fraction))
+deep_start  = n_layers - max(1, round(n_layers * deep_fraction))
+
+# For 28 layers with 0.25/0.25 fractions:
+# shallow: layers 0-6   (7 layers)
+# middle:  layers 7-20  (14 layers)
+# deep:    layers 21-27 (7 layers)
+```
+
+When `split_middle=True`, the middle zone is split at its midpoint:
+
+```python
+middle_split = shallow_end + (deep_start - shallow_end) // 2
+# middle-early: layers 7-13  (7 layers, K4/V4)
+# middle-late:  layers 14-20 (7 layers, K4/V2)
+```
+
+### Named Presets
+
+Four pre-tuned `ZeroQuantPreset` configurations are provided:
+
+| Preset | Avg Bits | Split | CoQuant | Description |
+|--------|:--------:|:-----:|:-------:|-------------|
+| `ZERO_QUANT_FAST` | 6.57 | No | No | K8 everywhere, V8 boundary — beats TQ on MAE/speed |
+| `ZERO_QUANT_QUALITY` | 6.0 | No | Yes | Maximum fidelity, uses co-quantization |
+| `ZERO_QUANT_BALANCED` | 6.0 | No | No | Good quality without CoQuant overhead |
+| `ZERO_QUANT_TURBO` | 5.75 | Yes | No | Best memory savings via split-middle |
+| `ZERO_QUANT_ULTRA` | 5.75 | Yes | Yes | Maximum quality at lowest bit budget |
+
+### Benchmark: Zero-Quant vs TurboQuant
+
+28-layer model, 28 heads × 128 head_dim, 512-token context (3-iteration median):
+
+| Metric | TurboQuant K8/V4 | ZQ-FAST | ZQ-QUALITY | ZQ-TURBO | ZQ-ULTRA |
+|--------|:-----------------:|:-------:|:----------:|:--------:|:--------:|
+| Avg bits | 6.0 | 6.57 | 6.0 | **5.75** | **5.75** |
+| MAE-K | 0.0098 | 0.0098 | 0.0434 | 0.0433 | 0.0434 |
+| MAE-V | 0.0769 | **0.0577** | **0.0434** | 0.0920 | **0.0435** |
+| MSE-V | 0.00933 | **0.00670** | **0.00473** | 0.03141 | **0.00473** |
+| CosSim-V | 0.9953 | **0.9966** | **0.9976** | 0.9842 | **0.9976** |
+| Critical V MSE | 0.009325 | **0.000127** | **0.000132** | **0.000127** | **0.000132** |
+| Compress | 899ms | **775ms** | 1559ms | 865ms | 1585ms |
+| Decompress | 453ms | 497ms | 823ms | 627ms | 851ms |
+
+**Key results:**
+- **ZQ-FAST** outperforms TQ on MAE-V (−25%), compress speed (−14%), and critical-zone V MSE (−98.6%) while keeping identical K quality.
+- **ZQ-TURBO/ULTRA** achieve lowest avg bits (5.75) for maximum memory savings.
+- Coquant presets (QUALITY/ULTRA) have ~80% compression overhead from processing joint K||V tensors.
+
+### Utility Functions
+
+| Function | Purpose |
+|----------|---------|
+| `estimate_kv_memory_gb_zero_quant()` | Estimate total KV cache memory for a Zero-Quant config |
+| `savings_vs_turboquant()` | Calculate bit savings and memory reduction vs flat TurboQuant |
+| `compare_with_turboquant()` | Run live MSE/CosSim head-to-head on real tensor data |
+| `recommend_zero_quant()` | Hardware-aware preset recommendation based on VRAM budget |
+
+### File Map
+
+| File | Purpose |
+|------|---------|
+| `src/turboquant/zero_quant.py` | ZeroQuantConfig, DepthAdaptiveCompressor, presets, utilities |
+| `tests/test_zero_quant.py` | 76 unit tests — config validation, round-trip, presets, utilities |
+| `tests/test_zero_quant_vs_turboquant.py` | 15 head-to-head comparison tests |
+
+---
+
+## 6. C++ Turbo Engine
 
 ### Overview
 
@@ -378,7 +503,7 @@ src/turboquant_cpp/
 
 ### Key Algorithms
 
-#### 5.1 Fast Walsh-Hadamard Transform
+#### 6.1 Fast Walsh-Hadamard Transform
 
 The Python implementation uses `scipy.linalg.hadamard()` to build a full d×d matrix, then computes `H @ diag(signs) @ x` as a matrix-vector multiply — O(d²).
 
@@ -405,7 +530,7 @@ static void fwht_inplace(double* data, int d) {
 
 For `d=128` (typical head_dim): Python does 128×128 = 16,384 multiplies. C++ does 128 × 7 = 896 butterfly operations — **18x fewer FLOPs**.
 
-#### 5.2 OpenMP Parallelism
+#### 6.2 OpenMP Parallelism
 
 Block-level compression and tensor-level operations are parallelized with OpenMP:
 
@@ -425,7 +550,7 @@ for (int r = 0; r < n_rows; ++r) {
 
 The `dynamic` schedule for compression handles variable-size last blocks. The `static` schedule for rotation handles uniform-size rows. The `if` clauses avoid thread-pool overhead for small workloads.
 
-#### 5.3 Lloyd-Max Codebook
+#### 6.3 Lloyd-Max Codebook
 
 Precomputed optimal centroids for N(0,1) distribution are compiled into the binary:
 
@@ -443,7 +568,7 @@ static const Codebook TURBO4{
 
 Quantization is a linear scan of sorted boundaries — O(2^n_bits) per element. For 4-bit (16 levels), this compiles down to ~15 comparisons with branch prediction hints.
 
-#### 5.4 Integration with Python
+#### 6.4 Integration with Python
 
 The C++ backend integrates transparently via adapter functions in `compressor.py`:
 
@@ -528,7 +653,7 @@ Everything works identically — just ~5-9x slower for compression/decompression
 
 ---
 
-## 6. Server Architecture
+## 7. Server Architecture
 
 ### Application Factory (`app.py`)
 
@@ -591,7 +716,7 @@ data: [DONE]
 
 ---
 
-## 7. Configuration Reference
+## 8. Configuration Reference
 
 ### YAML Configuration (`config/default.yaml`)
 
@@ -664,7 +789,7 @@ CLI args  >  Environment vars  >  YAML config  >  Code defaults
 
 ---
 
-## 8. Performance Benchmarks
+## 9. Performance Benchmarks
 
 ### Single-Prompt (GPU, 4K Context)
 
@@ -709,7 +834,7 @@ With the C++ backend, the per-turn overhead drops from ~400ms to ~50ms, making m
 
 ---
 
-## 9. Build & Development
+## 10. Build & Development
 
 ### Project Structure
 
@@ -749,7 +874,7 @@ turboquant-x/
 │   │   └── *.so                  # Compiled extension (after build)
 │   └── utils/
 │       └── memory.py             # GPU memory monitoring (pynvml / nvidia-smi)
-├── tests/                        # 536 tests, 80%+ coverage
+├── tests/                        # 593+ tests, 80%+ coverage
 ├── benchmarks/                   # Performance benchmarks
 │   ├── benchmark_compare.py      # Standard vs TurboQuant comparison
 │   ├── benchmark_multiturn.py    # Multi-turn conversation
@@ -788,7 +913,7 @@ python -m src.main --mode turboquant
 ### Running Tests
 
 ```bash
-# All 536 tests
+# All 593+ tests
 pytest
 
 # With coverage report

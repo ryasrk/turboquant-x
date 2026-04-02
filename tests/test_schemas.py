@@ -33,17 +33,28 @@ class TestChatMessage:
         with pytest.raises(ValidationError):
             ChatMessage(role="bot", content="Hi")
 
-    def test_empty_content_raises(self):
-        with pytest.raises(ValidationError):
-            ChatMessage(role="user", content="")
+    def test_empty_content_allowed(self):
+        """Empty content is valid for tool/assistant messages with tool_calls."""
+        msg = ChatMessage(role="tool", content="", tool_call_id="call_1", name="read_file")
+        assert msg.content == ""
+
+    def test_tool_role_accepted(self):
+        msg = ChatMessage(role="tool", content="result", tool_call_id="call_1", name="read_file")
+        assert msg.role == "tool"
 
     def test_max_length_content_accepted(self):
         msg = ChatMessage(role="assistant", content="a" * 32_000)
         assert len(msg.content) == 32_000
 
-    def test_over_max_length_raises(self):
-        with pytest.raises(ValidationError):
-            ChatMessage(role="user", content="a" * 32_001)
+    def test_multimodal_content_accepted(self):
+        """Content can be a list for OpenAI multimodal format."""
+        parts = [
+            {"type": "text", "text": "describe this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ]
+        msg = ChatMessage(role="user", content=parts)
+        assert isinstance(msg.content, list)
+        assert len(msg.content) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +68,7 @@ class TestChatRequest:
 
     def test_valid_request_with_defaults(self, _msg):
         req = ChatRequest(messages=[_msg])
-        assert req.max_tokens == 512
+        assert req.max_tokens == 2048
         assert req.temperature == 0.7
         assert req.top_p == 0.95
         assert req.stream is False
@@ -66,7 +77,7 @@ class TestChatRequest:
         with pytest.raises(ValidationError):
             ChatRequest(messages=[])
 
-    @pytest.mark.parametrize("val,ok", [(0, False), (1, True), (4096, True), (4097, False)])
+    @pytest.mark.parametrize("val,ok", [(0, False), (1, True), (16384, True), (16385, False)])
     def test_max_tokens_range(self, _msg, val, ok):
         if ok:
             req = ChatRequest(messages=[_msg], max_tokens=val)

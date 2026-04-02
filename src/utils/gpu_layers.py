@@ -268,6 +268,152 @@ def compute_optimal_gpu_layers(
     return optimal
 
 
+def compute_optimal_context(
+    model_path: str | Path,
+    *,
+    min_gpu_layers: int = 4,
+    safety_margin: float = 0.90,
+    kv_bytes_per_ctx_per_layer: int = 1024,
+    kv_config: Any | None = None,
+) -> tuple[int, int]:
+    """Co-optimise n_ctx and n_gpu_layers for maximum context window.
+
+    Finds the largest power-of-two n_ctx (up to the model's native max)
+    that still keeps at least *min_gpu_layers* on the GPU.
+
+    Parameters
+    ----------
+    model_path:
+        Path to the GGUF model file.
+    min_gpu_layers:
+        Minimum acceptable GPU layers (below this, reduce n_ctx instead).
+    safety_margin:
+        Fraction of free VRAM to use.
+    kv_bytes_per_ctx_per_layer:
+        Per-token per-GPU-layer KV cost in bytes.
+    kv_config:
+        Optional ``KVCacheConfig`` — if supplied, actual per-token KV
+        bytes are computed from the model's architecture metadata.
+
+    Returns
+    -------
+    (n_ctx, n_gpu_layers)
+        The co-optimised values.
+    """
+    path = Path(model_path)
+    meta = _read_gguf_metadata(path)
+    n_layers = _get_block_count(meta)
+    if n_layers is None:
+        return 8192, 0  # safe fallback
+
+    # Native context ceiling from the GGUF architecture
+    arch = meta.get("general.architecture", "")
+    native_ctx = 131072  # default ceiling
+    for key in (f"{arch}.context_length", "llama.context_length"):
+        if key in meta:
+            native_ctx = int(meta[key])
+            break
+
+    free_vram = _get_free_vram_bytes()
+    if free_vram is None:
+        # CPU-only: use RAM budget instead
+        import psutil
+        ram_avail = psutil.virtual_memory().available
+        try:
+            model_bytes = path.stat().st_size
+        except OSError:
+            return 8192, 0
+        bytes_per_layer = model_bytes / n_layers
+        ram_for_kv = ram_avail * 0.80 - model_bytes
+        if ram_for_kv <= 0:
+            return 4096, 0
+        _kv_per_token = _estimate_kv_bytes_per_token(meta, kv_config)
+        max_ctx = int(ram_for_kv / _kv_per_token) if _kv_per_token > 0 else 8192
+        max_ctx = min(max_ctx, native_ctx)
+        # Round down to nearest power of 2
+        n_ctx = 1
+        while n_ctx * 2 <= max_ctx:
+            n_ctx *= 2
+        return max(4096, n_ctx), 0
+
+    budget = int(free_vram * safety_margin)
+
+    try:
+        model_bytes = path.stat().st_size
+    except OSError:
+        return 8192, 0
+
+    bytes_per_layer = model_bytes / n_layers
+    _kv_per_token = _estimate_kv_bytes_per_token(meta, kv_config)
+
+    # Sweep from largest viable n_ctx down until min_gpu_layers is satisfied.
+    # Candidate n_ctx values: powers of 2 from native_ctx down to 4096.
+    candidates = []
+    ctx = 4096
+    while ctx <= native_ctx:
+        candidates.append(ctx)
+        ctx *= 2
+
+    best_ctx = 4096
+    best_gl = 0
+
+    for ctx in reversed(candidates):
+        kv_vram = _kv_per_token * ctx  # total KV cache in VRAM
+        remaining = budget - kv_vram
+        if remaining <= 0:
+            continue
+        gl = min(n_layers, int(remaining / bytes_per_layer))
+        gl = max(0, gl)
+        if gl >= min_gpu_layers:
+            best_ctx = ctx
+            best_gl = gl
+            break
+        # Even if below threshold, remember best option
+        if gl > best_gl:
+            best_gl = gl
+            best_ctx = ctx
+
+    logger.info(
+        "Auto context — model: %s | native_ctx: %d | "
+        "VRAM budget: %.1f GB | KV/token: %d B | "
+        "optimal: n_ctx=%d, n_gpu_layers=%d",
+        path.name, native_ctx, budget / 1e9, _kv_per_token,
+        best_ctx, best_gl,
+    )
+
+    return best_ctx, best_gl
+
+
+def _estimate_kv_bytes_per_token(meta: dict[str, Any], kv_config: Any | None) -> int:
+    """Estimate total KV cache bytes per context token from GGUF metadata."""
+    arch = meta.get("general.architecture", "llama")
+
+    # Try architecture-specific keys first, then fall back to llama.*
+    def _get(suffix: str, default: int) -> int:
+        for prefix in (arch, "llama"):
+            key = f"{prefix}.{suffix}"
+            if key in meta:
+                return int(meta[key])
+        return default
+
+    n_layers = _get("block_count", 32)
+    n_kv_heads = _get("attention.head_count_kv", 4)
+    # head_dim = key_length (or rope.dimension_count, or embedding / head_count)
+    head_dim = _get("attention.key_length", 128)
+
+    # bits per element (default Q8_0 = 8.5 bpe for both K and V)
+    k_bpe = 8.5
+    v_bpe = 8.5
+    if kv_config is not None:
+        from src.engine.kv_cache import _BITS_PER_ELEMENT
+        k_bpe = _BITS_PER_ELEMENT.get(kv_config.cache_type_k, 8.5)
+        v_bpe = _BITS_PER_ELEMENT.get(kv_config.cache_type_v, 8.5)
+
+    k_bytes_per_token = n_layers * n_kv_heads * head_dim * k_bpe / 8
+    v_bytes_per_token = n_layers * n_kv_heads * head_dim * v_bpe / 8
+    return int(k_bytes_per_token + v_bytes_per_token)
+
+
 def layer_distribution_report(
     model_path: str | Path,
     n_gpu_layers: int,

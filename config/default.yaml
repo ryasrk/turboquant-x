@@ -3,7 +3,9 @@
 model:
   name: "qwen3.5-35b-a3b"
   path: "./models/Qwen3.5-35B-A3B-q4_k_m.gguf"
-  n_ctx: 4096
+  n_ctx: -1               # -1 = auto: co-optimise with GPU layers for max context
+                           # Balances VRAM between KV cache and weight layers
+                           # Set a fixed value (e.g. 32768) to override
   n_gpu_layers: -1       # -1 = auto: optimal layers computed from VRAM at startup
   gpu_safety_margin: 0.92  # VRAM fraction to use for model layers (0.85-0.95 range)
                             # Higher = more GPU layers, slightly higher OOM risk
@@ -13,17 +15,21 @@ model:
   n_threads_batch: -1    # -1 = auto (cpu_count = 28) for fast prompt eval
   n_batch: 512           # Prompt eval batch size. For 70B: use 1024
 
-# Inference mode: "standard" | "turboquant" | "zero-quant"
-#   standard   — llama.cpp Q8_0 KV cache, no Python overhead, KV grows each turn
-#   turboquant — Q8_0 KV at C level + PolarQuant Python compression between turns
-#                benchmark: 55.4 tok/s, CosSim=0.9953, Top-1=98.5%%, -25%% KV vs std
-#   zero-quant — Q8_0 KV at C level + depth-adaptive PolarQuant (shallow/mid/deep)
-#                benchmark: 55.5 tok/s, CosSim=0.9894, Top-1=93.6%%, -28%% KV vs std
+# Inference mode: "standard" | "turboquant" | "zero-quant" | "ultra-quant"
+#   standard    — llama.cpp Q8_0 KV cache, no Python overhead, KV grows each turn
+#   turboquant  — Q8_0 KV at C level + PolarQuant Python compression between turns
+#                 benchmark: 55.4 tok/s, CosSim=0.9953, Top-1=98.2%, -25% KV vs std
+#   zero-quant  — Q8_0 KV at C level + depth-adaptive PolarQuant (zone-based)
+#                 FAST preset: 55.6 tok/s, CosSim=0.9966, Top-1=98.5%, -18% KV vs std
+#                 TURBO preset: 55.5 tok/s, CosSim=0.9814, Top-1=91.3%, -28% KV vs std
+#   ultra-quant — Memory-budget-aware big-model inference (70B+ on consumer hardware)
+#                 Auto-selects quant level, GPU/CPU/mmap layer split, KV compression
+#                 Based on: FlexGen, PowerInfer, LLM-in-a-Flash, T-MAC, MoE offloading
 inference_mode: "turboquant"
 
 kv_cache:
   cache_type_k: "q8_0"
-  cache_type_v: "q8_0"
+  cache_type_v: "q4_0"
   flash_attention: true
 
 # TurboQuant compression settings (only used when inference_mode = "turboquant")
@@ -36,20 +42,45 @@ turboquant:
   block_size: 128
 
 # Zero-Quant depth-adaptive compression (only used when inference_mode = "zero-quant")
-# Layers are grouped into three zones by depth; each zone uses independent K/V bits.
-# Based on: arXiv:2405.17799 (activation sparsity), 2406.05955 (TurboSparse),
-#           2511.06174 (co-quantization), 2601.05047 (memory bottleneck).
+# Layers are grouped into zones by depth; each zone uses independent K/V bits.
+# Presets: "fast" (recommended), "quality", "balanced", "turbo", "ultra"
+# Set preset OR individual values. Explicit values override the preset.
+# Based on: arXiv:2405.17799, 2406.05955, 2511.06174, 2601.05047.
 zero_quant:
-  shallow_fraction: 0.25   # first 25%% of layers — dense activations, protect
-  deep_fraction: 0.25      # last 25%% of layers — output-critical, protect
-  shallow_k_bits: 8        # high precision for dense-activation shallow zone
-  shallow_v_bits: 8
-  middle_k_bits: 4         # aggressive compression for sparse middle zone
-  middle_v_bits: 3         # raised from 2→3 for better Top-1 match (+0.25 bits)
-  deep_k_bits: 8           # high precision for output-critical deep zone
-  deep_v_bits: 8
+  preset: "fast"             # recommended: K8 everywhere, V8 boundary, V4 middle
+  # --- Override individual values below (uncomment to override preset) ---
+  # shallow_fraction: 0.15   # FAST default: 15% boundary layers
+  # deep_fraction: 0.15
+  # shallow_k_bits: 8        # K8/V8 boundary — full precision
+  # shallow_v_bits: 8
+  # middle_k_bits: 8         # K8 everywhere — no rotation overhead
+  # middle_v_bits: 4         # V4 middle — standard PolarQuant compression
+  # deep_k_bits: 8
+  # deep_v_bits: 8
+  # split_middle: false      # true = four-zone scheme (for TURBO/ULTRA presets)
+  # middle_early_v_bits: 4   # only used when split_middle=true
+  # middle_late_v_bits: 2
   block_size: 128
-  use_kv_coquant: false    # joint K-V codebook (paper 3); false = standard
+  use_kv_coquant: false      # joint K-V codebook (QUALITY/ULTRA presets enable this)
+
+# Ultra-Quant memory-budget-aware big-model inference
+# Only used when inference_mode = "ultra-quant"
+# Runs 70B+ models on consumer hardware via tiered GPU/CPU/mmap offloading,
+# MoE-aware expert placement, and ultra-aggressive KV cache compression.
+# Presets for zero_quant_preset: "conservative", "turbo" (default), "extreme"
+ultra_quant:
+  target_model_params_b: 70.0      # Model size in billions (used for memory planning)
+  max_ram_usage_fraction: 0.85     # Fraction of free RAM to use (0.0-1.0)
+  max_vram_usage_fraction: 0.90    # Fraction of GPU VRAM to use (0.0-1.0)
+  enable_mmap: true                # Memory-mapped loading (enables disk offloading)
+  enable_mlock_critical: true      # Pin embedding+output layers in RAM
+  enable_moe_offload: true         # Detect MoE and offload inactive experts to CPU
+  kv_budget_mb: 0                  # Max KV cache size in MB (0 = auto: 15% of remaining)
+  force_quant: ""                  # Force GGUF quant level (empty = auto-select best fit)
+  zero_quant_preset: "turbo"       # KV compression preset: conservative | turbo | extreme
+  # conservative: K8/V8 boundary, K8/V4 middle — safe, ~5 avg bits
+  # turbo:        K8/V4 boundary, K4/V2 middle — recommended, ~3.5 avg bits
+  # extreme:      K4/V2 boundary, K4/V2 middle, split_middle — ~2.5 avg bits, some quality loss
 
 server:
   host: "0.0.0.0"
@@ -62,3 +93,4 @@ server:
 
 logging:
   level: "INFO"
+  thought_log: "logs/agent-thoughts.log"

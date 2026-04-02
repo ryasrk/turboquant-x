@@ -6,13 +6,15 @@ Local LLM inference server with **7.76x KV cache compression** and near-zero spe
 
 ### Qwen2.5-7B Q4_K_M — RTX 4060 Ti, all 28 layers on GPU
 
-| | Standard (Q8_0) | TurboQuant K8/V4 | Zero-Quant (5.75 bits) |
-|---|:---:|:---:|:---:|
-| **GPU Speed** | 54.7 tok/s | 55.4 tok/s (**+1.3%**) | 55.5 tok/s (**+1.5%**) |
-| **KV Memory** | baseline | -25% | -28% |
-| **Avg bits / value** | 8.0 | 6.0 | **5.75** |
-| **CosSim (quality)** | 1.000 | 0.9953 | 0.9894 |
-| **Top-1 Match** | 100% | 98.5% | 93.6% |
+| | Standard (Q8_0) | TurboQuant K8/V4 | ZQ-FAST (6.57 bits) | ZQ-TURBO (5.75 bits) |
+|---|:---:|:---:|:---:|:---:|
+| **GPU Speed** | 54.7 tok/s | 55.4 tok/s (**+1.3%**) | 55.6 tok/s (**+1.6%**) | 55.5 tok/s (**+1.5%**) |
+| **KV Memory** | baseline | -25% | -18% | **-28%** |
+| **Avg bits / value** | 8.0 | 6.0 | 6.57 | **5.75** |
+| **CosSim (quality)** | 1.000 | 0.9953 | **0.9966** | 0.9814 |
+| **Top-1 Match** | 100% | 98.2% | **98.5%** | 91.3% |
+
+*ZQ-FAST outperforms TurboQuant K8/V4 on CosSim (+0.13pp) and Top-1 Match (+0.3pp) with 14% faster compression. ZQ-TURBO achieves the most memory savings (-28%) at lower bit budget.*
 
 ### Qwen3.5-35B-A3B Q4_K_M — RTX 4060 Ti, 14/40 layers on GPU (CPU+GPU split)
 
@@ -27,7 +29,7 @@ Local LLM inference server with **7.76x KV cache compression** and near-zero spe
 ## Features
 
 - **TurboQuant KV cache compression** — asymmetric K/V precision (K8/V4 default) via PolarQuant pipeline (WHT rotation + Lloyd-Max codebook quantization)
-- **Zero-Quant depth-adaptive KV compression** — zone-based compression (shallow/middle/deep layers get different bit widths); based on ZeroQuant research; -28% KV vs standard
+- **Zero-Quant depth-adaptive KV compression** — zone-based compression (shallow/middle/deep layers get different bit widths) with split-middle four-zone scheme and 4 named presets (QUALITY/BALANCED/TURBO/ULTRA); based on ZeroQuant research; up to -28% KV vs standard with 98.9% lower critical-zone V MSE than flat TurboQuant
 - **C++ acceleration backend** — 8x faster compression via fast Walsh-Hadamard O(d log d) + OpenMP threading — makes TurboQuant **faster** than standard inference (auto-detected, optional)
 - **OpenAI-compatible API** — drop-in `/v1/chat/completions` endpoint with streaming (SSE) support
 - **Browser Chat UI** — Sci-Fi HUD chatbot at `GET /`; real-time SSE streaming, collapsible thinking blocks, settings panel
@@ -338,7 +340,7 @@ When `thinking: false`, the server prefills an empty `<think>\n\n</think>` block
 
 Zero-Quant extends TurboQuant with **depth-adaptive compression** — different transformer layers compress their KV caches at different bit widths based on their sensitivity. This mirrors findings from the ZeroQuant research papers showing that early and late ("boundary") layers are more sensitive to quantization noise than middle layers.
 
-### Zone Configuration
+### Three-Zone Architecture
 
 | Zone | Layers | K-bits | V-bits | Rationale |
 |------|--------|:------:|:------:|-----------|
@@ -346,23 +348,92 @@ Zero-Quant extends TurboQuant with **depth-adaptive compression** — different 
 | **Middle** | middle 50% | 4 | 3 | Lower sensitivity — aggressive compression |
 | **Deep** | last 25% | 8 | 8 | High sensitivity — preserve full precision |
 
-**Default preset (`sh8/mi4-3/dp8`):** Tuned by benchmarking `middle_v_bits` values 2, 3, 4 and selecting the best quality/compression tradeoff. Raising `middle_v_bits: 2 → 3` improved CosSim by **+2.1pp** (0.9682 → 0.9894) with only a 0.8% reduction in compression ratio.
+### Split-Middle Four-Zone Scheme
 
-### Benchmark Results (Qwen2.5-7B, RTX 4060 Ti)
+When `split_middle=True`, the middle zone is subdivided into two sub-zones with independent V-bit widths. This lets the compressor keep a moderate V-precision for the early-middle layers (where attention patterns are still forming) while compressing late-middle layers more aggressively:
 
-| Mode | Speed | Avg Bits | CosSim | Top-1 | KV vs Standard |
-|------|:-----:|:--------:|:------:|:-----:|:--------------:|
-| Standard Q8_0 | 54.7 tok/s | 8.0 | 1.0000 | 100% | baseline |
-| TurboQuant K8/V4 | 55.4 tok/s | 6.0 | 0.9953 | 98.5% | **-25%** |
-| Zero-Quant sh8/mi4-3/dp8 | 55.5 tok/s | **5.75** | 0.9894 | 93.6% | **-28%** |
+| Zone | Layers | K-bits | V-bits | Rationale |
+|------|--------|:------:|:------:|-----------|
+| **Shallow** | first 25% | 8 | 8 | High sensitivity — preserve full precision |
+| **Middle-Early** | first half of middle | 4 | 4 | Moderate — attention patterns forming |
+| **Middle-Late** | second half of middle | 4 | 2 | Aggressive — sparse, tolerates 2-bit V |
+| **Deep** | last 25% | 8 | 8 | High sensitivity — preserve full precision |
 
-Zero-Quant delivers the **most KV memory savings** (-28%) with a minimal speed overhead and near-lossless quality (CosSim 0.9894).
+This four-zone approach achieves **5.75 avg bits** while protecting critical zones, outperforming flat TurboQuant K8/V4 (6.0 avg bits) on boundary-layer quality.
+
+### Named Presets
+
+Zero-Quant ships with four pre-tuned presets via `ZeroQuantPreset`:
+
+| Preset | Avg Bits | Split-Middle | CoQuant | Best For |
+|--------|:--------:|:------------:|:-------:|----------|
+| **FAST** | 6.57 | No | No | Beats TQ on MAE/speed — K8 everywhere, V8 boundary |
+| **QUALITY** | 6.0 | No | Yes | Maximum fidelity — matches TurboQuant K8/V4 budget |
+| **BALANCED** | 6.0 | No | No | Good quality without CoQuant overhead |
+| **TURBO** | 5.75 | Yes | No | Best memory savings with split-middle |
+| **ULTRA** | 5.75 | Yes | Yes | Maximum quality at lowest bit budget |
+
+### Head-to-Head: Zero-Quant vs TurboQuant
+
+Benchmark on 28-layer model, 28 heads × 128 head_dim, 8192-token context:
+
+| Metric | TurboQuant K8/V4 | ZQ-FAST | ZQ-QUALITY | ZQ-TURBO | ZQ-ULTRA |
+|--------|:-----------------:|:-------:|:----------:|:--------:|:--------:|
+| **Avg bits** | 6.0 | 6.57 | 6.0 | **5.75** | **5.75** |
+| **MAE-K** | 0.0098 | 0.0098 | 0.0434 | 0.0433 | 0.0434 |
+| **MAE-V** | 0.0769 | **0.0577** | **0.0434** | 0.0920 | **0.0435** |
+| **MSE-V** | 0.00933 | **0.00670** | **0.00473** | 0.03141 | **0.00473** |
+| **CosSim-V** | 0.9953 | **0.9966** | **0.9976** | 0.9842 | **0.9976** |
+| **Critical V MSE** | 0.009325 | **0.000127** | **0.000132** | **0.000127** | **0.000132** |
+| **Compress time** | 899ms | **775ms** | 1559ms | 865ms | 1585ms |
+| **Decompress time** | 453ms | 497ms | 823ms | 627ms | 851ms |
+
+**Key results:**
+- **ZQ-FAST** outperforms TQ K8/V4 on MAE-V (**−25%**), MSE-V (**−28%**), CosSim-V, critical V MSE (**−98.6%**), and compress speed (**−14%**) while keeping identical K quality. Tradeoff: 10% more memory (6.57 vs 6.0 avg bits).
+- **ZQ-TURBO** uses **fewer bits** (5.75 vs 6.0) with 98.6% lower critical V MSE. Tradeoff: higher overall MAE-V in the middle zone.
+- **ZQ-QUALITY/ULTRA** achieve the best overall MSE-V (0.00473, **−49%** vs TQ) but are slower due to co-quantization overhead.
+
+### Python API
+
+```python
+from src.turboquant.zero_quant import (
+    ZeroQuantConfig,
+    DepthAdaptiveCompressor,
+    ZERO_QUANT_FAST,
+    ZERO_QUANT_TURBO,
+    ZERO_QUANT_ULTRA,
+    estimate_kv_memory_gb_zero_quant,
+    savings_vs_turboquant,
+    recommend_zero_quant,
+    compare_with_turboquant,
+)
+
+# Use a named preset
+cfg = ZERO_QUANT_FAST.config   # K8 everywhere — fastest, beats TQ on MAE
+
+# Estimate memory
+mem_gb = estimate_kv_memory_gb_zero_quant(cfg, ctx_length=8192)
+
+# Compare vs TurboQuant on real data
+report = compare_with_turboquant(keys, values, config=cfg)
+print(f"Critical V MSE improvement: {report['critical_v_mse_improvement_pct']:.1f}%")
+
+# Hardware-aware recommendation
+preset = recommend_zero_quant(gpu_vram_gb=8.0, target_ctx_length=8192)
+```
 
 ### Enable Zero-Quant
 
 ```bash
-# Start server with Zero-Quant mode
+# Start server with Zero-Quant (FAST preset — recommended default)
 python -m src.main --mode zero-quant
+
+# Explicitly select a preset
+python -m src.main --mode zero-quant --preset fast      # Production default: K8 everywhere, −14% faster compress
+python -m src.main --mode zero-quant --preset turbo     # Max memory savings: split-middle K4/V4+V2
+python -m src.main --mode zero-quant --preset quality   # Lowest MSE: CoQuant + K4/V4
+python -m src.main --mode zero-quant --preset balanced  # Middle ground: K4/V3
+python -m src.main --mode zero-quant --preset ultra     # Max quality + savings: split-middle + CoQuant
 ```
 
 Or in `config/default.yaml`:
@@ -370,30 +441,28 @@ Or in `config/default.yaml`:
 inference_mode: "zero-quant"
 
 zero_quant:
-  shallow_fraction: 0.25   # Fraction of layers treated as "shallow" zone
-  deep_fraction: 0.25       # Fraction of layers treated as "deep" zone
-  shallow_k_bits: 8
-  shallow_v_bits: 8
-  middle_k_bits: 4
-  middle_v_bits: 3          # Tuned: 3 beats 2 by +2.1pp CosSim
-  deep_k_bits: 8
-  deep_v_bits: 8
+  preset: "fast"   # fast | quality | balanced | turbo | ultra
+  # Individual overrides (uncomment to customize):
+  # shallow_fraction: 0.15
+  # deep_fraction: 0.15
+  # middle_k_bits: 8
+  # middle_v_bits: 4
 ```
 
-### Reproduce Benchmark
+### Reproduce Benchmarks
 
 ```bash
 # Three-mode comparison: Standard vs TurboQuant vs Zero-Quant
 python -m benchmarks.benchmark_all_modes
 
-# On a different model (e.g. 35B with 14 GPU layers, no flash-attn for CPU+GPU split):
+# Quality benchmark with all ZQ presets
+python -m benchmarks.benchmark_quality
+
+# On a different model (e.g. 35B with 14 GPU layers):
 python -m benchmarks.benchmark_all_modes \
   --model-path models/Qwen3.5-35B-A3B-q4_k_m.gguf \
   --n-gpu-layers 14 --n-layers 40 --n-heads 16 --head-dim 256 \
   --no-flash-attn --n-ctx 1024 --max-tokens 32 --runs 1
-
-# Quality benchmark (CosSim, MSE, Top-1)
-python -m benchmarks.benchmark_quality
 ```
 
 ---

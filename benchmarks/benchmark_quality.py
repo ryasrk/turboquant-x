@@ -56,7 +56,15 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.turboquant.compressor import QuantConfig, TurboQuantCompressor  # noqa: E402
-from src.turboquant.zero_quant import ZeroQuantConfig, DepthAdaptiveCompressor  # noqa: E402
+from src.turboquant.zero_quant import (  # noqa: E402
+    ZeroQuantConfig,
+    DepthAdaptiveCompressor,
+    ZERO_QUANT_FAST,
+    ZERO_QUANT_QUALITY,
+    ZERO_QUANT_BALANCED,
+    ZERO_QUANT_TURBO,
+    ZERO_QUANT_ULTRA,
+)
 
 # ---------------------------------------------------------------------------
 # Preset configurations
@@ -84,6 +92,12 @@ ZQ_PRESETS: dict[str, ZeroQuantConfig] = {
         middle_k_bits=4, middle_v_bits=2,
         deep_k_bits=4, deep_v_bits=4,
     ),
+    # --- New four-zone presets ---
+    "ZQ-FAST (K8-everywhere)": ZERO_QUANT_FAST.config,
+    "ZQ-QUALITY (coquant)": ZERO_QUANT_QUALITY.config,
+    "ZQ-BALANCED": ZERO_QUANT_BALANCED.config,
+    "ZQ-TURBO (split-mid)": ZERO_QUANT_TURBO.config,
+    "ZQ-ULTRA (split+coquant)": ZERO_QUANT_ULTRA.config,
 }
 
 # Process layers one-at-a-time when tensor would exceed this threshold
@@ -417,11 +431,16 @@ def print_table(results: list[dict], title: str = "TurboQuant Presets") -> None:
     print(sep)
     for r in results:
         ratio = f"{r['compression_ratio']:.2f}x" if r["compression_ratio"] else "N/A"
-        avg_bits = r.get("avg_bits", (r.get("k_bits", 0) + r.get("v_bits", 0)) / 2)
+        avg_bits = r.get("avg_bits")
+        if avg_bits is None:
+            k_b = r.get("k_bits", 0)
+            v_b = r.get("v_bits", 0)
+            if isinstance(k_b, (int, float)) and isinstance(v_b, (int, float)):
+                avg_bits = (k_b + v_b) / 2
         if isinstance(avg_bits, (int, float)):
             avg_bits_str = f"{avg_bits:.1f}"
         else:
-            avg_bits_str = str(avg_bits)
+            avg_bits_str = str(avg_bits) if avg_bits is not None else "N/A"
         print(
             f"  {r['preset']:<32} {avg_bits_str:>9} {ratio:>13} "
             f"{r['cosine_similarity']:>12.4f} {r['attn_score_accuracy']:>10.4f} "

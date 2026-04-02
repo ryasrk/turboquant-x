@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from src.server.app import get_engine, get_turbo_engine, get_inference_mode, get_uptime, InferenceMode
+from src.server.app import get_engine, get_turbo_engine, get_inference_mode, get_uptime, is_loading, InferenceMode
 from src.server.schemas import (
     ChatRequest,
     ChatResponse,
@@ -27,8 +28,93 @@ from src.server.schemas import (
 from src.utils.memory import get_gpu_memory
 
 logger = logging.getLogger(__name__)
+_thought_logger = logging.getLogger("agent.thoughts")
 
 router = APIRouter()
+
+
+class _ThinkStreamFilter:
+    """Token-level filter that intercepts ``<think>…</think>`` blocks.
+
+    * Tokens inside a think block are buffered and written to the
+      thought log file — they are **not** yielded to the client.
+    * Tokens outside think blocks pass through unchanged.
+    * Handles partial tag boundaries across token splits by keeping a
+      small look-behind buffer.
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._inside = False
+        self._buf = ""          # partial-tag look-behind
+        self._thought_buf = ""  # accumulated thought text
+
+    def feed(self, token: str) -> str | None:
+        """Process one token. Return text to send, or *None* to suppress."""
+        self._buf += token
+
+        if not self._inside:
+            idx = self._buf.find(self._OPEN)
+            if idx != -1:
+                # Emit everything before the tag, enter think mode
+                before = self._buf[:idx]
+                self._buf = self._buf[idx + len(self._OPEN):]
+                self._inside = True
+                # Continue processing the buffer for </think> in same call
+                after = self._process_inside()
+                parts = [p for p in (before, after) if p]
+                return "".join(parts) or None
+            # Guard against partial "<thi" at end of buffer
+            if len(self._buf) > len(self._OPEN):
+                emit = self._buf[:-len(self._OPEN)]
+                self._buf = self._buf[-len(self._OPEN):]
+                return emit
+            return None
+        else:
+            return self._process_inside()
+
+    def _process_inside(self) -> str | None:
+        """Consume buffer while inside a ``<think>`` block."""
+        idx = self._buf.find(self._CLOSE)
+        if idx != -1:
+            # Capture thought, exit think mode
+            self._thought_buf += self._buf[:idx]
+            self._buf = self._buf[idx + len(self._CLOSE):]
+            self._inside = False
+            # Log the thought
+            thought = self._thought_buf.strip()
+            if thought:
+                _thought_logger.debug("[stream] %s", thought)
+            self._thought_buf = ""
+            # Process anything remaining after </think>
+            if self._buf:
+                leftover = self._buf
+                self._buf = ""
+                return self.feed(leftover)
+            return None
+        # Check for partial </think> at end of buffer — keep it there
+        # so the next feed() can complete the match.
+        for i in range(1, len(self._CLOSE)):
+            if self._buf.endswith(self._CLOSE[:i]):
+                safe = self._buf[:-i]
+                self._thought_buf += safe
+                self._buf = self._buf[-i:]
+                return None
+        # No partial match — accumulate everything as thought
+        self._thought_buf += self._buf
+        self._buf = ""
+        return None
+
+    def flush(self) -> str | None:
+        """Flush any remaining buffer at end of stream."""
+        if self._inside and self._thought_buf.strip():
+            _thought_logger.debug("[stream-incomplete] %s", self._thought_buf.strip())
+        remaining = self._buf
+        self._buf = ""
+        self._thought_buf = ""
+        return remaining or None
 
 
 @router.post(
@@ -53,7 +139,43 @@ async def chat_completions(request: ChatRequest):
         )
 
     # Convert Pydantic messages to dicts for engine
-    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+    messages = []
+    for m in request.messages:
+        # Flatten multimodal content arrays to plain text for text-only models
+        if isinstance(m.content, list):
+            text_parts = [p.get("text", "") for p in m.content if isinstance(p, dict) and p.get("type") == "text"]
+            content = " ".join(text_parts) if text_parts else ""
+        else:
+            content = m.content
+        msg = {"role": m.role, "content": content}
+        if m.tool_call_id:
+            msg["tool_call_id"] = m.tool_call_id
+        if m.name:
+            msg["name"] = m.name
+        messages.append(msg)
+
+    # Estimate prompt tokens and check context budget
+    n_ctx = engine.model_config.n_ctx
+    estimated_tokens = sum(len(m["content"]) // 3 + 4 for m in messages)  # ~3 chars/token + overhead
+    headroom = request.max_tokens + 64  # reserve for generation + template overhead
+    if estimated_tokens + headroom > n_ctx:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": "context_exceeded",
+                "message": (
+                    f"Conversation too long: ~{estimated_tokens:,} prompt tokens + "
+                    f"{request.max_tokens:,} max_tokens exceeds context window of {n_ctx:,}."
+                ),
+                "context_max": n_ctx,
+                "estimated_tokens": estimated_tokens,
+                "suggestion": "Clear the conversation or reduce max_tokens.",
+            },
+        )
+
+    # Agent mode: route through tool-calling loop
+    if request.tools:
+        return _agent_response(messages, request)
 
     if request.stream:
         return _stream_response(messages, request)
@@ -105,6 +227,7 @@ def _stream_response(
         engine = get_engine()
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         model_name = engine.model_config.model_name
+        finish_reason = "stop"
 
         # First chunk: role
         first_chunk = StreamChunk(
@@ -119,7 +242,9 @@ def _stream_response(
         )
         yield {"data": first_chunk.model_dump_json()}
 
-        # Content chunks
+        # Content chunks — capture finish_reason from generator return
+        # The ThinkStreamFilter diverts <think>…</think> tokens to the
+        # thought log so the client only receives the answer portion.
         stream = engine.chat_stream(
             messages=messages,
             max_tokens=request.max_tokens,
@@ -127,15 +252,39 @@ def _stream_response(
             top_p=request.top_p,
             thinking=request.effective_thinking,
         )
+        think_filter = _ThinkStreamFilter()
 
-        for token in stream:
+        try:
+            while True:
+                token = next(stream)
+                emit = think_filter.feed(token)
+                if not emit:
+                    continue
+                chunk = StreamChunk(
+                    id=completion_id,
+                    model=model_name,
+                    choices=[
+                        StreamChoice(
+                            index=0,
+                            delta=StreamDelta(content=emit),
+                        )
+                    ],
+                )
+                yield {"data": chunk.model_dump_json()}
+        except StopIteration as e:
+            if e.value and hasattr(e.value, "finish_reason"):
+                finish_reason = e.value.finish_reason
+
+        # Flush any trailing buffer from the filter
+        trailing = think_filter.flush()
+        if trailing:
             chunk = StreamChunk(
                 id=completion_id,
                 model=model_name,
                 choices=[
                     StreamChoice(
                         index=0,
-                        delta=StreamDelta(content=token),
+                        delta=StreamDelta(content=trailing),
                     )
                 ],
             )
@@ -149,11 +298,41 @@ def _stream_response(
                 StreamChoice(
                     index=0,
                     delta=StreamDelta(),
-                    finish_reason="stop",
+                    finish_reason=finish_reason,
                 )
             ],
         )
         yield {"data": final_chunk.model_dump_json()}
+        yield {"data": "[DONE]"}
+
+    return EventSourceResponse(event_generator())
+
+
+def _agent_response(messages: list[dict], request: ChatRequest) -> EventSourceResponse:
+    """Handle agent mode with tool calling via SSE."""
+    async def event_generator():
+        from src.agent.loop import AgentLoop
+        from src.server.app import get_agent_registry
+
+        registry = get_agent_registry()
+        if registry is None:
+            yield {"data": json.dumps({"type": "error", "message": "Agent tools not initialized"})}
+            yield {"data": "[DONE]"}
+            return
+
+        loop = AgentLoop(registry)
+        engine = get_engine()
+
+        async for event in loop.run(
+            engine,
+            messages,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            thinking=request.effective_thinking,
+        ):
+            yield {"data": json.dumps(event)}
+
         yield {"data": "[DONE]"}
 
     return EventSourceResponse(event_generator())
@@ -202,11 +381,24 @@ async def health_check():
     except Exception:
         pass
 
+    model_name = stats.get("model_name", "") if stats else ""
+    _thinking_prefixes = ("qwen3", "qwq", "deepseek-r1")
+    supports_thinking = any(model_name.lower().startswith(p) for p in _thinking_prefixes)
+
+    _tools_prefixes = ("qwen2.5", "qwen3", "qwq", "functionary", "hermes")
+    supports_tools = any(model_name.lower().startswith(p) for p in _tools_prefixes)
+
     return HealthResponse(
         status=status,
         model_loaded=model_loaded,
-        model_name=stats.get("model_name", ""),
+        model_name=model_name,
         inference_mode=get_inference_mode().value,
+        loading=is_loading(),
+        supports_thinking=supports_thinking,
+        supports_tools=supports_tools,
+        supports_vision=False,  # GGUF models don't include vision encoder
+        context_max=stats.get("context_max", 0) if stats else 0,
+        context_used=stats.get("context_used", 0) if stats else 0,
         gpu_memory=gpu_info,
         kv_cache_config={
             "cache_type_k": stats.get("kv_cache_k", "unknown"),
@@ -231,3 +423,84 @@ async def list_models():
         models = []
 
     return ModelListResponse(data=models)
+
+
+@router.post("/v1/switch-mode")
+async def switch_mode(request: Request):
+    """Switch inference mode at runtime (unloads + reloads engine)."""
+    import asyncio
+
+    from src.server.app import switch_inference_mode, InferenceMode as _IM
+
+    body = await request.json()
+    mode_str = body.get("mode", "").strip()
+
+    try:
+        new_mode = _IM(mode_str)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid mode: {mode_str}. Valid: {[m.value for m in _IM]}",
+        )
+
+    try:
+        await asyncio.to_thread(switch_inference_mode, request.app, new_mode)
+    except Exception as e:
+        logger.exception("Mode switch failed")
+        raise HTTPException(status_code=500, detail=f"Mode switch failed: {e}")
+
+    return {"status": "ok", "mode": new_mode.value}
+
+
+@router.get("/v1/available-models")
+async def available_models():
+    """List GGUF model files in the models/ directory."""
+    from pathlib import Path
+
+    models_dir = Path("models")
+    files = []
+    if models_dir.is_dir():
+        for f in sorted(models_dir.glob("*.gguf")):
+            size_gb = f.stat().st_size / (1024**3)
+            files.append({
+                "filename": f.name,
+                "path": str(f),
+                "size_gb": round(size_gb, 2),
+            })
+
+    # Mark which one is currently loaded
+    current_path = ""
+    try:
+        engine = get_engine()
+        current_path = engine.model_config.model_path
+    except RuntimeError:
+        pass
+
+    for m in files:
+        m["loaded"] = (m["path"] == current_path or m["filename"] in current_path)
+
+    return {"models": files, "loading": is_loading()}
+
+
+@router.post("/v1/switch-model")
+async def switch_model_endpoint(request: Request):
+    """Switch to a different GGUF model file (unloads + reloads)."""
+    import asyncio
+    from src.server.app import switch_model
+
+    body = await request.json()
+    model_path = body.get("model", "").strip()
+    if not model_path:
+        raise HTTPException(status_code=422, detail="'model' field is required")
+
+    try:
+        result = await asyncio.to_thread(switch_model, request.app, model_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.exception("Model switch failed")
+        raise HTTPException(status_code=500, detail=f"Model switch failed: {e}")
+
+    return result

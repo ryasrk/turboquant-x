@@ -326,6 +326,8 @@ class TestGetStats:
             "kv_cache_k",
             "kv_cache_v",
             "flash_attention",
+            "context_max",
+            "context_used",
         }
         assert set(stats.keys()) == expected_keys
 

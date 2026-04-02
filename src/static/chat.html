@@ -4,583 +4,70 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TurboQuant-X ∞ Neural Interface</title>
-  <style>
-    /* ── Sci-Fi / Space HUD theme ────────────────────────────── */
-    :root {
-      --bg:        #020b18;
-      --bg2:       #050e1f;
-      --bg3:       #081628;
-      --surface:   #0b1c30;
-      --border:    #0d3a5a;
-      --holo:      #00b4ff;       /* holographic blue */
-      --holo2:     #7df9ff;       /* ice teal         */
-      --alert:     #ff6d00;       /* alert orange     */
-      --safe:      #39ff14;       /* systems-green    */
-      --text:      #cde8ff;
-      --text-dim:  #3a6080;
-      --user-bg:   #050f1f;
-      --asst-bg:   #040d1a;
-      --code-bg:   #030a14;
-      --radius:    4px;
-      --font-mono: 'Courier New', Courier, monospace;
-    }
-
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background:
-        radial-gradient(ellipse at 20% 50%, rgba(0,80,160,0.12) 0%, transparent 60%),
-        radial-gradient(ellipse at 80% 20%, rgba(0,180,255,0.08) 0%, transparent 50%),
-        var(--bg);
-      color: var(--text);
-      font-family: var(--font-mono);
-      font-size: 13px;
-      height: 100dvh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    /* ── Star-field + grid overlay ─────────────────────────────── */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background-image:
-        radial-gradient(1px 1px at 15%  8%, rgba(125,249,255,0.6) 0%, transparent 0%),
-        radial-gradient(1px 1px at 72% 18%, rgba(125,249,255,0.4) 0%, transparent 0%),
-        radial-gradient(1px 1px at 40% 55%, rgba(125,249,255,0.5) 0%, transparent 0%),
-        radial-gradient(1px 1px at 88% 72%, rgba(125,249,255,0.3) 0%, transparent 0%),
-        radial-gradient(1px 1px at 5%  90%, rgba(125,249,255,0.4) 0%, transparent 0%),
-        radial-gradient(1px 1px at 60% 85%, rgba(125,249,255,0.5) 0%, transparent 0%),
-        radial-gradient(1px 1px at 33% 30%, rgba(125,249,255,0.3) 0%, transparent 0%),
-        radial-gradient(1px 1px at 95% 40%, rgba(125,249,255,0.6) 0%, transparent 0%);
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    body::after {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(0,180,255,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,180,255,0.03) 1px, transparent 1px);
-      background-size: 40px 40px;
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    header, #chat, #input-bar, #status-bar, #settings-overlay { position: relative; z-index: 1; }
-
-    /* ── Scrollbar ─────────────────────────────────────────────── */
-    ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--holo); border-radius: 2px; }
-
-    /* ── Header ────────────────────────────────────────────────── */
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 18px;
-      background: linear-gradient(180deg, rgba(5,14,31,0.95) 0%, rgba(2,11,24,0.95) 100%);
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-
-    /* ── HUD corner accent ─────────────────────────────────────── */
-    header::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0;
-      width: 80px; height: 3px;
-      background: linear-gradient(90deg, var(--holo), transparent);
-    }
-    header::after {
-      content: '';
-      position: absolute;
-      top: 0; right: 0;
-      width: 80px; height: 3px;
-      background: linear-gradient(270deg, var(--alert), transparent);
-      z-index: 2;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .logo-mark {
-      width: 30px; height: 30px;
-      border: 1px solid var(--holo);
-      clip-path: polygon(8px 0%, 100% 0%, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0% 100%, 0% 8px);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 10px;
-      color: var(--holo);
-      letter-spacing: -1px;
-      box-shadow: 0 0 14px rgba(0,180,255,0.4), inset 0 0 8px rgba(0,180,255,0.1);
-      background: rgba(0,180,255,0.05);
-    }
-
-    .logo-text {
-      font-size: 15px;
-      font-weight: bold;
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      color: var(--holo2);
-      text-shadow: 0 0 16px var(--holo), 0 0 30px rgba(0,180,255,0.4);
-    }
-
-    .logo-sub {
-      font-size: 9px;
-      color: var(--text-dim);
-      letter-spacing: 3px;
-      text-transform: uppercase;
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    /* ── Thinking toggle ───────────────────────────────────────── */
-    #thinking-btn {
-      background: rgba(57,255,20,0.08);
-      border: 1px solid rgba(57,255,20,0.5);
-      color: var(--safe);
-      cursor: pointer;
-      padding: 5px 12px;
-      font-size: 10px;
-      font-family: var(--font-mono);
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      transition: box-shadow 0.15s, opacity 0.15s;
-      clip-path: polygon(4px 0%,100% 0%,100% calc(100% - 4px),calc(100% - 4px) 100%,0% 100%,0% 4px);
-    }
-    #thinking-btn:hover { box-shadow: 0 0 10px rgba(57,255,20,0.4); }
-    #thinking-btn.off {
-      background: rgba(255,109,0,0.06);
-      border-color: rgba(255,109,0,0.4);
-      color: var(--alert);
-    }
-    #thinking-btn.off:hover { box-shadow: 0 0 10px rgba(255,109,0,0.4); }
-
-    #model-badge {
-      font-size: 10px;
-      color: var(--holo2);
-      border: 1px solid rgba(125,249,255,0.4);
-      padding: 2px 8px;
-      border-radius: 2px;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      clip-path: polygon(4px 0%,100% 0%,100% calc(100% - 4px),calc(100% - 4px) 100%,0% 100%,0% 4px);
-    }
-
-    #mode-badge {
-      font-size: 10px;
-      color: var(--alert);
-      border: 1px solid rgba(255,109,0,0.4);
-      padding: 2px 8px;
-      border-radius: 2px;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      clip-path: polygon(4px 0%,100% 0%,100% calc(100% - 4px),calc(100% - 4px) 100%,0% 100%,0% 4px);
-    }
-
-    .icon-btn {
-      background: rgba(0,180,255,0.05);
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      cursor: pointer;
-      padding: 5px 12px;
-      border-radius: 2px;
-      font-size: 11px;
-      font-family: var(--font-mono);
-      letter-spacing: 1px;
-      transition: color 0.15s, border-color 0.15s, box-shadow 0.15s;
-      clip-path: polygon(4px 0%,100% 0%,100% calc(100% - 4px),calc(100% - 4px) 100%,0% 100%,0% 4px);
-    }
-    .icon-btn:hover {
-      color: var(--holo2);
-      border-color: var(--holo);
-      box-shadow: 0 0 12px rgba(0,180,255,0.3);
-    }
-
-    /* ── Chat area ─────────────────────────────────────────────── */
-    #chat {
-      flex: 1;
-      overflow-y: auto;
-      padding: 18px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .message {
-      display: flex;
-      flex-direction: column;
-      max-width: 80%;
-      animation: fadeSlide 0.2s ease-out;
-    }
-
-    @keyframes fadeSlide {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    .message.user      { align-self: flex-end; }
-    .message.assistant { align-self: flex-start; }
-
-    .msg-role {
-      font-size: 9px;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-      padding: 0 4px;
-    }
-    .message.user .msg-role       { color: var(--alert); text-align: right; }
-    .message.assistant .msg-role  { color: var(--holo); }
-
-    .msg-bubble {
-      padding: 10px 14px;
-      line-height: 1.65;
-      white-space: pre-wrap;
-      word-break: break-word;
-      border: 1px solid transparent;
-      position: relative;
-    }
-
-    /* ── HUD corner cut for bubbles ──────────────────────────── */
-    .message.user .msg-bubble {
-      background: var(--user-bg);
-      border-color: rgba(255,109,0,0.4);
-      box-shadow: 0 0 14px rgba(255,109,0,0.1), inset 0 0 20px rgba(255,109,0,0.03);
-      color: #ffd0aa;
-      clip-path: polygon(8px 0%,100% 0%,100% calc(100% - 8px),calc(100% - 8px) 100%,0% 100%,0% 8px);
-    }
-
-    .message.assistant .msg-bubble {
-      background: var(--asst-bg);
-      border-color: rgba(0,180,255,0.35);
-      box-shadow: 0 0 16px rgba(0,180,255,0.08), inset 0 0 20px rgba(0,180,255,0.03);
-      color: var(--text);
-      clip-path: polygon(0% 0%, calc(100% - 8px) 0%, 100% 8px, 100% 100%, 8px 100%, 0% calc(100% - 8px));
-    }
-
-    .msg-bubble code {
-      background: var(--code-bg);
-      color: var(--holo2);
-      padding: 1px 5px;
-      border-radius: 2px;
-      font-family: var(--font-mono);
-    }
-
-    /* ── Think block ────────────────────────────────────────────── */
-    .think-block {
-      margin-bottom: 8px;
-      border: 1px solid rgba(125,249,255,0.2);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    .think-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      background: rgba(0,180,255,0.06);
-      cursor: pointer;
-      user-select: none;
-      font-size: 10px;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: var(--holo2);
-    }
-    .think-header:hover { background: rgba(0,180,255,0.1); }
-    .think-chevron { transition: transform 0.2s; font-style: normal; }
-    .think-block.collapsed .think-chevron { transform: rotate(-90deg); }
-    .think-body {
-      padding: 8px 10px;
-      font-size: 11px;
-      color: var(--text-dim);
-      white-space: pre-wrap;
-      background: rgba(0,0,0,0.2);
-      border-top: 1px solid rgba(125,249,255,0.1);
-      line-height: 1.55;
-    }
-    .think-block.collapsed .think-body { display: none; }
-    .msg-answer { white-space: pre-wrap; word-break: break-word; }
-
-    /* ── Typing cursor ─────────────────────────────────────────── */    .cursor {
-      display: inline-block;
-      width: 7px; height: 13px;
-      background: var(--holo);
-      margin-left: 2px;
-      vertical-align: middle;
-      animation: blink 0.8s steps(1) infinite;
-      box-shadow: 0 0 8px var(--holo);
-    }
-    @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
-
-    /* ── Input bar ─────────────────────────────────────────────── */
-    #input-bar {
-      display: flex;
-      align-items: flex-end;
-      gap: 8px;
-      padding: 10px 14px 14px;
-      background: linear-gradient(0deg, rgba(5,14,31,0.98) 0%, rgba(2,11,24,0.95) 100%);
-      border-top: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-
-    #user-input {
-      flex: 1;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: var(--font-mono);
-      font-size: 13px;
-      padding: 9px 12px;
-      border-radius: 2px;
-      resize: none;
-      min-height: 42px;
-      max-height: 140px;
-      outline: none;
-      line-height: 1.5;
-      transition: border-color 0.15s, box-shadow 0.15s;
-      clip-path: polygon(6px 0%,100% 0%,100% calc(100% - 6px),calc(100% - 6px) 100%,0% 100%,0% 6px);
-    }
-    #user-input:focus {
-      border-color: var(--holo);
-      box-shadow: 0 0 14px rgba(0,180,255,0.2);
-    }
-    #user-input::placeholder { color: var(--text-dim); }
-
-    #send-btn {
-      background: linear-gradient(135deg, var(--holo), #0070cc);
-      color: var(--bg);
-      border: none;
-      padding: 9px 18px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: bold;
-      letter-spacing: 2px;
-      cursor: pointer;
-      text-transform: uppercase;
-      box-shadow: 0 0 18px rgba(0,180,255,0.4);
-      transition: box-shadow 0.15s, opacity 0.15s;
-      height: 42px;
-      flex-shrink: 0;
-      clip-path: polygon(6px 0%,100% 0%,100% calc(100% - 6px),calc(100% - 6px) 100%,0% 100%,0% 6px);
-    }
-    #send-btn:hover  { box-shadow: 0 0 28px rgba(0,180,255,0.7); }
-    #send-btn:active { opacity: 0.85; }
-    #send-btn:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
-
-    #clear-btn {
-      background: rgba(255,109,0,0.08);
-      border: 1px solid rgba(255,109,0,0.4);
-      color: var(--alert);
-      padding: 9px 12px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      cursor: pointer;
-      height: 42px;
-      flex-shrink: 0;
-      letter-spacing: 1px;
-      transition: box-shadow 0.15s;
-      clip-path: polygon(6px 0%,100% 0%,100% calc(100% - 6px),calc(100% - 6px) 100%,0% 100%,0% 6px);
-    }
-    #clear-btn:hover { box-shadow: 0 0 12px rgba(255,109,0,0.4); }
-
-    /* ── Settings panel ────────────────────────────────────────── */
-    #settings-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,5,15,0.8);
-      backdrop-filter: blur(4px);
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-    }
-    #settings-overlay.open { display: flex; }
-
-    #settings-panel {
-      background: var(--bg3);
-      border: 1px solid var(--holo);
-      box-shadow: 0 0 50px rgba(0,180,255,0.25), inset 0 0 40px rgba(0,180,255,0.04);
-      padding: 24px 28px;
-      width: min(520px, 94vw);
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      clip-path: polygon(12px 0%,100% 0%,100% calc(100% - 12px),calc(100% - 12px) 100%,0% 100%,0% 12px);
-    }
-
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .panel-title {
-      font-size: 12px;
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      color: var(--holo);
-      text-shadow: 0 0 12px var(--holo);
-    }
-    .close-btn {
-      background: none;
-      border: none;
-      color: var(--text-dim);
-      cursor: pointer;
-      font-size: 16px;
-      line-height: 1;
-      transition: color 0.15s;
-    }
-    .close-btn:hover { color: var(--alert); }
-
-    .field-label {
-      font-size: 9px;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      margin-bottom: 6px;
-    }
-
-    #system-prompt-input {
-      width: 100%;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      padding: 10px 12px;
-      resize: vertical;
-      min-height: 100px;
-      outline: none;
-      transition: border-color 0.15s;
-      clip-path: polygon(6px 0%,100% 0%,100% calc(100% - 6px),calc(100% - 6px) 100%,0% 100%,0% 6px);
-    }
-    #system-prompt-input:focus { border-color: var(--holo); }
-
-    .settings-row {
-      display: flex;
-      gap: 12px;
-    }
-
-    .settings-field {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .number-input {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      padding: 8px 10px;
-      outline: none;
-      transition: border-color 0.15s;
-      clip-path: polygon(5px 0%,100% 0%,100% calc(100% - 5px),calc(100% - 5px) 100%,0% 100%,0% 5px);
-    }
-    .number-input:focus { border-color: var(--holo); }
-
-    .save-btn {
-      background: linear-gradient(135deg, var(--holo), #005a99);
-      color: var(--bg2);
-      border: none;
-      padding: 10px 24px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: bold;
-      letter-spacing: 3px;
-      cursor: pointer;
-      text-transform: uppercase;
-      align-self: flex-end;
-      box-shadow: 0 0 18px rgba(0,180,255,0.5);
-      transition: box-shadow 0.15s;
-      clip-path: polygon(6px 0%,100% 0%,100% calc(100% - 6px),calc(100% - 6px) 100%,0% 100%,0% 6px);
-    }
-    .save-btn:hover { box-shadow: 0 0 30px rgba(0,180,255,0.8); }
-
-    /* ── Status bar ────────────────────────────────────────────── */
-    #status-bar {
-      font-size: 10px;
-      color: var(--text-dim);
-      letter-spacing: 2px;
-      padding: 3px 14px 5px;
-      background: var(--bg2);
-      border-top: 1px solid var(--border);
-      display: flex;
-      gap: 16px;
-    }
-    #status-bar span { opacity: 0.6; }
-    #token-count { color: var(--safe); opacity: 1 !important; }
-
-    /* ── Welcome ───────────────────────────────────────────────── */
-    #welcome {
-      align-self: center;
-      text-align: center;
-      color: var(--text-dim);
-      margin-top: auto;
-      margin-bottom: auto;
-      padding: 20px;
-    }
-    #welcome .big { font-size: 36px; margin-bottom: 8px; }
-    #welcome p {
-      font-size: 11px;
-      letter-spacing: 2px;
-      line-height: 2;
-      color: var(--text-dim);
-      text-transform: uppercase;
-    }
-    #welcome .big-text {
-      font-size: 13px;
-      color: var(--holo);
-      text-shadow: 0 0 14px var(--holo);
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      margin-bottom: 10px;
-    }
-
-    /* ── Error toast ───────────────────────────────────────────── */
-    #toast {
-      position: fixed;
-      bottom: 80px; right: 18px;
-      background: var(--alert);
-      color: #fff;
-      padding: 8px 16px;
-      font-size: 12px;
-      opacity: 0;
-      transition: opacity 0.3s;
-      pointer-events: none;
-      z-index: 200;
-      max-width: 300px;
-      clip-path: polygon(6px 0%,100% 0%,100% calc(100% - 6px),calc(100% - 6px) 100%,0% 100%,0% 6px);
-    }
-    #toast.show { opacity: 1; }
-  </style>
+  <link rel="stylesheet" href="/static/css/theme.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
+
+<!-- ── Login Modal ───────────────────────────────────────────────────── -->
+<div id="auth-overlay">
+  <div id="auth-panel">
+    <div class="panel-header">
+      <span class="panel-title">◈ Neural Auth</span>
+    </div>
+    <div id="auth-tabs">
+      <button class="auth-tab active" data-tab="login">Login</button>
+      <button class="auth-tab" data-tab="register">Register</button>
+    </div>
+    <form id="auth-form" autocomplete="off">
+      <input type="text" id="auth-username" placeholder="Username" autocomplete="username" required />
+      <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
+      <div id="auth-error" class="auth-error"></div>
+      <button type="submit" id="auth-submit" class="save-btn">Login</button>
+    </form>
+    <div id="auth-skip">
+      <button id="auth-skip-btn" class="text-btn">Continue as guest</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Session Sidebar ──────────────────────────────────────────────── -->
+<div id="session-sidebar">
+  <div class="sidebar-header">
+    <span>◈ Sessions</span>
+    <button id="new-chat-btn" title="New Chat">+ New</button>
+  </div>
+  <div id="session-list"></div>
+  <div class="sidebar-footer">
+    <span id="auth-user-display"></span>
+    <button id="logout-btn" class="text-btn">Logout</button>
+  </div>
+</div>
 
 <!-- ── Header ──────────────────────────────────────────────────────── -->
 <header>
   <div class="logo">
+    <button id="sidebar-toggle" class="icon-btn" title="Toggle sessions">☰</button>
     <div class="logo-mark">⬡</div>
     <div>
       <div class="logo-text">TurboQuant-X</div>
-      <div class="logo-sub">neural interface v0.1</div>
+      <div class="logo-sub">neural interface v0.2</div>
     </div>
   </div>
   <div class="header-right">
-    <span id="model-badge">loading…</span>
-    <span id="mode-badge">—</span>    <button id="thinking-btn" title="Toggle chain-of-thought thinking">◈ Thinking ON</button>    <button class="icon-btn" id="settings-btn">[ settings ]</button>
+    <select id="header-model-select" class="header-select model-select" title="Switch model">
+      <option>loading…</option>
+    </select>
+    <select id="header-mode-select" class="header-select mode-select" title="Switch mode">
+      <option value="standard">Standard</option>
+      <option value="turboquant">TurboQuant</option>
+      <option value="zero-quant">Zero-Quant</option>
+      <option value="ultra-quant">Ultra-Quant</option>
+    </select>
+    <button class="icon-btn" id="settings-btn">[ settings ]</button>
   </div>
 </header>
 
@@ -593,23 +80,61 @@
   </div>
 </div>
 
-<!-- ── Input bar ────────────────────────────────────────────────────── -->
-<div id="input-bar">
-  <textarea
-    id="user-input"
-    placeholder="Transmit query… (Shift+Enter for newline)"
-    rows="1"
-    autocomplete="off"
-  ></textarea>
-  <button id="clear-btn" title="Clear session">CLR</button>
-  <button id="send-btn">Transmit ▶</button>
+<!-- ── Image preview bar ────────────────────────────────────────────── -->
+<!-- (moved inside input-box below) -->
+
+<!-- ── Input area ───────────────────────────────────────────────────── -->
+<div id="context-warning">
+  <span id="context-warning-text">Context window exceeded</span>
+  <span class="ctx-dismiss" id="ctx-dismiss">✕</span>
+</div>
+<div id="input-container">
+  <div id="scroll-bottom-wrap">
+    <button id="scroll-bottom-btn" title="Scroll to bottom">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z" clip-rule="evenodd"></path></svg>
+    </button>
+  </div>
+  <div id="input-bar">
+    <div id="input-box">
+      <div id="image-preview-bar"></div>
+      <input type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+      <textarea
+        id="user-input"
+        placeholder="Send a message…"
+        rows="2"
+        autocomplete="off"
+      ></textarea>
+      <div id="input-toolbar">
+        <div id="input-tools-left">
+          <button id="upload-btn" title="Attach file" type="button">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 1v10M1 6h10"/></svg>
+          </button>
+          <button id="agent-btn" title="Agent Mode" type="button">🤖 Agent</button>
+          <button id="thinking-btn" title="Toggle chain-of-thought thinking" type="button">◈ Think</button>
+        </div>
+        <div id="input-tools-right">
+          <button id="clear-btn" title="Clear session" type="button">CLR</button>
+          <button id="send-btn" title="Send message" type="submit">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.3V2.7M8 2.7L4 6.7M8 2.7l4 4"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Status bar ───────────────────────────────────────────────────── -->
 <div id="status-bar">
-    <span>◈ SYS:ONLINE</span>
-    <span>PORT:8000</span>
-    <span id="token-count">tokens: —</span>
+  <span>◈ SYS:ONLINE</span>
+  <span>PORT:8000</span>
+  <span id="token-count">tokens: —</span>
+  <span id="context-meter" class="context-meter" title="Context window usage">
+    <span class="context-label">ctx:</span>
+    <span class="context-bar-wrap">
+      <span class="context-bar-fill" id="context-bar-fill"></span>
+    </span>
+    <span class="context-text" id="context-text">—</span>
+  </span>
   <span id="uptime-disp">uptime: —</span>
 </div>
 
@@ -632,7 +157,7 @@
     <div class="settings-row">
       <div class="settings-field">
         <div class="field-label">Max Tokens</div>
-        <input type="number" class="number-input" id="max-tokens-input" value="512" min="1" max="4096" />
+        <input type="number" class="number-input" id="max-tokens-input" value="2048" min="1" max="16384" />
       </div>
       <div class="settings-field">
         <div class="field-label">Temperature</div>
@@ -644,316 +169,55 @@
       </div>
     </div>
 
+    <div class="settings-row">
+      <div class="settings-field">
+        <div class="field-label">Inference Mode</div>
+        <select class="select-input" id="mode-select">
+          <option value="standard">Standard</option>
+          <option value="turboquant">TurboQuant</option>
+          <option value="zero-quant">Zero-Quant</option>
+          <option value="ultra-quant">Ultra-Quant</option>
+        </select>
+      </div>
+      <div class="settings-field">
+        <div class="field-label">Debug Mode</div>
+        <div class="toggle-wrapper">
+          <button class="toggle-btn" id="debug-toggle" type="button">OFF</button>
+          <span id="mode-loading">◈ switching…</span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="field-label">Available Models</div>
+      <div id="model-list">
+        <div class="model-item"><span class="model-name" style="color:var(--text-dim)">scanning models…</span></div>
+      </div>
+    </div>
+
     <button class="save-btn" id="save-settings-btn">[ Save ]</button>
   </div>
 </div>
 
-<!-- ── Error toast ───────────────────────────────────────────────────── -->
-<div id="toast"></div>
+<!-- ── Notification card ──────────────────────────────────────────────── -->
+<div id="notif-card" class="notif-card">
+  <div class="notif-icon">◈</div>
+  <div class="notif-text"></div>
+  <button class="notif-close" title="Dismiss">×</button>
+</div>
 
-<script>
-// ── State ──────────────────────────────────────────────────────────────
-const state = {
-  history: [],      // {role, content}[]
-  settings: loadSettings(),
-  streaming: false,
-  totalTokens: 0,
-  thinking: true,   // Qwen3 thinking mode
-};
+<!-- ── Confirm modal ─────────────────────────────────────────────────── -->
+<div id="confirm-overlay" class="confirm-overlay hidden">
+  <div class="confirm-card">
+    <div class="confirm-title">◈ Confirm</div>
+    <div class="confirm-message" id="confirm-message"></div>
+    <div class="confirm-actions">
+      <button class="confirm-btn cancel" id="confirm-cancel">Cancel</button>
+      <button class="confirm-btn danger" id="confirm-ok">Delete</button>
+    </div>
+  </div>
+</div>
 
-function loadSettings() {
-  try {
-    const saved = localStorage.getItem('tq-settings');
-    if (saved) return JSON.parse(saved);
-  } catch (_) {}
-  return {
-    systemPrompt: '',
-    maxTokens: 512,
-    temperature: 0.7,
-    topP: 0.95,
-  };
-}
-
-function saveSettings() {
-  localStorage.setItem('tq-settings', JSON.stringify(state.settings));
-}
-
-// ── DOM refs ───────────────────────────────────────────────────────────
-const chatEl        = document.getElementById('chat');
-const welcomeEl     = document.getElementById('welcome');
-const inputEl       = document.getElementById('user-input');
-const sendBtn       = document.getElementById('send-btn');
-const clearBtn      = document.getElementById('clear-btn');
-const settingsBtn   = document.getElementById('settings-btn');
-const settingsOverlay = document.getElementById('settings-overlay');
-const settingsClose = document.getElementById('settings-close');
-const saveSettingsBtn = document.getElementById('save-settings-btn');
-const systemPromptEl  = document.getElementById('system-prompt-input');
-const maxTokensEl     = document.getElementById('max-tokens-input');
-const temperatureEl   = document.getElementById('temperature-input');
-const topPEl          = document.getElementById('top-p-input');
-const modelBadge    = document.getElementById('model-badge');
-const modeBadge     = document.getElementById('mode-badge');
-const thinkingBtn   = document.getElementById('thinking-btn');
-const tokenCount    = document.getElementById('token-count');
-const uptimeDisp    = document.getElementById('uptime-disp');
-const toast         = document.getElementById('toast');
-
-// Apply saved settings to UI
-systemPromptEl.value = state.settings.systemPrompt;
-maxTokensEl.value    = state.settings.maxTokens;
-temperatureEl.value  = state.settings.temperature;
-topPEl.value         = state.settings.topP;
-
-// ── Health poll ────────────────────────────────────────────────────────
-async function pollHealth() {
-  try {
-    const r = await fetch('/health');
-    if (!r.ok) return;
-    const d = await r.json();
-    modelBadge.textContent = d.model_name || 'unknown';
-    modeBadge.textContent  = d.inference_mode || 'standard';
-    if (d.uptime_s != null) {
-      uptimeDisp.textContent = `uptime: ${Math.floor(d.uptime_s)}s`;
-    }
-  } catch (_) {
-    modelBadge.textContent = 'offline';
-  }
-}
-pollHealth();
-setInterval(pollHealth, 15000);
-
-// ── Show toast ─────────────────────────────────────────────────────────
-let toastTimer;
-function showToast(msg) {
-  toast.textContent = msg;
-  toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 3500);
-}
-
-// ── Auto-resize textarea ───────────────────────────────────────────────
-inputEl.addEventListener('input', () => {
-  inputEl.style.height = 'auto';
-  inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
-});
-
-// ── Send on Enter (Shift+Enter = newline) ──────────────────────────────
-inputEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    if (!state.streaming) sendMessage();
-  }
-});
-
-sendBtn.addEventListener('click', () => { if (!state.streaming) sendMessage(); });
-
-clearBtn.addEventListener('click', clearSession);
-
-// ── Thinking toggle ────────────────────────────────────────────────────
-thinkingBtn.addEventListener('click', () => {
-  state.thinking = !state.thinking;
-  if (state.thinking) {
-    thinkingBtn.textContent = '◈ Thinking ON';
-    thinkingBtn.classList.remove('off');
-  } else {
-    thinkingBtn.textContent = '◈ Thinking OFF';
-    thinkingBtn.classList.add('off');
-  }
-});
-
-// ── Settings toggle ────────────────────────────────────────────────────
-settingsBtn.addEventListener('click', () => settingsOverlay.classList.add('open'));
-settingsClose.addEventListener('click', () => settingsOverlay.classList.remove('open'));
-settingsOverlay.addEventListener('click', (e) => {
-  if (e.target === settingsOverlay) settingsOverlay.classList.remove('open');
-});
-
-saveSettingsBtn.addEventListener('click', () => {
-  state.settings.systemPrompt = systemPromptEl.value.trim();
-  state.settings.maxTokens    = Math.max(1, Math.min(4096, parseInt(maxTokensEl.value, 10) || 512));
-  state.settings.temperature  = Math.max(0, Math.min(2, parseFloat(temperatureEl.value) || 0.7));
-  state.settings.topP         = Math.max(0, Math.min(1, parseFloat(topPEl.value) || 0.95));
-  saveSettings();
-  settingsOverlay.classList.remove('open');
-  showToast('Configuration updated.');
-});
-
-// ── Append message bubble ──────────────────────────────────────────────
-function appendMessage(role, content, streaming = false) {
-  if (welcomeEl && welcomeEl.parentNode === chatEl) {
-    chatEl.removeChild(welcomeEl);
-  }
-
-  const wrapper = document.createElement('div');
-  wrapper.className = `message ${role}`;
-
-  const roleEl = document.createElement('div');
-  roleEl.className = 'msg-role';
-  roleEl.textContent = role === 'user' ? '▶ operator' : '◈ tq-neural';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'msg-bubble';
-  bubble.textContent = content;
-
-  if (streaming) {
-    const cursor = document.createElement('span');
-    cursor.className = 'cursor';
-    bubble.appendChild(cursor);
-  }
-
-  wrapper.appendChild(roleEl);
-  wrapper.appendChild(bubble);
-  chatEl.appendChild(wrapper);
-  chatEl.scrollTop = chatEl.scrollHeight;
-  return bubble;
-}
-
-// ── Render think blocks ────────────────────────────────────────────────
-function renderAssistantContent(bubble, text) {
-  bubble.innerHTML = '';
-  const thinkMatch = text.match(/^<think>([\s\S]*?)<\/think>\s*([\s\S]*)$/);
-  if (thinkMatch) {
-    const thinkContent = thinkMatch[1].trim();
-    const answer       = thinkMatch[2].trim();
-
-    if (thinkContent) {
-      const block = document.createElement('div');
-      block.className = 'think-block collapsed';
-      block.innerHTML = `
-        <div class="think-header">
-          <i class="think-chevron">▼</i>
-          <span>chain-of-thought</span>
-        </div>
-        <div class="think-body"></div>`;
-      block.querySelector('.think-body').textContent = thinkContent;
-      block.querySelector('.think-header').addEventListener('click', () => {
-        block.classList.toggle('collapsed');
-      });
-      bubble.appendChild(block);
-    }
-
-    const answerEl = document.createElement('div');
-    answerEl.className = 'msg-answer';
-    answerEl.textContent = answer;
-    bubble.appendChild(answerEl);
-  } else {
-    const answerEl = document.createElement('div');
-    answerEl.className = 'msg-answer';
-    answerEl.textContent = text;
-    bubble.appendChild(answerEl);
-  }
-}
-
-// ── Send message ───────────────────────────────────────────────────────
-async function sendMessage() {
-  const text = inputEl.value.trim();
-  if (!text) return;
-
-  inputEl.value = '';
-  inputEl.style.height = 'auto';
-
-  state.history.push({ role: 'user', content: text });
-  appendMessage('user', text);
-
-  setStreaming(true);
-  const bubble = appendMessage('assistant', '', true);
-
-  // Build messages array including optional system prompt
-  const messages = [];
-  if (state.settings.systemPrompt) {
-    messages.push({ role: 'system', content: state.settings.systemPrompt });
-  }
-  messages.push(...state.history);
-
-  let assistantText = '';
-
-  try {
-    const resp = await fetch('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages,
-        max_tokens:  state.settings.maxTokens,
-        temperature: state.settings.temperature,
-        top_p:       state.settings.topP,
-        stream:      true,
-        thinking:    state.thinking,
-      }),
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-      throw new Error(err.detail || resp.statusText);
-    }
-
-    const reader = resp.body.getReader();
-    const dec    = new TextDecoder();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = dec.decode(value, { stream: true });
-      for (const line of chunk.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') break;
-        try {
-          const parsed = JSON.parse(data);
-          const delta  = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            assistantText += delta;
-            // Remove cursor, set text, re-add cursor
-            const cursor = bubble.querySelector('.cursor');
-            bubble.textContent = assistantText;
-            bubble.appendChild(cursor);
-            chatEl.scrollTop = chatEl.scrollHeight;
-          }
-        } catch (_) {}
-      }
-    }
-
-    // Remove blinking cursor and render final content
-    const cursor = bubble.querySelector('.cursor');
-    if (cursor) cursor.remove();
-    renderAssistantContent(bubble, assistantText);
-
-    state.history.push({ role: 'assistant', content: assistantText });
-    state.totalTokens += assistantText.split(/\s+/).length; // rough estimate
-    tokenCount.textContent = `tokens: ~${state.totalTokens}`;
-
-  } catch (err) {
-    const cursor = bubble.querySelector('.cursor');
-    if (cursor) cursor.remove();
-    bubble.textContent = `[ERROR] ${err.message}`;
-    bubble.style.borderColor = 'var(--neon3)';
-    bubble.style.color = 'var(--neon3)';
-    showToast(`Error: ${err.message}`);
-    // Roll back history
-    state.history.pop();
-  } finally {
-    setStreaming(false);
-  }
-}
-
-// ── Clear session ──────────────────────────────────────────────────────
-function clearSession() {
-  state.history = [];
-  state.totalTokens = 0;
-  tokenCount.textContent = 'tokens: —';
-  chatEl.innerHTML = '';
-  chatEl.appendChild(welcomeEl);
-}
-
-// ── Disable UI during streaming ────────────────────────────────────────
-function setStreaming(on) {
-  state.streaming = on;
-  sendBtn.disabled = on;
-  inputEl.disabled = on;
-  sendBtn.textContent = on ? '…' : 'Transmit ▶';
-}
-</script>
+<script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Three-mode benchmark: Standard vs TurboQuant vs Zero-Quant.
+"""Four-mode benchmark: Standard vs TurboQuant vs Zero-Quant vs Ultra-Quant.
 
-Runs identical prompts through all three inference modes on the same model
+Runs identical prompts through all four inference modes on the same model
 and reports: token speed, KV compression ratio, MSE, compress/decompress
 latency, and avg bits per value.
 
@@ -31,6 +31,12 @@ from src.engine.kv_cache import CacheType, KVCacheConfig
 from src.engine.model_config import ModelConfig
 from src.engine.turbo_engine import TurboQuantEngine
 from src.engine.zero_quant_engine import ZeroQuantEngine
+from src.engine.ultra_quant_engine import (
+    UltraQuantConfig,
+    UltraQuantEngine,
+    _estimate_n_layers,
+    _estimate_n_heads,
+)
 from src.turboquant.compressor import QuantConfig
 from src.turboquant.zero_quant import ZeroQuantConfig
 from src.utils.memory import get_gpu_memory, get_ram_usage
@@ -208,6 +214,57 @@ def run_zero_quant(
     return result
 
 
+def run_ultra_quant(
+    model_config: ModelConfig,
+    max_tokens: int,
+    runs: int,
+    ultra_config: UltraQuantConfig | None = None,
+    n_layers: int = 28,
+    n_heads: int = 28,
+    head_dim: int = 128,
+) -> dict:
+    cfg = ultra_config or UltraQuantConfig(
+        target_model_params_b=7.0,
+        zero_quant_preset="turbo",
+    )
+    engine = UltraQuantEngine(
+        model_config, cfg,
+        n_layers=n_layers, n_heads=n_heads, head_dim=head_dim,
+    )
+
+    r_before, g_before = _ram_mb(), _gpu_mb()
+    engine.load_model()
+    r_after, g_after = _ram_mb(), _gpu_mb()
+
+    plan = engine.offload_plan
+    avg_kv_bits = engine.zero_quant_config.average_bits(n_layers)
+
+    result = _collect_runs(engine, "ultra", max_tokens, runs)
+    engine.unload()
+    gc.collect()
+
+    result.update(
+        {
+            "label": f"Ultra-Quant ({cfg.zero_quant_preset})",
+            "kv_k": "ultra-adaptive",
+            "kv_v": "ultra-adaptive",
+            "avg_bits": avg_kv_bits,
+            "model_ram_mb": round(r_after - r_before, 1),
+            "gpu_mb": (
+                round(g_after - g_before, 1)
+                if g_before is not None and g_after is not None
+                else None
+            ),
+            "n_gpu_layers": plan.n_gpu_layers,
+            "n_cpu_layers": plan.n_cpu_layers,
+            "n_mmap_layers": plan.n_mmap_layers,
+            "recommended_quant": plan.recommended_quant,
+            "estimated_speed": plan.estimated_speed_tok_s,
+        }
+    )
+    return result
+
+
 def _collect_runs(engine, mode: str, max_tokens: int, runs: int) -> dict:
     """Run benchmark prompts and collect per-run stats."""
     tps_list: list[float] = []
@@ -225,14 +282,7 @@ def _collect_runs(engine, mode: str, max_tokens: int, runs: int) -> dict:
                 msg, stats = engine.chat(prompt, max_tokens=max_tokens, temperature=0.0)
                 response_text = msg["content"]
                 comp_stats = None
-            elif mode == "turbo":
-                res = engine.chat_with_compression(
-                    prompt, max_tokens=max_tokens, temperature=0.0
-                )
-                response_text = res.text
-                stats = res.gen_stats
-                comp_stats = res.compression_stats
-            else:  # zero
+            elif mode in ("turbo", "zero", "ultra"):
                 res = engine.chat_with_compression(
                     prompt, max_tokens=max_tokens, temperature=0.0
                 )
@@ -274,7 +324,7 @@ def print_report(results: list[dict], model_path: str, n_ctx: int) -> None:
     line = "-" * 84
 
     print(f"\n{sep}")
-    print("  INFERENCE MODE COMPARISON — Standard / TurboQuant / Zero-Quant")
+    print("  INFERENCE MODE COMPARISON — Standard / TurboQuant / Zero-Quant / Ultra-Quant")
     print(sep)
 
     gpu_info = get_gpu_memory()
@@ -359,7 +409,7 @@ def print_report(results: list[dict], model_path: str, n_ctx: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Standard vs TurboQuant vs Zero-Quant benchmark")
+    p = argparse.ArgumentParser(description="Standard vs TurboQuant vs Zero-Quant vs Ultra-Quant benchmark")
     p.add_argument(
         "--model-path",
         default="models/qwen2.5-7b-instruct-q4_k_m.gguf",
@@ -395,10 +445,10 @@ def main() -> None:
 
     all_results = []
 
-    print(f"\n[1/3] Standard inference...")
+    print(f"\n[1/4] Standard inference...")
     all_results.append(run_standard(model_config, args.max_tokens, args.runs, flash_attention=flash_attn))
 
-    print(f"[2/3] TurboQuant K8/V4 (quality preset)...")
+    print(f"[2/4] TurboQuant K8/V4 (quality preset)...")
     all_results.append(run_turboquant(
         model_config, args.max_tokens, args.runs,
         k_bits=8, v_bits=4,
@@ -407,11 +457,28 @@ def main() -> None:
     ))
 
     avg_bits = zq_cfg.average_bits(args.n_layers)
-    print(f"[3/3] Zero-Quant depth-adaptive (avg {avg_bits:.1f} bits)...")
+    print(f"[3/4] Zero-Quant depth-adaptive (avg {avg_bits:.1f} bits)...")
     all_results.append(run_zero_quant(
         model_config, args.max_tokens, args.runs, zq_cfg,
         n_layers=args.n_layers, n_heads=args.n_heads, head_dim=args.head_dim,
         flash_attention=flash_attn,
+    ))
+
+    # Estimate model params from GGUF file size and quant level
+    model_size_gb = Path(args.model_path).stat().st_size / (1024**3)
+    # Rough estimate: Q4_K_M ≈ 4.85 bpw → params_b ≈ size_gb / (bpw / 8) * 1e-9 / overhead
+    est_params_b = model_size_gb / (4.85 / 8) * 0.95  # ~0.95 for metadata overhead
+    est_params_b = round(max(1.0, est_params_b), 1)
+
+    ultra_cfg = UltraQuantConfig(
+        target_model_params_b=est_params_b,
+        zero_quant_preset="turbo",
+    )
+    ultra_avg = ultra_cfg.zero_quant_preset
+    print(f"[4/4] Ultra-Quant ({ultra_avg} preset)...")
+    all_results.append(run_ultra_quant(
+        model_config, args.max_tokens, args.runs, ultra_cfg,
+        n_layers=args.n_layers, n_heads=args.n_heads, head_dim=args.head_dim,
     ))
 
     print_report(all_results, args.model_path, args.n_ctx)

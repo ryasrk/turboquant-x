@@ -1,0 +1,74 @@
+/** API layer — all server communication goes through here. */
+
+export async function fetchHealth() {
+  const r = await fetch('/health');
+  if (!r.ok) throw new Error(`Health: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchAvailableModels() {
+  const r = await fetch('/v1/available-models');
+  if (!r.ok) throw new Error(`Models: ${r.status}`);
+  return r.json();
+}
+
+export async function switchMode(mode) {
+  const r = await fetch('/v1/switch-mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || r.statusText);
+  }
+  return r.json();
+}
+
+export async function switchModel(filename) {
+  const r = await fetch('/v1/switch-model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: filename }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || r.statusText);
+  }
+  return r.json();
+}
+
+/**
+ * Start a streaming chat completion. Returns the ReadableStream reader.
+ * @param {Array} messages - Chat messages
+ * @param {Object} opts - { maxTokens, temperature, topP, thinking }
+ * @returns {ReadableStreamDefaultReader}
+ */
+export async function chatStream(messages, opts) {
+  const r = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages,
+      max_tokens:  opts.maxTokens,
+      temperature: opts.temperature,
+      top_p:       opts.topP,
+      stream:      true,
+      thinking:    opts.thinking,
+      tools:       opts.agent || false,
+    }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    const detail = err.detail;
+    // Structured error (e.g. context_exceeded) — extract .message
+    if (detail && typeof detail === 'object') {
+      const e = new Error(detail.message || JSON.stringify(detail));
+      e.code = detail.error;
+      e.contextMax = detail.context_max;
+      throw e;
+    }
+    throw new Error(detail || r.statusText);
+  }
+  return r.body.getReader();
+}

@@ -1,0 +1,73 @@
+/* ── TurboQuant-X Theme: Variables, Base, Backgrounds ──────────────── */
+:root {
+  --bg:        #020b18;
+  --bg2:       #050e1f;
+  --bg3:       #081628;
+  --surface:   #0b1c30;
+  --border:    #0d3a5a;
+  --holo:      #00b4ff;
+  --holo2:     #7df9ff;
+  --alert:     #ff6d00;
+  --safe:      #39ff14;
+  --text:      #cde8ff;
+  --text-dim:  #3a6080;
+  --user-bg:   #050f1f;
+  --asst-bg:   #040d1a;
+  --code-bg:   #030a14;
+  --radius:    4px;
+  --font-mono: 'Courier New', Courier, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(0,80,160,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(0,180,255,0.08) 0%, transparent 50%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Star-field ────────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 15%  8%, rgba(125,249,255,0.6) 0%, transparent 0%),
+    radial-gradient(1px 1px at 72% 18%, rgba(125,249,255,0.4) 0%, transparent 0%),
+    radial-gradient(1px 1px at 40% 55%, rgba(125,249,255,0.5) 0%, transparent 0%),
+    radial-gradient(1px 1px at 88% 72%, rgba(125,249,255,0.3) 0%, transparent 0%),
+    radial-gradient(1px 1px at 5%  90%, rgba(125,249,255,0.4) 0%, transparent 0%),
+    radial-gradient(1px 1px at 60% 85%, rgba(125,249,255,0.5) 0%, transparent 0%),
+    radial-gradient(1px 1px at 33% 30%, rgba(125,249,255,0.3) 0%, transparent 0%),
+    radial-gradient(1px 1px at 95% 40%, rgba(125,249,255,0.6) 0%, transparent 0%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Grid overlay ──────────────────────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,180,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,180,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+header, #chat, #input-bar, #status-bar, #settings-overlay { position: relative; z-index: 1; }
+
+/* ── Scrollbar ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--holo); border-radius: 2px; }

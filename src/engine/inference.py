@@ -31,6 +31,7 @@ class GenerationStats:
     total_tokens: int
     generation_time_s: float
     tokens_per_second: float
+    finish_reason: str = "stop"
 
 
 class InferenceEngine:
@@ -296,6 +297,7 @@ class InferenceEngine:
         effective_messages = self._apply_thinking(messages, thinking)
         start = time.monotonic()
         completion_tokens = 0
+        finish_reason = "stop"
 
         with self._lock:
             stream = self._model.create_chat_completion(
@@ -307,8 +309,12 @@ class InferenceEngine:
             )
 
             for chunk in stream:
-                delta = chunk["choices"][0].get("delta", {})
+                choice = chunk["choices"][0]
+                delta = choice.get("delta", {})
                 content = delta.get("content", "")
+                fr = choice.get("finish_reason")
+                if fr:
+                    finish_reason = fr
                 if content:
                     completion_tokens += 1  # approximate
                     yield content
@@ -321,6 +327,7 @@ class InferenceEngine:
             total_tokens=completion_tokens,
             generation_time_s=elapsed,
             tokens_per_second=completion_tokens / max(elapsed, 0.001),
+            finish_reason=finish_reason,
         )
 
     def get_stats(self) -> dict[str, Any]:
@@ -329,7 +336,15 @@ class InferenceEngine:
         Returns dict with:
         - model_name, n_ctx, is_loaded
         - kv_config (K type, V type)
+        - context_used / context_max for tracking
         """
+        context_used = 0
+        if self._loaded and self._model is not None:
+            try:
+                context_used = self._model.n_tokens
+            except Exception:
+                pass
+
         return {
             "model_name": self._model_config.model_name,
             "n_ctx": self._model_config.n_ctx,
@@ -337,4 +352,6 @@ class InferenceEngine:
             "kv_cache_k": self._kv_config.cache_type_k.value,
             "kv_cache_v": self._kv_config.cache_type_v.value,
             "flash_attention": self._kv_config.flash_attention,
+            "context_max": self._model_config.n_ctx,
+            "context_used": context_used,
         }

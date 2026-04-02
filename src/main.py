@@ -77,6 +77,7 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         "logging": dict(config.get("logging", {})),
         "inference_mode": config.get("inference_mode", "standard"),
         "turboquant": dict(config.get("turboquant", {})),
+        "ultra_quant": dict(config.get("ultra_quant", {})),
     }
 
     # Model overrides
@@ -130,11 +131,39 @@ def build_model_config(config: dict[str, Any]) -> ModelConfig:
     When n_gpu_layers is -1 (the sentinel for "auto"), calls
     compute_optimal_gpu_layers() to derive the best distribution between
     GPU and CPU based on available VRAM and model size.
+
+    When n_ctx is -1 (or 0), co-optimises context window and GPU layers
+    together via compute_optimal_context().
     """
     model = config.get("model", {})
     model_path = model.get("path", "models/qwen2.5-7b-instruct-q4_k_m.gguf")
     n_ctx = model.get("n_ctx", 8192)
     n_gpu_layers_cfg = model.get("n_gpu_layers", -1)
+
+    # Build KV config early so auto-ctx can account for actual KV compression
+    kv_config_for_ctx = None
+    try:
+        kv_config_for_ctx = build_kv_config(config)
+    except Exception:
+        pass
+
+    # Auto-maximise context window: n_ctx = -1 or 0
+    if n_ctx <= 0:
+        try:
+            from src.utils.gpu_layers import compute_optimal_context
+            safety_margin = model.get("gpu_safety_margin", 0.92)
+            n_ctx, auto_gl = compute_optimal_context(
+                model_path,
+                safety_margin=safety_margin,
+                kv_config=kv_config_for_ctx,
+            )
+            logger.info("Auto context: n_ctx=%d, n_gpu_layers=%d", n_ctx, auto_gl)
+            # If GPU layers are also auto, use the co-optimised value
+            if n_gpu_layers_cfg == -1:
+                n_gpu_layers_cfg = auto_gl
+        except Exception as exc:
+            logger.warning("Auto context failed: %s. Defaulting to 8192.", exc)
+            n_ctx = 8192
 
     if n_gpu_layers_cfg == -1:
         try:
@@ -237,6 +266,26 @@ def build_zero_quant_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_ultra_quant_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Build Ultra-Quant settings from config.
+
+    Reads the ``ultra_quant`` section and returns a plain dict that
+    ``create_app`` forwards to :class:`~src.engine.ultra_quant_engine.UltraQuantConfig`.
+    """
+    uq = config.get("ultra_quant", {})
+    return {
+        "target_model_params_b": uq.get("target_model_params_b", 70.0),
+        "max_ram_usage_fraction": uq.get("max_ram_usage_fraction", 0.85),
+        "max_vram_usage_fraction": uq.get("max_vram_usage_fraction", 0.90),
+        "enable_mmap": uq.get("enable_mmap", True),
+        "enable_mlock_critical": uq.get("enable_mlock_critical", True),
+        "enable_moe_offload": uq.get("enable_moe_offload", True),
+        "kv_budget_mb": uq.get("kv_budget_mb", 0),
+        "force_quant": uq.get("force_quant", ""),
+        "zero_quant_preset": uq.get("zero_quant_preset", "turbo"),
+    }
+
+
 def setup_logging(config: dict[str, Any]) -> None:
     """Configure logging from config."""
     log_cfg = config.get("logging", {})
@@ -276,7 +325,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["standard", "turboquant", "zero-quant"],
+        choices=["standard", "turboquant", "zero-quant", "ultra-quant"],
         default=None,
         help="Inference mode (overrides config)",
     )
@@ -319,6 +368,7 @@ def main(argv: list[str] | None = None) -> None:
     inference_mode = build_inference_mode(config)
     turboquant_cfg = build_turboquant_config(config)
     zero_quant_cfg = build_zero_quant_config(config)
+    ultra_quant_cfg = build_ultra_quant_config(config)
 
     server_cfg = config.get("server", {})
     host = server_cfg.get("host", "0.0.0.0")
@@ -347,10 +397,22 @@ def main(argv: list[str] | None = None) -> None:
             zero_quant_cfg["deep_v_bits"],
             zero_quant_cfg["use_kv_coquant"],
         )
+    elif inference_mode == InferenceMode.ULTRA_QUANT:
+        logger.info(
+            "UltraQuant: target=%.0fB, quant_preset=%s, mmap=%s, mlock=%s",
+            ultra_quant_cfg["target_model_params_b"],
+            ultra_quant_cfg["zero_quant_preset"],
+            ultra_quant_cfg["enable_mmap"],
+            ultra_quant_cfg["enable_mlock_critical"],
+        )
     logger.info("Server: %s:%d", host, port)
 
     # Create and run app
-    app = create_app(model_config, kv_config, cors_origins, inference_mode, turboquant_cfg, zero_quant_cfg)
+    app = create_app(
+        model_config, kv_config, cors_origins, inference_mode,
+        turboquant_cfg, zero_quant_cfg, ultra_quant_cfg,
+        thought_log_path=config.get("logging", {}).get("thought_log"),
+    )
 
     import uvicorn
     uvicorn.run(app, host=host, port=port)

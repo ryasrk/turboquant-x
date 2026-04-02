@@ -10,17 +10,20 @@ from pydantic import BaseModel, Field
 
 class ChatMessage(BaseModel):
     """A single chat message."""
-    role: Literal["system", "user", "assistant"]
-    content: str = Field(..., min_length=1, max_length=32_000)
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | list = Field(default="", description="Text string or OpenAI multimodal content array")
+    tool_call_id: str | None = None
+    name: str | None = None
 
 
 class ChatRequest(BaseModel):
     """Chat completion request — OpenAI-compatible."""
     messages: list[ChatMessage] = Field(..., min_length=1, max_length=100)
-    max_tokens: int = Field(default=512, ge=1, le=4096)
+    max_tokens: int = Field(default=2048, ge=1, le=16384)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
     stream: bool = False
+    tools: bool = False  # Enable agent mode with tool calling
     thinking: bool = True  # Qwen3: enable/disable chain-of-thought thinking block
     chat_template_kwargs: dict | None = Field(
         default=None,
@@ -91,6 +94,12 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     model_name: str = ""
     inference_mode: str = "standard"
+    loading: bool = False
+    supports_thinking: bool = False
+    supports_tools: bool = False
+    supports_vision: bool = False
+    context_max: int = 0
+    context_used: int = 0
     gpu_memory: dict | None = None
     kv_cache_config: dict | None = None
     turboquant_config: dict | None = None
