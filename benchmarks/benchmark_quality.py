@@ -56,6 +56,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.turboquant.compressor import QuantConfig, TurboQuantCompressor  # noqa: E402
+from src.turboquant.zero_quant import ZeroQuantConfig, DepthAdaptiveCompressor  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Preset configurations
@@ -64,6 +65,25 @@ PRESETS: dict[str, QuantConfig] = {
     "Quality (K8/V4)":    QuantConfig(k_bits=8, v_bits=4),
     "Aggressive (K8/V2)": QuantConfig(k_bits=8, v_bits=2),
     "Symmetric (K4/V4)":  QuantConfig(k_bits=4, v_bits=4),
+}
+
+# Zero-Quant depth-adaptive presets
+ZQ_PRESETS: dict[str, ZeroQuantConfig] = {
+    "ZQ-Default (sh8/mi4-2/dp8)": ZeroQuantConfig(
+        shallow_k_bits=8, shallow_v_bits=8,
+        middle_k_bits=4, middle_v_bits=2,
+        deep_k_bits=8, deep_v_bits=8,
+    ),
+    "ZQ-Balanced (sh8/mi4-4/dp8)": ZeroQuantConfig(
+        shallow_k_bits=8, shallow_v_bits=8,
+        middle_k_bits=4, middle_v_bits=4,
+        deep_k_bits=8, deep_v_bits=8,
+    ),
+    "ZQ-Aggressive (sh4/mi4-2/dp4)": ZeroQuantConfig(
+        shallow_k_bits=4, shallow_v_bits=4,
+        middle_k_bits=4, middle_v_bits=2,
+        deep_k_bits=4, deep_v_bits=4,
+    ),
 }
 
 # Process layers one-at-a-time when tensor would exceed this threshold
@@ -255,6 +275,88 @@ def run_preset(
 
 
 # ---------------------------------------------------------------------------
+# Zero-Quant quality benchmark
+# ---------------------------------------------------------------------------
+
+
+def run_zero_quant_preset(
+    preset_name: str,
+    config: ZeroQuantConfig,
+    n_layers: int,
+    n_heads: int,
+    head_dim: int,
+    seq_len: int,
+    n_trials: int,
+    n_queries: int,
+    rng: np.random.Generator,
+) -> dict:
+    """Run quality benchmark for a single ZeroQuantConfig.
+
+    Same metrics as ``run_preset`` (cosine_similarity, top1/top5 match),
+    but uses ``DepthAdaptiveCompressor`` so each zone is compressed at its
+    configured bit-width.
+    """
+    compressor = DepthAdaptiveCompressor(config)
+
+    full_tensor_bytes = 2 * n_layers * n_heads * seq_len * head_dim * 8
+    layer_by_layer = full_tensor_bytes > _LAYER_BY_LAYER_THRESHOLD_BYTES
+
+    all_cos, all_attn_acc, all_top1, all_top5 = [], [], [], []
+    compress_times, decompress_times = [], []
+    actual_ratios: list[float] = []
+
+    for _trial in range(n_trials):
+        K = rng.standard_normal((n_layers, n_heads, seq_len, head_dim)).astype(np.float64)
+        V = rng.standard_normal((n_layers, n_heads, seq_len, head_dim)).astype(np.float64)
+
+        t0 = time.perf_counter()
+        ckv = compressor.compress_kv(K, V)
+        compress_times.append(time.perf_counter() - t0)
+
+        orig_b = K.nbytes + V.nbytes
+        comp_b = ckv.memory_bytes()
+        if orig_b > 0 and comp_b > 0:
+            actual_ratios.append(orig_b / comp_b)
+
+        t0 = time.perf_counter()
+        K_r, V_r = compressor.decompress_kv(ckv)
+        decompress_times.append(time.perf_counter() - t0)
+
+        for layer_i in range(n_layers):
+            for h in range(n_heads):
+                cos, acc, t1, t5 = _attention_metrics(
+                    K[layer_i, h], V[layer_i, h],
+                    K_r[layer_i, h], V_r[layer_i, h],
+                    n_queries=n_queries, rng=rng,
+                )
+                all_cos.append(cos)
+                all_attn_acc.append(acc)
+                all_top1.append(t1)
+                all_top5.append(t5)
+
+    avg_bits = config.average_bits(n_layers)
+    return {
+        "preset": preset_name,
+        "k_bits": f"sh{config.shallow_k_bits}/mi{config.middle_k_bits}/dp{config.deep_k_bits}",
+        "v_bits": f"sh{config.shallow_v_bits}/mi{config.middle_v_bits}/dp{config.deep_v_bits}",
+        "avg_bits": round(avg_bits, 2),
+        "compression_ratio": round(float(np.mean(actual_ratios)), 2) if actual_ratios else None,
+        "cosine_similarity": round(float(np.mean(all_cos)), 4),
+        "attn_score_accuracy": round(float(np.mean(all_attn_acc)), 4),
+        "top1_match_pct": round(float(np.mean(all_top1)) * 100, 1),
+        "top5_match_pct": round(float(np.mean(all_top5)) * 100, 1),
+        "avg_compress_ms": round(float(np.mean(compress_times)) * 1000, 1),
+        "avg_decompress_ms": round(float(np.mean(decompress_times)) * 1000, 1),
+        "trials": n_trials,
+        "n_layers": n_layers,
+        "n_heads": n_heads,
+        "seq_len": seq_len,
+        "head_dim": head_dim,
+        "layer_by_layer": layer_by_layer,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI + output
 # ---------------------------------------------------------------------------
 
@@ -302,21 +404,27 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def print_table(results: list[dict]) -> None:
+def print_table(results: list[dict], title: str = "TurboQuant Presets") -> None:
     """Print a formatted results table."""
+    print(f"\n  {title}")
     header = (
-        f"\n{'Preset':<24} {'Compression':>13} {'Cosine Sim':>12} "
-        f"{'Attn Accuracy':>14} {'Top-1 Match':>12} {'Top-5 Match':>12} "
+        f"\n  {'Preset':<32} {'Avg Bits':>9} {'Compression':>13} {'Cosine Sim':>12} "
+        f"{'Attn Acc':>10} {'Top-1 Match':>12} {'Top-5 Match':>12} "
         f"{'Compress':>10} {'Decompress':>11}"
     )
-    sep = "-" * len(header.rstrip())
+    sep = "  " + "-" * (len(header.rstrip()) - 2)
     print(header)
     print(sep)
     for r in results:
         ratio = f"{r['compression_ratio']:.2f}x" if r["compression_ratio"] else "N/A"
+        avg_bits = r.get("avg_bits", (r.get("k_bits", 0) + r.get("v_bits", 0)) / 2)
+        if isinstance(avg_bits, (int, float)):
+            avg_bits_str = f"{avg_bits:.1f}"
+        else:
+            avg_bits_str = str(avg_bits)
         print(
-            f"{r['preset']:<24} {ratio:>13} {r['cosine_similarity']:>12.4f} "
-            f"{r['attn_score_accuracy']:>14.4f} "
+            f"  {r['preset']:<32} {avg_bits_str:>9} {ratio:>13} "
+            f"{r['cosine_similarity']:>12.4f} {r['attn_score_accuracy']:>10.4f} "
             f"{r['top1_match_pct']:>11.1f}% {r['top5_match_pct']:>11.1f}% "
             f"{r['avg_compress_ms']:>9.1f}ms {r['avg_decompress_ms']:>10.1f}ms"
         )
@@ -361,7 +469,29 @@ def main() -> int:
         print(f" done ({elapsed:.1f}s)")
         results.append(r)
 
-    print_table(results)
+    print_table(results, title="TurboQuant Presets (flat per-layer quantization)")
+
+    # Zero-Quant depth-adaptive benchmarks
+    print("\n  Running Zero-Quant depth-adaptive presets...")
+    zq_results: list[dict] = []
+    for name, zq_config in ZQ_PRESETS.items():
+        print(f"  Running {name} ...", end="", flush=True)
+        t_start = time.perf_counter()
+        r = run_zero_quant_preset(
+            name, zq_config,
+            n_layers=args.n_layers,
+            n_heads=args.n_heads,
+            head_dim=args.head_dim,
+            seq_len=args.seq_len,
+            n_trials=args.trials,
+            n_queries=args.queries,
+            rng=rng,
+        )
+        elapsed = time.perf_counter() - t_start
+        print(f" done ({elapsed:.1f}s)")
+        zq_results.append(r)
+
+    print_table(zq_results, title="Zero-Quant Presets (depth-adaptive: shallow/middle/deep zones)")
 
     if args.json:
         out_path = Path(args.json)
@@ -369,7 +499,8 @@ def main() -> int:
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "args": vars(args),
-            "results": results,
+            "turboquant_results": results,
+            "zero_quant_results": zq_results,
         }
         out_path.write_text(json.dumps(payload, indent=2))
         print(f"Results saved to {out_path}")
