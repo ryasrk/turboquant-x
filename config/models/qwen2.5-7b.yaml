@@ -17,6 +17,10 @@ model:
   n_batch: 512
 
 # All layers on GPU → standard mode is already fast; turboquant adds longer context
+# Benchmark (RTX 4060 Ti, 4096 ctx, seq=64):
+#   standard:    54.7 tok/s, 8.0 avg bits, MSE=0.000000
+#   turboquant:  55.4 tok/s, 6.0 avg bits, MSE=0.009966  CosSim=0.9953  Top-1=98.5%
+#   zero-quant:  55.5 tok/s, 5.8 avg bits, MSE=0.023459  CosSim=0.9894  Top-1=93.6%
 inference_mode: "turboquant"
 
 kv_cache:
@@ -24,9 +28,26 @@ kv_cache:
   cache_type_v: "q8_0"
   flash_attention: true
 
+# Best TurboQuant preset (benchmark-proven): quality K8/V4
+# CosSim=0.9953, Top-1 match=98.5%%, compress 7.76x, compress=14ms
 turboquant:
-  preset: "quality"
+  preset: "quality"     # K8/V4 — best CosSim+Top-1 balance
   block_size: 128
+
+# Zero-Quant preset (switch inference_mode to "zero-quant" to activate)
+# Best balance: sh8/mi4-3/dp8 — avg 5.75 bits, CosSim=0.9894, Top-1=93.6%%
+# Middle K4 reduces Top-1 vs TurboQuant; mid V3 recovers quality vs V2
+zero_quant:
+  shallow_fraction: 0.25    # layers 0-6 protect with K8/V8
+  deep_fraction: 0.25       # layers 21-27 protect with K8/V8
+  shallow_k_bits: 8
+  shallow_v_bits: 8
+  middle_k_bits: 4          # sparse middle layers (7-20): K4 saves bandwidth
+  middle_v_bits: 3          # raised 2->3: +2.1pp CosSim at +0.25 bits cost
+  deep_k_bits: 8
+  deep_v_bits: 8
+  block_size: 128
+  use_kv_coquant: false     # joint K-V codebook (paper [3]); false = independent
 
 server:
   host: "0.0.0.0"

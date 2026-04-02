@@ -14,6 +14,9 @@ model:
 
 # Recommended inference settings for Qwen3.5-35B
 # Use "zero-quant" for lower first-token latency on short conversations
+# Benchmark preset guide (from Qwen-7B data — 35B architecture similar):
+#   turboquant quality K8/V4: CosSim=0.9953, Top-1=98.5%%, compress 7.76x
+#   zero-quant sh8/mi4-3/dp8: CosSim=0.9894, Top-1=93.6%%, avg 5.75 bits
 inference_mode: "turboquant"
 
 kv_cache:
@@ -21,9 +24,25 @@ kv_cache:
   cache_type_v: "q8_0"
   flash_attention: true
 
+# Best TurboQuant preset (benchmark-proven): quality K8/V4
+# CosSim=0.9953, Top-1 match=98.5%% — best overall balance
 turboquant:
-  preset: "quality"     # K8/V4 — compression 7.76x, cos_sim 0.9952, attn_acc 0.9999
+  preset: "quality"     # K8/V4 — best CosSim+Top-1 balance
   block_size: 128
+
+# Zero-Quant preset (switch inference_mode to "zero-quant" to activate)
+# For 35B ~60+ layers: sh0.20/dp0.15 preserves more shallow/deep precision
+zero_quant:
+  shallow_fraction: 0.20    # first 20%% of layers — dense activations
+  deep_fraction: 0.20       # last 20%% of layers — output-critical
+  shallow_k_bits: 8
+  shallow_v_bits: 8
+  middle_k_bits: 4
+  middle_v_bits: 3          # best V-bit from benchmarks (CosSim/memory balance)
+  deep_k_bits: 8
+  deep_v_bits: 8
+  block_size: 128
+  use_kv_coquant: false
 
 server:
   host: "0.0.0.0"

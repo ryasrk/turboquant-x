@@ -16,9 +16,9 @@ model:
 # Inference mode: "standard" | "turboquant" | "zero-quant"
 #   standard   — llama.cpp Q8_0 KV cache, no Python overhead, KV grows each turn
 #   turboquant — Q8_0 KV at C level + PolarQuant Python compression between turns
-#                (7.76x compression, frees VRAM for longer conversations)
-#   zero-quant — Q4_0 KV at C level, n_threads_batch=all cores for fast prompt eval,
-#                no Python compression overhead (lower per-turn latency)
+#                benchmark: 55.4 tok/s, CosSim=0.9953, Top-1=98.5%%, -25%% KV vs std
+#   zero-quant — Q8_0 KV at C level + depth-adaptive PolarQuant (shallow/mid/deep)
+#                benchmark: 55.5 tok/s, CosSim=0.9894, Top-1=93.6%%, -28%% KV vs std
 inference_mode: "turboquant"
 
 kv_cache:
