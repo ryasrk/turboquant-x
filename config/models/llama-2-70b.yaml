@@ -43,7 +43,7 @@ zero_quant:
   shallow_k_bits: 8
   shallow_v_bits: 8
   middle_k_bits: 4
-  middle_v_bits: 2
+  middle_v_bits: 3
   deep_k_bits: 8
   deep_v_bits: 8
   block_size: 128

@@ -89,7 +89,7 @@ class ZeroQuantConfig:
     shallow_k_bits: int = 8
     shallow_v_bits: int = 8
     middle_k_bits: int = 4
-    middle_v_bits: int = 2
+    middle_v_bits: int = 3
     deep_k_bits: int = 8
     deep_v_bits: int = 8
 

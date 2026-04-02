@@ -45,7 +45,7 @@ zero_quant:
   shallow_k_bits: 8        # high precision for dense-activation shallow zone
   shallow_v_bits: 8
   middle_k_bits: 4         # aggressive compression for sparse middle zone
-  middle_v_bits: 2
+  middle_v_bits: 3         # raised from 2→3 for better Top-1 match (+0.25 bits)
   deep_k_bits: 8           # high precision for output-critical deep zone
   deep_v_bits: 8
   block_size: 128
