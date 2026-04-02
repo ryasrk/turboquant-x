@@ -11,7 +11,9 @@ model:
   name: "llama-2-70b-chat"
   path: "./models/llama-2-70b-chat.Q4_K_S.gguf"
   n_ctx: 2048           # Reduced from 4096 to free ~655 MB → 1-2 extra GPU layers
-  n_gpu_layers: -1      # auto: ~12 layers on RTX 4060 Ti 8 GB
+  n_gpu_layers: -1      # auto: ~14-15 layers on RTX 4060 Ti 8 GB (was 12 with old calc)
+  gpu_safety_margin: 0.94  # Aggressive: use 94% of VRAM → ~14 GPU layers
+                            # Set to 0.88 if you get OOM errors
   chat_format: "llama-2"
   n_threads: 14         # Physical cores (28 logical / 2)
   n_threads_batch: 28   # All logical cores for prompt eval (biggest win on 70B CPU)

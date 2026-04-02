@@ -226,12 +226,10 @@ def compute_optimal_gpu_layers(
         logger.info("No GPU detected — using CPU-only (n_gpu_layers=0).")
         return 0
 
-    # Budget available after applying safety margin
+    # Budget available after applying safety margin (single deduction — no double reserve)
+    # safety_margin already encapsulates all overhead: KV cache growth, runtime buffers,
+    # activation memory.  Default 0.92 → use 92 % of free VRAM.
     budget = int(free_vram * safety_margin)
-
-    # Compute-buffer reservation: typically 5–10 % of budget
-    compute_reserve = int(free_vram * 0.10)
-    budget -= compute_reserve
 
     # KV cache cost for layers we put on GPU
     # We'll solve: budget - kv_cost(gl) - weight_cost(gl) >= 0

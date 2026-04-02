@@ -5,6 +5,8 @@ model:
   path: "./models/Qwen3.5-35B-A3B-q4_k_m.gguf"
   n_ctx: 4096
   n_gpu_layers: -1       # -1 = auto: optimal layers computed from VRAM at startup
+  gpu_safety_margin: 0.92  # VRAM fraction to use for model layers (0.85-0.95 range)
+                            # Higher = more GPU layers, slightly higher OOM risk
   chat_format: "chatml"
   n_threads: -1          # -1 = auto (cpu_count // 2). For 70B: set to 14
   n_threads_batch: -1    # -1 = auto (cpu_count, all cores). For zero-quant: set to 28

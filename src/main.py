@@ -88,6 +88,8 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         result["model"]["n_ctx"] = int(env_val)
     if env_val := os.environ.get("TURBOQUANT_N_GPU_LAYERS"):
         result["model"]["n_gpu_layers"] = int(env_val)
+    if env_val := os.environ.get("TURBOQUANT_GPU_SAFETY_MARGIN"):
+        result["model"]["gpu_safety_margin"] = float(env_val)
     if env_val := os.environ.get("TURBOQUANT_N_THREADS"):
         result["model"]["n_threads"] = int(env_val)
     if env_val := os.environ.get("TURBOQUANT_N_THREADS_BATCH"):
@@ -137,7 +139,10 @@ def build_model_config(config: dict[str, Any]) -> ModelConfig:
     if n_gpu_layers_cfg == -1:
         try:
             from src.utils.gpu_layers import compute_optimal_gpu_layers
-            n_gpu_layers = compute_optimal_gpu_layers(model_path, n_ctx=n_ctx)
+            safety_margin = model.get("gpu_safety_margin", 0.92)
+            n_gpu_layers = compute_optimal_gpu_layers(
+                model_path, n_ctx=n_ctx, safety_margin=safety_margin
+            )
             logger.info("Auto GPU layers: %d (resolved from VRAM + model size)", n_gpu_layers)
         except Exception as exc:
             logger.warning("GPU layer auto-detection failed: %s. Defaulting to 0.", exc)
