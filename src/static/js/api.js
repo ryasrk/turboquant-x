@@ -38,6 +38,27 @@ export async function switchModel(filename) {
   return r.json();
 }
 
+export async function switchProvider(provider, apiKey) {
+  const body = { provider };
+  if (apiKey) body.api_key = apiKey;
+  const r = await fetch('/v1/switch-provider', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || r.statusText);
+  }
+  return r.json();
+}
+
+export async function fetchCloudProviders() {
+  const r = await fetch('/v1/cloud-providers');
+  if (!r.ok) throw new Error(`Providers: ${r.status}`);
+  return r.json();
+}
+
 /**
  * Start a streaming chat completion. Returns the ReadableStream reader.
  * @param {Array} messages - Chat messages

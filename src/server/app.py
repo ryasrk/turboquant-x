@@ -393,6 +393,7 @@ def create_app(
     ultra_quant_config: dict[str, Any] | None = None,
     thought_log_path: str | None = None,
     cloud_config: Any | None = None,
+    cloud_yaml_config: dict[str, Any] | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -425,6 +426,7 @@ def create_app(
     app.state.ultra_quant_config = ultra_quant_config or {}
     app.state.thought_log_path = thought_log_path
     app.state.cloud_config = cloud_config
+    app.state._cloud_yaml_config = cloud_yaml_config or {}
 
     # CORS middleware
     origins = cors_origins or ["http://localhost:3000", "http://localhost:8000"]

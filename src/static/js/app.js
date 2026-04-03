@@ -1,7 +1,7 @@
 /** Main entry — wires all modules together. */
 
 import { state } from './state.js';
-import { fetchHealth, switchMode, fetchAvailableModels, switchModel } from './api.js';
+import { fetchHealth, switchMode, fetchAvailableModels, switchModel, switchProvider } from './api.js';
 import { showToast, appendMessage, renderAssistantContent, getChatEl, updateContextMeter } from './ui.js';
 import { sendMessage, clearSession } from './chat.js';
 import { initSettings, openSettings, syncModeFromHealth } from './settings.js';
@@ -26,12 +26,86 @@ const settingsBtn  = document.getElementById('settings-btn');
 const thinkingBtn  = document.getElementById('thinking-btn');
 const agentBtn     = document.getElementById('agent-btn');
 const uptimeDisp   = document.getElementById('uptime-disp');
+const modelNameDisp = document.getElementById('model-name-disp');
 const headerModeSelect  = document.getElementById('header-mode-select');
 const headerModelSelect = document.getElementById('header-model-select');
+const localToggleHeader = document.getElementById('local-toggle');
+const cloudToggleHeader = document.getElementById('cloud-toggle');
 
 // ── Init modules ──────────────────────────────────────────────────────
 initSettings();
 initUpload();
+initInferenceToggle();
+
+// ── Inference type toggle (header) ───────────────────────────────────
+function initInferenceToggle() {
+  if (!localToggleHeader || !cloudToggleHeader) return;
+  
+  localToggleHeader.addEventListener('click', () => {
+    setHeaderInferenceType('local');
+  });
+  
+  cloudToggleHeader.addEventListener('click', () => {
+    setHeaderInferenceType('cloud');
+  });
+  
+  // Initialize display
+  const currentType = state.settings.inferenceType || 'local';
+  updateHeaderInferenceDisplay(currentType);
+}
+
+function setHeaderInferenceType(type) {
+  state.settings.inferenceType = type;
+  updateHeaderInferenceDisplay(type);
+  
+  // Update model select based on inference type
+  updateHeaderModelSelect(type);
+  
+  showToast(`Switched to ${type} inference`, 'info');
+}
+
+function updateHeaderInferenceDisplay(type) {
+  if (!localToggleHeader || !cloudToggleHeader) return;
+  
+  localToggleHeader.classList.toggle('active', type === 'local');
+  cloudToggleHeader.classList.toggle('active', type === 'cloud');
+  
+  localToggleHeader.setAttribute('aria-checked', type === 'local');
+  cloudToggleHeader.setAttribute('aria-checked', type === 'cloud');
+}
+
+function updateHeaderModelSelect(type) {
+  if (!headerModelSelect) return;
+  if (type === 'local') {
+    headerModelSelect.title = 'Switch local model';
+    headerModelSelect.setAttribute('aria-label', 'Select local model');
+    populateHeaderModels(); // Existing local models
+  } else {
+    headerModelSelect.title = 'Switch cloud provider';
+    headerModelSelect.setAttribute('aria-label', 'Select cloud provider');
+    populateHeaderProviders(); // New cloud providers
+  }
+}
+
+async function populateHeaderProviders() {
+  if (!headerModelSelect) return;
+  const providers = [
+    { name: 'OpenAI (GPT-4)', value: 'openai' },
+    { name: 'Anthropic (Claude)', value: 'anthropic' },
+    { name: 'Zhipu (GLM)', value: 'zhipu' },
+    { name: 'Moonshot (Kimi)', value: 'moonshot' },
+    { name: 'DeepSeek', value: 'deepseek' }
+  ];
+  
+  headerModelSelect.innerHTML = '';
+  for (const provider of providers) {
+    const opt = document.createElement('option');
+    opt.value = provider.value;
+    opt.textContent = provider.name;
+    opt.selected = provider.value === (state.settings.cloudProvider || 'openai');
+    headerModelSelect.appendChild(opt);
+  }
+}
 
 // ── Thinking support ──────────────────────────────────────────────────
 let _supportsThinking = false;
@@ -53,49 +127,75 @@ function updateThinkingUI(supports) {
 
 // ── Header mode switcher ──────────────────────────────────────────────
 let _modeSwitching = false;
-headerModeSelect.addEventListener('change', async () => {
-  const newMode = headerModeSelect.value;
-  if (_modeSwitching || newMode === state.settings.inferenceMode) return;
-  _modeSwitching = true;
-  headerModeSelect.disabled = true;
-  showToast(`Switching to ${newMode}… (model reloading)`);
-  try {
-    await switchMode(newMode);
-    state.settings.inferenceMode = newMode;
-    syncModeFromHealth(newMode);
-    showToast(`Mode: ${newMode}`);
-  } catch (e) {
-    showToast(`Mode switch failed: ${e.message}`);
-    headerModeSelect.value = state.settings.inferenceMode;
-  } finally {
-    _modeSwitching = false;
-    headerModeSelect.disabled = false;
-    pollHealth();
-  }
-});
+if (headerModeSelect) {
+  headerModeSelect.addEventListener('change', async () => {
+    const newMode = headerModeSelect.value;
+    if (_modeSwitching || newMode === state.settings.inferenceMode) return;
+    _modeSwitching = true;
+    headerModeSelect.disabled = true;
+    showToast(`Switching to ${newMode}… (model reloading)`);
+    try {
+      await switchMode(newMode);
+      state.settings.inferenceMode = newMode;
+      syncModeFromHealth(newMode);
+      showToast(`Mode: ${newMode}`);
+    } catch (e) {
+      showToast(`Mode switch failed: ${e.message}`);
+      headerModeSelect.value = state.settings.inferenceMode;
+    } finally {
+      _modeSwitching = false;
+      headerModeSelect.disabled = false;
+      pollHealth();
+    }
+  });
+}
 
 // ── Header model switcher ─────────────────────────────────────────────
 let _modelSwitching = false;
-headerModelSelect.addEventListener('change', async () => {
-  const filename = headerModelSelect.value;
-  if (_modelSwitching || !filename) return;
-  _modelSwitching = true;
-  headerModelSelect.disabled = true;
-  showToast(`Loading ${filename}…`);
-  try {
-    const d = await switchModel(filename);
-    showToast(`Model loaded: ${d.model_name}`);
-  } catch (e) {
-    showToast(`Load failed: ${e.message}`);
-  } finally {
-    _modelSwitching = false;
-    headerModelSelect.disabled = false;
-    pollHealth();
-    populateHeaderModels();
-  }
-});
+if (headerModelSelect) {
+  headerModelSelect.addEventListener('change', async () => {
+    const value = headerModelSelect.value;
+    if (_modelSwitching || !value) return;
+
+    // Cloud mode: switch provider on server
+    if (state.settings.inferenceType === 'cloud') {
+      _modelSwitching = true;
+      headerModelSelect.disabled = true;
+      const displayName = headerModelSelect.selectedOptions[0]?.textContent || value;
+      showToast(`Switching to ${displayName}…`);
+      try {
+        const result = await switchProvider(value);
+        state.settings.cloudProvider = value;
+        showToast(`Cloud provider: ${displayName} (${result.model})`, 'info');
+      } catch (e) {
+        showToast(`Provider switch failed: ${e.message}`, 'error');
+      } finally {
+        _modelSwitching = false;
+        headerModelSelect.disabled = false;
+      }
+      return;
+    }
+
+    // Local mode: load the model file
+    _modelSwitching = true;
+    headerModelSelect.disabled = true;
+    showToast(`Loading ${value}…`);
+    try {
+      const d = await switchModel(value);
+      showToast(`Model loaded: ${d.model_name}`);
+    } catch (e) {
+      showToast(`Load failed: ${e.message}`);
+    } finally {
+      _modelSwitching = false;
+      headerModelSelect.disabled = false;
+      pollHealth();
+      populateHeaderModels();
+    }
+  });
+}
 
 async function populateHeaderModels() {
+  if (!headerModelSelect) return;
   try {
     const d = await fetchAvailableModels();
     headerModelSelect.innerHTML = '';
@@ -115,9 +215,15 @@ async function pollHealth() {
     const d = await fetchHealth();
     updateThinkingUI(!!d.supports_thinking);
     setVisionEnabled(!!d.supports_vision);
-    headerModeSelect.value = d.inference_mode || 'standard';
+    if (headerModeSelect) {
+      headerModeSelect.value = d.inference_mode || 'standard';
+    }
     syncModeFromHealth(d.inference_mode);
-    if (d.uptime_s != null) {
+    if (d.model_name && modelNameDisp) {
+      modelNameDisp.textContent = `model: ${d.model_name}`;
+      modelNameDisp.title = d.model_name;
+    }
+    if (d.uptime_s != null && uptimeDisp) {
       uptimeDisp.textContent = `uptime: ${Math.floor(d.uptime_s)}s`;
     }
     if (d.context_max) {
@@ -125,8 +231,8 @@ async function pollHealth() {
       updateContextMeter();
     }
     if (d.loading) {
-      headerModelSelect.disabled = true;
-      headerModeSelect.disabled  = true;
+      if (headerModelSelect) headerModelSelect.disabled = true;
+      if (headerModeSelect) headerModeSelect.disabled = true;
     }
   } catch (_) {}
 }
@@ -219,8 +325,13 @@ function updateAuthUI() {
 authTabs.forEach(tab => {
   tab.addEventListener('click', () => {
     _authMode = tab.dataset.tab;
-    authTabs.forEach(t => t.classList.toggle('active', t === tab));
+    authTabs.forEach(t => {
+      t.classList.toggle('active', t === tab);
+      t.setAttribute('aria-selected', t === tab);
+    });
     authSubmit.textContent = _authMode === 'login' ? 'Login' : 'Register';
+    authPassword.setAttribute('autocomplete', _authMode === 'login' ? 'current-password' : 'new-password');
+    authPassword.placeholder = _authMode === 'login' ? 'Password' : 'Choose a password';
     authError.textContent = '';
   });
 });
@@ -230,8 +341,12 @@ authForm.addEventListener('submit', async (e) => {
   authError.textContent = '';
   const username = authUsername.value.trim();
   const password = authPassword.value;
-  if (!username || !password) { authError.textContent = 'Fill in all fields'; return; }
+  if (!username) { authError.textContent = 'Username is required'; authUsername.focus(); return; }
+  if (username.length < 3) { authError.textContent = 'Username must be at least 3 characters'; authUsername.focus(); return; }
+  if (!password) { authError.textContent = 'Password is required'; authPassword.focus(); return; }
+  if (password.length < 4) { authError.textContent = 'Password must be at least 4 characters'; authPassword.focus(); return; }
   authSubmit.disabled = true;
+  authSubmit.textContent = _authMode === 'login' ? 'Logging in…' : 'Registering…';
   try {
     if (_authMode === 'login') {
       await apiLogin(username, password);
@@ -242,8 +357,10 @@ authForm.addEventListener('submit', async (e) => {
     showToast(`Welcome, ${username}`);
   } catch (err) {
     authError.textContent = err.message;
+    authPassword.focus();
   } finally {
     authSubmit.disabled = false;
+    authSubmit.textContent = _authMode === 'login' ? 'Login' : 'Register';
   }
 });
 

@@ -7,6 +7,8 @@
   --border:    #0d3a5a;
   --holo:      #00b4ff;
   --holo2:     #7df9ff;
+  --accent:    #00b4ff;
+  --accent-rgb: 0,180,255;
   --alert:     #ff6d00;
   --safe:      #39ff14;
   --text:      #cde8ff;
@@ -65,7 +67,15 @@ body::after {
   z-index: 0;
 }
 
-header, #chat, #input-bar, #status-bar, #settings-overlay { position: relative; z-index: 1; }
+header, main, #input-container, #status-bar, #settings-overlay { position: relative; z-index: 1; }
+
+main {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 
 /* ── Scrollbar ─────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }

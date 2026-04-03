@@ -1,8 +1,8 @@
 # TurboQuant-X Server Configuration
 
 model:
-  name: "qwen3.5-35b-a3b"
-  path: "./models/Qwen3.5-35B-A3B-q4_k_m.gguf"
+  name: ""     # leave empty to auto-discover the first *.gguf in models/
+  path: ""     # leave empty to auto-discover; or set e.g. ./models/my-model.gguf
   n_ctx: -1               # -1 = auto: co-optimise with GPU layers for max context
                            # Balances VRAM between KV cache and weight layers
                            # Set a fixed value (e.g. 32768) to override

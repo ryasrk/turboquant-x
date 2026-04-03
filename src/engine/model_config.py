@@ -144,6 +144,78 @@ def validate_model_path(config: ModelConfig) -> bool:
     return Path(config.model_path).is_file()
 
 
+def scan_available_models(model_dir: str | Path = DEFAULT_MODEL_DIR) -> list[dict]:
+    """Scan the model directory for available GGUF files.
+
+    Args:
+        model_dir: Directory to scan for *.gguf files.
+
+    Returns:
+        List of dicts with keys: filename, path, size_gb, model_name.
+    """
+    model_dir = Path(model_dir)
+    found: list[dict] = []
+    if not model_dir.is_dir():
+        return found
+    for f in sorted(model_dir.glob("*.gguf")):
+        size_gb = f.stat().st_size / (1024 ** 3)
+        matched_key = next(
+            (k for k, v in MODEL_REGISTRY.items() if v["filename"] == f.name),
+            None,
+        )
+        found.append({
+            "filename": f.name,
+            "path": str(f),
+            "size_gb": round(size_gb, 2),
+            "model_name": matched_key or f.stem,
+        })
+    return found
+
+
+def auto_select_model(model_dir: str | Path = DEFAULT_MODEL_DIR) -> ModelConfig | None:
+    """Auto-discover and select a model from the models directory.
+
+    Selection priority:
+    1. First registry-matched model (sorted alphabetically by filename)
+    2. First GGUF file found if no registry match exists
+
+    Args:
+        model_dir: Directory to scan for *.gguf files.
+
+    Returns:
+        ModelConfig for the selected model, or None if no GGUF files found.
+    """
+    available = scan_available_models(model_dir)
+    if not available:
+        return None
+
+    registry_matches = [m for m in available if m["model_name"] in MODEL_REGISTRY]
+    chosen = registry_matches[0] if registry_matches else available[0]
+
+    if chosen["model_name"] in MODEL_REGISTRY:
+        meta = MODEL_REGISTRY[chosen["model_name"]]
+        return ModelConfig(
+            model_path=chosen["path"],
+            model_name=chosen["model_name"],
+            n_ctx=meta["default_n_ctx"],
+            n_gpu_layers=-1,
+            chat_format=meta["chat_format"],
+            weight_size_gb=chosen["size_gb"],
+        )
+
+    # Unknown model — use safe defaults, infer chat_format from filename
+    name_lower = chosen["filename"].lower()
+    chat_format = "chatml" if any(x in name_lower for x in ("qwen", "mistral", "llama")) else "chatml"
+    return ModelConfig(
+        model_path=chosen["path"],
+        model_name=chosen["model_name"],
+        n_ctx=8192,
+        n_gpu_layers=-1,
+        chat_format=chat_format,
+        weight_size_gb=chosen["size_gb"],
+    )
+
+
 def from_env(model_dir: str | Path = DEFAULT_MODEL_DIR) -> ModelConfig:
     """Create ModelConfig from environment variables.
 

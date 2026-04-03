@@ -135,10 +135,42 @@ def build_model_config(config: dict[str, Any]) -> ModelConfig:
 
     When n_ctx is -1 (or 0), co-optimises context window and GPU layers
     together via compute_optimal_context().
+
+    When model path is empty or the file does not exist, auto-discovers
+    the first available GGUF in the models/ directory.
     """
+    from src.engine.model_config import auto_select_model
+
     model = config.get("model", {})
-    model_path = model.get("path", "models/qwen2.5-7b-instruct-q4_k_m.gguf")
+    model_path: str = model.get("path", "") or ""
     n_ctx = model.get("n_ctx", 8192)
+
+    # Auto-discover model if path is empty or the file does not exist
+    if not model_path or not Path(model_path).is_file():
+        if model_path and not Path(model_path).is_file():
+            logger.warning(
+                "Configured model path does not exist: %s — scanning models/ for available GGUF files.",
+                model_path,
+            )
+        discovered = auto_select_model()
+        if discovered is None:
+            raise FileNotFoundError(
+                "No model path configured and no *.gguf files found in models/. "
+                "Download a model with: scripts/download_model.sh"
+            )
+        logger.info(
+            "Auto-selected model: %s (%s)",
+            discovered.model_name,
+            discovered.model_path,
+        )
+        # Merge discovered defaults with any explicit config overrides
+        model_path = discovered.model_path
+        if not model.get("name"):
+            model = {**model, "name": discovered.model_name}
+        if not model.get("chat_format"):
+            model = {**model, "chat_format": discovered.chat_format}
+        if model.get("n_ctx", -1) == 0 or not model.get("n_ctx"):
+            n_ctx = model.get("n_ctx", 8192) or discovered.n_ctx
     n_gpu_layers_cfg = model.get("n_gpu_layers", -1)
 
     # Build KV config early so auto-ctx can account for actual KV compression
@@ -509,6 +541,7 @@ def main(argv: list[str] | None = None) -> None:
         turboquant_cfg, zero_quant_cfg, ultra_quant_cfg,
         thought_log_path=config.get("logging", {}).get("thought_log"),
         cloud_config=cloud_cfg,
+        cloud_yaml_config=config.get("cloud", {}),
     )
 
     import uvicorn

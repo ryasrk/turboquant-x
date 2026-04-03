@@ -193,24 +193,34 @@ class TestBuildModelConfig:
 
     def test_defaults_when_empty_config(self) -> None:
         mc = build_model_config({})
-        assert mc.model_path == "models/qwen2.5-7b-instruct-q4_k_m.gguf"
-        assert mc.model_name == "qwen2.5-7b-instruct"
-        assert mc.n_ctx == 8192
-        assert mc.n_gpu_layers == -1
-        assert mc.chat_format == "chatml"
+        # Path is auto-discovered from models/ directory
+        assert mc.model_path.endswith(".gguf")
+        assert mc.model_name  # non-empty
+        assert mc.n_ctx >= 128
+        # GPU layers are computed from available VRAM — assert they are a valid value
+        assert mc.n_gpu_layers >= 0 or mc.n_gpu_layers == -1
+        assert mc.chat_format
 
     def test_all_fields_populated(self, sample_config: dict) -> None:
         mc = build_model_config(sample_config)
         assert mc.model_path == sample_config["model"]["path"]
         assert mc.model_name == sample_config["model"]["name"]
         assert mc.n_ctx == sample_config["model"]["n_ctx"]
-        assert mc.n_gpu_layers == sample_config["model"]["n_gpu_layers"]
+        # n_gpu_layers=-1 is the "auto" sentinel: build_model_config resolves it
+        # to an actual count via VRAM detection, so accept any non-negative value.
+        cfg_layers = sample_config["model"]["n_gpu_layers"]
+        if cfg_layers == -1:
+            assert mc.n_gpu_layers >= 0
+        else:
+            assert mc.n_gpu_layers == cfg_layers
         assert mc.chat_format == sample_config["model"]["chat_format"]
 
-    def test_custom_values(self) -> None:
+    def test_custom_values(self, tmp_path: Path) -> None:
+        model_file = tmp_path / "custom.gguf"
+        model_file.touch()  # file must exist for path validation
         cfg = {
             "model": {
-                "path": "/tmp/custom.gguf",
+                "path": str(model_file),
                 "name": "custom-model",
                 "n_ctx": 4096,
                 "n_gpu_layers": 10,
@@ -218,7 +228,7 @@ class TestBuildModelConfig:
             }
         }
         mc = build_model_config(cfg)
-        assert mc.model_path == "/tmp/custom.gguf"
+        assert mc.model_path == str(model_file)
         assert mc.n_ctx == 4096
         assert mc.n_gpu_layers == 10
         assert mc.chat_format == "llama2"

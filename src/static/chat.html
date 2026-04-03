@@ -4,28 +4,35 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TurboQuant-X ∞ Neural Interface</title>
-  <link rel="stylesheet" href="/static/css/theme.css" />
-  <link rel="stylesheet" href="/static/css/layout.css" />
-  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/theme.css?v=2" />
+  <link rel="stylesheet" href="/static/css/layout.css?v=2" />
+  <link rel="stylesheet" href="/static/css/components.css?v=2" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
+<!-- Skip Navigation Link for Accessibility -->
+<a href="#user-input" class="skip-nav">Skip to main content</a>
+
 <!-- ── Login Modal ───────────────────────────────────────────────────── -->
 <div id="auth-overlay">
-  <div id="auth-panel">
+  <div id="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
     <div class="panel-header">
-      <span class="panel-title">◈ Neural Auth</span>
+      <h2 id="auth-title" class="panel-title">◈ Neural Auth</h2>
     </div>
-    <div id="auth-tabs">
-      <button class="auth-tab active" data-tab="login">Login</button>
-      <button class="auth-tab" data-tab="register">Register</button>
+    <div id="auth-tabs" role="tablist">
+      <button class="auth-tab active" data-tab="login" role="tab" aria-selected="true">Login</button>
+      <button class="auth-tab" data-tab="register" role="tab" aria-selected="false">Register</button>
     </div>
     <form id="auth-form" autocomplete="off">
-      <input type="text" id="auth-username" placeholder="Username" autocomplete="username" required />
-      <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
-      <div id="auth-error" class="auth-error"></div>
+      <label for="auth-username" class="sr-only">Username</label>
+      <input type="text" id="auth-username" placeholder="Username" autocomplete="username" required
+             aria-required="true" minlength="3" maxlength="32" />
+      <label for="auth-password" class="sr-only">Password</label>
+      <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required
+             aria-required="true" minlength="4" maxlength="128" />
+      <div id="auth-error" class="auth-error" role="alert" aria-live="polite"></div>
       <button type="submit" id="auth-submit" class="save-btn">Login</button>
     </form>
     <div id="auth-skip">
@@ -35,87 +42,119 @@
 </div>
 
 <!-- ── Session Sidebar ──────────────────────────────────────────────── -->
-<div id="session-sidebar">
+<div id="session-sidebar" role="complementary" aria-label="Chat sessions">
   <div class="sidebar-header">
     <span>◈ Sessions</span>
-    <button id="new-chat-btn" title="New Chat">+ New</button>
+    <button id="new-chat-btn" title="Create new chat session" aria-label="Create new chat session">+ New</button>
   </div>
-  <div id="session-list"></div>
+  <div id="session-list" role="list" aria-live="polite"></div>
   <div class="sidebar-footer">
     <span id="auth-user-display"></span>
-    <button id="logout-btn" class="text-btn">Logout</button>
+    <button id="logout-btn" class="text-btn" aria-label="Logout">Logout</button>
   </div>
 </div>
 
 <!-- ── Header ──────────────────────────────────────────────────────── -->
-<header>
+<header role="banner">
   <div class="logo">
-    <button id="sidebar-toggle" class="icon-btn" title="Toggle sessions">☰</button>
-    <div class="logo-mark">⬡</div>
+    <button id="sidebar-toggle" class="icon-btn" title="Toggle sessions sidebar" aria-label="Toggle sessions sidebar" aria-expanded="false">☰</button>
+    <div class="logo-mark" aria-hidden="true">⬡</div>
     <div>
       <div class="logo-text">TurboQuant-X</div>
       <div class="logo-sub">neural interface v0.2</div>
     </div>
   </div>
   <div class="header-right">
-    <select id="header-model-select" class="header-select model-select" title="Switch model">
+    <!-- Primary Local/Cloud Toggle -->
+    <div class="inference-toggle" role="radiogroup" aria-label="Choose inference type">
+      <button 
+        id="local-toggle" 
+        class="inference-btn active" 
+        role="radio" 
+        aria-checked="true"
+        aria-describedby="local-toggle-desc"
+        title="Use local models on your device"
+      >
+        <span class="inference-icon">💻</span>
+        <span class="inference-label">Local</span>
+      </button>
+      <button 
+        id="cloud-toggle" 
+        class="inference-btn" 
+        role="radio" 
+        aria-checked="false"
+        aria-describedby="cloud-toggle-desc"
+        title="Use cloud AI providers"
+      >
+        <span class="inference-icon">☁️</span>
+        <span class="inference-label">Cloud</span>
+      </button>
+    </div>
+    
+    <!-- Model/Provider Select -->
+    <select id="header-model-select" class="header-select model-select" title="Switch model" aria-label="Select model">
       <option>loading…</option>
     </select>
-    <select id="header-mode-select" class="header-select mode-select" title="Switch mode">
-      <option value="standard">Standard</option>
-      <option value="turboquant">TurboQuant</option>
-      <option value="zero-quant">Zero-Quant</option>
-      <option value="ultra-quant">Ultra-Quant</option>
-    </select>
-    <button class="icon-btn" id="settings-btn">[ settings ]</button>
+    
+    <!-- Advanced Settings Button -->
+    <button class="settings-btn" id="settings-btn" aria-label="Open settings">
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 4.754a3.246 3.246 0 100 6.492 3.246 3.246 0 000-6.492zM5.754 8a2.246 2.246 0 114.492 0 2.246 2.246 0 01-4.492 0z"/>
+        <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 01-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 01-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 01.52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 011.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 011.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 01.52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 01-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 01-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 002.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 00-1.115 2.692l.319.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 00-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 00-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 00-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 002.611 8.87l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 003.726 4.31l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 002.692-1.115l.094-.319z"/>
+      </svg>
+      Settings
+    </button>
   </div>
 </header>
 
 <!-- ── Chat messages ────────────────────────────────────────────────── -->
-<div id="chat">
-  <div id="welcome">
-    <div class="big">◈</div>
-    <div class="big-text">Neural Link Established</div>
-    <p>TurboQuant-X is online<br>Transmit query to begin</p>
+<main role="main">
+  <div id="chat" role="log" aria-live="polite" aria-label="Chat conversation">
+    <div id="welcome">
+      <div class="big" aria-hidden="true">◈</div>
+      <div class="big-text">Neural Link Established</div>
+      <p>TurboQuant-X is online<br>Transmit query to begin</p>
+    </div>
   </div>
-</div>
+</main>
 
 <!-- ── Image preview bar ────────────────────────────────────────────── -->
 <!-- (moved inside input-box below) -->
 
 <!-- ── Input area ───────────────────────────────────────────────────── -->
-<div id="context-warning">
+<div id="context-warning" role="alert" aria-live="assertive">
   <span id="context-warning-text">Context window exceeded</span>
-  <span class="ctx-dismiss" id="ctx-dismiss">✕</span>
+  <button class="ctx-dismiss" id="ctx-dismiss" aria-label="Dismiss context warning">✕</button>
 </div>
-<div id="input-container">
+<div id="input-container" role="region" aria-label="Message input">
   <div id="scroll-bottom-wrap">
-    <button id="scroll-bottom-btn" title="Scroll to bottom">
-      <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z" clip-rule="evenodd"></path></svg>
+    <button id="scroll-bottom-btn" title="Scroll to bottom" aria-label="Scroll to bottom of conversation">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z" clip-rule="evenodd"></path></svg>
     </button>
   </div>
   <div id="input-bar">
     <div id="input-box">
-      <div id="image-preview-bar"></div>
-      <input type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+      <div id="image-preview-bar" aria-live="polite"></div>
+      <input type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden aria-label="Upload images" />
       <textarea
         id="user-input"
         placeholder="Send a message…"
         rows="2"
         autocomplete="off"
+        aria-label="Type your message"
       ></textarea>
       <div id="input-toolbar">
         <div id="input-tools-left">
-          <button id="upload-btn" title="Attach file" type="button">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 1v10M1 6h10"/></svg>
+          <button id="upload-btn" title="Attach file" type="button" aria-label="Attach file">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M6 1v10M1 6h10"/></svg>
           </button>
-          <button id="agent-btn" title="Agent Mode" type="button">🤖 Agent</button>
-          <button id="thinking-btn" title="Toggle chain-of-thought thinking" type="button">◈ Think</button>
+          <button id="agent-btn" title="Toggle agent mode" type="button" aria-pressed="false">🤖 Agent</button>
+          <button id="thinking-btn" title="Toggle chain-of-thought thinking" type="button" aria-pressed="false">◈ Think</button>
         </div>
         <div id="input-tools-right">
-          <button id="clear-btn" title="Clear session" type="button">CLR</button>
-          <button id="send-btn" title="Send message" type="submit">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.3V2.7M8 2.7L4 6.7M8 2.7l4 4"/></svg>
+          <button id="clear-btn" title="Clear current session" type="button" aria-label="Clear current session">CLR</button>
+          <button id="send-btn" title="Send message" type="submit" aria-label="Send message">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13.3V2.7M8 2.7L4 6.7M8 2.7l4 4"/></svg>
           </button>
         </div>
       </div>
@@ -127,6 +166,7 @@
 <div id="status-bar">
   <span>◈ SYS:ONLINE</span>
   <span>PORT:8000</span>
+  <span id="model-name-disp">model: —</span>
   <span id="token-count">tokens: —</span>
   <span id="context-meter" class="context-meter" title="Context window usage">
     <span class="context-label">ctx:</span>
@@ -139,63 +179,158 @@
 </div>
 
 <!-- ── Settings panel ───────────────────────────────────────────────── -->
-<div id="settings-overlay">
+<div id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-panel-title">
   <div id="settings-panel">
     <div class="panel-header">
-      <span class="panel-title">◈ System Config</span>
-      <button class="close-btn" id="settings-close">✕</button>
+      <h2 id="settings-panel-title" class="panel-title">◈ System Config</h2>
+      <button class="close-btn" id="settings-close" aria-label="Close settings">✕</button>
     </div>
 
     <div>
-      <div class="field-label">System Prompt</div>
+      <label for="system-prompt-input" class="field-label">System Prompt</label>
       <textarea
         id="system-prompt-input"
         placeholder="You are TurboQuant-X, an advanced AI system…"
+        aria-describedby="system-prompt-desc"
       ></textarea>
+      <div id="system-prompt-desc" class="field-description">Define the AI's behavior and personality</div>
     </div>
 
     <div class="settings-row">
       <div class="settings-field">
-        <div class="field-label">Max Tokens</div>
-        <input type="number" class="number-input" id="max-tokens-input" value="2048" min="1" max="16384" />
+        <label for="max-tokens-input" class="field-label">Max Tokens</label>
+        <input type="number" class="number-input" id="max-tokens-input" value="2048" min="1" max="16384" 
+               aria-describedby="max-tokens-desc" />
+        <div id="max-tokens-desc" class="field-description">Maximum response length</div>
       </div>
       <div class="settings-field">
-        <div class="field-label">Temperature</div>
-        <input type="number" class="number-input" id="temperature-input" value="0.7" min="0" max="2" step="0.05" />
+        <label for="temperature-input" class="field-label">Temperature</label>
+        <input type="number" class="number-input" id="temperature-input" value="0.7" min="0" max="2" step="0.05" 
+               aria-describedby="temperature-desc" />
+        <div id="temperature-desc" class="field-description">Creativity level (0=deterministic, 2=creative)</div>
       </div>
       <div class="settings-field">
-        <div class="field-label">Top-P</div>
-        <input type="number" class="number-input" id="top-p-input" value="0.95" min="0" max="1" step="0.05" />
+        <label for="top-p-input" class="field-label">Top-P</label>
+        <input type="number" class="number-input" id="top-p-input" value="0.95" min="0" max="1" step="0.05" 
+               aria-describedby="top-p-desc" />
+        <div id="top-p-desc" class="field-description">Nucleus sampling threshold</div>
       </div>
     </div>
 
-    <div class="settings-row">
-      <div class="settings-field">
-        <div class="field-label">Inference Mode</div>
-        <select class="select-input" id="mode-select">
-          <option value="standard">Standard</option>
-          <option value="turboquant">TurboQuant</option>
-          <option value="zero-quant">Zero-Quant</option>
-          <option value="ultra-quant">Ultra-Quant</option>
-        </select>
+    <!-- Inference Type Selection -->
+    <div class="settings-section">
+      <div class="section-header">
+        <h3 class="section-title">Inference Type</h3>
+        <button class="help-btn" id="inference-help" aria-label="Get help with inference types">
+          <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 15A7 7 0 118 1a7 7 0 010 14zm0 1A8 8 0 108 0a8 8 0 000 16z"/>
+            <path d="M5.255 5.786a.237.237 0 00.241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 00.25.246h.811a.25.25 0 00.25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/>
+          </svg>
+        </button>
       </div>
-      <div class="settings-field">
-        <div class="field-label">Debug Mode</div>
-        <div class="toggle-wrapper">
-          <button class="toggle-btn" id="debug-toggle" type="button">OFF</button>
-          <span id="mode-loading">◈ switching…</span>
+      
+      <div class="inference-cards">
+        <div class="inference-card local-card active" id="local-card">
+          <div class="card-header">
+            <div class="card-icon">💻</div>
+            <div class="card-title">Local Inference</div>
+            <div class="card-subtitle">Run on your device</div>
+          </div>
+          <ul class="card-features">
+            <li>✓ Privacy & offline use</li>
+            <li>✓ No usage costs</li>
+            <li>⚠ Requires GPU/RAM</li>
+          </ul>
+        </div>
+        
+        <div class="inference-card cloud-card" id="cloud-card">
+          <div class="card-header">
+            <div class="card-icon">☁️</div>
+            <div class="card-title">Cloud Inference</div>
+            <div class="card-subtitle">Use cloud AI providers</div>
+          </div>
+          <ul class="card-features">
+            <li>✓ Faster responses</li>
+            <li>✓ Latest models</li>
+            <li>💰 Pay per use</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Local Settings (shown when local is selected) -->
+    <div class="settings-section local-settings" id="local-settings">
+      <div class="section-header">
+        <h3 class="section-title">Local Model Settings</h3>
+      </div>
+      
+      <div class="settings-row">
+        <div class="settings-field">
+          <div class="field-label">
+            Quantization Mode
+            <button class="help-btn" id="quant-help" aria-label="Learn about quantization modes">
+              <svg width="12" height="12" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 15A7 7 0 118 1a7 7 0 010 14zm0 1A8 8 0 108 0a8 8 0 000 16z"/>
+                <path d="M5.255 5.786a.237.237 0 00.241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 00.25.246h.811a.25.25 0 00.25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/>
+              </svg>
+            </button>
+          </div>
+          <select class="select-input" id="mode-select" aria-describedby="mode-description">
+            <option value="standard">Standard (Balanced)</option>
+            <option value="turboquant">TurboQuant (Recommended)</option>
+            <option value="zero-quant">Zero-Quant (Memory Efficient)</option>
+            <option value="ultra-quant">Ultra-Quant (Large Models)</option>
+          </select>
+          <div id="mode-description" class="field-description">Choose compression level for model inference</div>
+        </div>
+        <div class="settings-field">
+          <div class="field-label">Debug Mode</div>
+          <div class="toggle-wrapper">
+            <button class="toggle-btn" id="debug-toggle" type="button" role="switch" aria-checked="false">OFF</button>
+            <span id="mode-loading" aria-live="polite">◈ switching…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Cloud Settings (hidden by default) -->
+    <div class="settings-section cloud-settings hidden" id="cloud-settings">
+      <div class="section-header">
+        <h3 class="section-title">Cloud Provider Settings</h3>
+      </div>
+      
+      <div class="settings-row">
+        <div class="settings-field">
+          <div class="field-label">Provider</div>
+          <select class="select-input" id="provider-select" aria-describedby="provider-description">
+            <option value="openai">OpenAI (GPT-4)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="zhipu">Zhipu (GLM)</option>
+            <option value="moonshot">Moonshot (Kimi)</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+          <div id="provider-description" class="field-description">Select your preferred cloud AI provider</div>
+        </div>
+        <div class="settings-field">
+          <div class="field-label">API Key Status</div>
+          <div class="api-key-status" id="api-key-status">
+            <span class="status-indicator not-configured">●</span>
+            <span class="status-text">Not configured</span>
+            <button class="text-btn" id="configure-api-btn">Configure</button>
+          </div>
         </div>
       </div>
     </div>
 
     <div>
       <div class="field-label">Available Models</div>
-      <div id="model-list">
-        <div class="model-item"><span class="model-name" style="color:var(--text-dim)">scanning models…</span></div>
+      <div id="model-list" role="list" aria-live="polite" aria-label="Available models">
+        <div class="model-item" role="listitem"><span class="model-name" style="color:var(--text-dim)">scanning models…</span></div>
       </div>
     </div>
 
-    <button class="save-btn" id="save-settings-btn">[ Save ]</button>
+    <button class="save-btn" id="save-settings-btn" aria-describedby="save-settings-desc">[ Save ]</button>
+    <div id="save-settings-desc" class="sr-only">Save all configuration changes</div>
   </div>
 </div>
 
@@ -218,6 +353,6 @@
   </div>
 </div>
 
-<script type="module" src="/static/js/app.js"></script>
+<script type="module" src="/static/js/app.js?v=2"></script>
 </body>
 </html>

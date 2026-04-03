@@ -688,3 +688,123 @@ async def switch_model_endpoint(request: Request):
         raise HTTPException(status_code=500, detail=f"Model switch failed: {e}")
 
     return result
+
+
+@router.post("/v1/switch-provider")
+async def switch_provider_endpoint(request: Request):
+    """Switch cloud provider at runtime (unloads + reloads cloud engine)."""
+    import asyncio
+
+    body = await request.json()
+    provider_name = body.get("provider", "").strip()
+    if not provider_name:
+        raise HTTPException(status_code=422, detail="'provider' field is required")
+
+    api_key = body.get("api_key", "").strip()
+
+    try:
+        from src.engine.cloud.registry import build_cloud_configs, SUPPORTED_PROVIDERS
+        from src.engine.cloud.provider import CloudConfig
+        from src.server.app import (
+            _create_and_load_engine, _unload_engines, InferenceMode as _IM, _switch_lock,
+        )
+        import src.server.app as _app_module
+
+        if provider_name not in SUPPORTED_PROVIDERS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown provider: {provider_name}. Valid: {list(SUPPORTED_PROVIDERS.keys())}",
+            )
+
+        # Build all cloud configs from existing config
+        import os
+        cloud_section = getattr(request.app.state, "_cloud_yaml_config", {})
+        configs = build_cloud_configs({"cloud": cloud_section})
+
+        # If an api_key was provided, use it; otherwise check existing configs
+        if api_key:
+            # Build config from the provided key + known defaults
+            providers_cfg = cloud_section.get("providers", {}).get(provider_name, {})
+            new_config = CloudConfig(
+                provider=provider_name,
+                api_key=api_key,
+                base_url=providers_cfg.get("base_url"),
+                model=providers_cfg.get("model", ""),
+                max_tokens=providers_cfg.get("max_tokens", 2048),
+                temperature=providers_cfg.get("temperature", 0.7),
+                top_p=providers_cfg.get("top_p", 0.95),
+                timeout=providers_cfg.get("timeout", 120.0),
+            )
+        elif provider_name in configs:
+            new_config = configs[provider_name]
+        else:
+            # Check env var
+            env_key = f"TURBOQUANT_CLOUD_{provider_name.upper()}_API_KEY"
+            env_api_key = os.environ.get(env_key, "")
+            if not env_api_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No API key for provider '{provider_name}'. "
+                           f"Set {env_key} env var or provide 'api_key' in request.",
+                )
+            providers_cfg = cloud_section.get("providers", {}).get(provider_name, {})
+            new_config = CloudConfig(
+                provider=provider_name,
+                api_key=env_api_key,
+                base_url=providers_cfg.get("base_url"),
+                model=providers_cfg.get("model", ""),
+                max_tokens=providers_cfg.get("max_tokens", 2048),
+                temperature=providers_cfg.get("temperature", 0.7),
+                top_p=providers_cfg.get("top_p", 0.95),
+                timeout=providers_cfg.get("timeout", 120.0),
+            )
+
+        # Update app state and reload cloud engine
+        request.app.state.cloud_config = new_config
+
+        with _switch_lock:
+            _app_module._loading = True
+            try:
+                _unload_engines()
+                _app_module._inference_mode = _IM.CLOUD
+                _create_and_load_engine(request.app, _IM.CLOUD)
+            finally:
+                _app_module._loading = False
+
+        return {
+            "status": "ok",
+            "provider": provider_name,
+            "model": new_config.model or "(default)",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Provider switch failed")
+        raise HTTPException(status_code=500, detail=f"Provider switch failed: {e}")
+
+
+@router.get("/v1/cloud-providers")
+async def list_cloud_providers(request: Request):
+    """List available cloud providers and their configuration status."""
+    import os
+    from src.engine.cloud.registry import SUPPORTED_PROVIDERS, build_cloud_configs
+
+    cloud_section = getattr(request.app.state, "_cloud_yaml_config", {})
+    configs = build_cloud_configs({"cloud": cloud_section})
+
+    current_cloud = get_cloud_engine()
+    current_provider = current_cloud.provider_name if current_cloud else None
+
+    providers = []
+    for name, display in SUPPORTED_PROVIDERS.items():
+        env_key = f"TURBOQUANT_CLOUD_{name.upper()}_API_KEY"
+        has_key = name in configs or bool(os.environ.get(env_key, ""))
+        providers.append({
+            "name": name,
+            "display_name": display,
+            "configured": has_key,
+            "active": name == current_provider,
+        })
+
+    return {"providers": providers, "active_provider": current_provider}

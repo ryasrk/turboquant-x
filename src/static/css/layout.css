@@ -248,6 +248,7 @@ header::after {
   background: linear-gradient(0deg, rgba(5,14,31,0.98) 0%, rgba(2,11,24,0.95) 100%);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  width: 100%;
 }
 
 #scroll-bottom-wrap {
@@ -281,8 +282,9 @@ header::after {
 #scroll-bottom-btn.visible { display: flex; }
 
 #input-bar {
-  max-width: 960px;
+  max-width: 720px;
   margin: 0 auto;
+  width: 100%;
 }
 
 #input-box {
@@ -384,6 +386,14 @@ header::after {
 }
 #status-bar span { opacity: 0.6; }
 #token-count { color: var(--safe); opacity: 1 !important; }
+#model-name-disp {
+  color: var(--holo2);
+  opacity: 1 !important;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── Context meter ─────────────────────────────────────────────────── */
 .context-meter {
