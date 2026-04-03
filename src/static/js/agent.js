@@ -14,6 +14,8 @@ const TOOL_ICONS = {
   exec_shell: '💻',
   get_env: '⚙️',
   current_time: '🕐',
+  // Terminal (requires approval)
+  terminal_exec: '🖥️',
   // Web
   web_search: '🔍',
   fetch_webpage: '🌐',
@@ -37,7 +39,8 @@ export function createToolCallCard(name, args) {
   const card = document.createElement('div');
   card.className = 'tool-card tool-call';
   
-  const icon = TOOL_ICONS[name] || '🔧';
+  const isMcp = name.startsWith('mcp_');
+  const icon = isMcp ? '🔌' : (TOOL_ICONS[name] || '🔧');
   const argSummary = Object.entries(args)
     .map(([k, v]) => {
       let display;
@@ -136,4 +139,109 @@ export function isAgentEnabled() {
 export function toggleAgent() {
   state.agent = !state.agent;
   return state.agent;
+}
+
+/** Risk level configuration */
+const RISK_CONFIG = {
+  low:      { emoji: '🟢', label: 'Low Risk',      color: 'var(--success, #4caf50)' },
+  medium:   { emoji: '🟡', label: 'Medium Risk',   color: '#ff9800' },
+  high:     { emoji: '🟠', label: 'High Risk',     color: '#f57c00' },
+  critical: { emoji: '🔴', label: 'Critical Risk', color: 'var(--alert, #f44336)' },
+};
+
+const INTENT_LABELS = {
+  read_only:           '📖 Read Only',
+  write:               '✏️ File Write',
+  destructive:         '💥 Destructive',
+  network:             '🌐 Network',
+  package_management:  '📦 Package Install',
+  process_management:  '⚙️ Process Management',
+  system_admin:        '🔒 System Admin',
+  unknown:             '❓ Unknown',
+};
+
+/** Create a tool approval request card with Allow/Deny buttons.
+ *  Returns { card, promise } where promise resolves to true (allowed) or false (denied). */
+export function createToolApprovalCard(name, args, approvalId, riskLevel, intent, warnings) {
+  const card = document.createElement('div');
+  const risk = riskLevel || 'medium';
+  card.className = `tool-card tool-approval risk-${risk}`;
+  card.dataset.approvalId = approvalId;
+
+  const icon = TOOL_ICONS[name] || '🔧';
+  const command = args.command || JSON.stringify(args);
+  const reason = args.reason || '';
+  const riskCfg = RISK_CONFIG[risk] || RISK_CONFIG.medium;
+  const intentLabel = INTENT_LABELS[intent] || INTENT_LABELS.unknown;
+  const warningsList = (warnings || []);
+
+  card.innerHTML = `
+    <div class="tool-header">
+      <span class="tool-icon">🛡️</span>
+      <span class="tool-name">Approval Required</span>
+      <span class="tool-risk-badge" style="color:${riskCfg.color}">${riskCfg.emoji} ${riskCfg.label}</span>
+      <span class="tool-status">⏳</span>
+    </div>
+    <div class="tool-approval-meta">
+      <span class="tool-intent-badge">${intentLabel}</span>
+    </div>
+    <div class="tool-approval-command">
+      <span class="tool-approval-label">${icon} ${escapeHtml(name)}</span>
+      <pre class="tool-approval-cmd">${escapeHtml(command)}</pre>
+      ${reason ? `<div class="tool-approval-reason">${escapeHtml(reason)}</div>` : ''}
+    </div>
+    ${warningsList.length > 0 ? `
+      <div class="tool-approval-warnings">
+        ${warningsList.map(w => `<div class="tool-approval-warning">⚠️ ${escapeHtml(w)}</div>`).join('')}
+      </div>
+    ` : ''}
+    <div class="tool-approval-actions">
+      <button class="tool-approve-btn" data-action="allow">✓ Allow</button>
+      <button class="tool-deny-btn" data-action="deny">✕ Deny</button>
+    </div>
+  `;
+
+  const promise = new Promise((resolve) => {
+    card.querySelector('.tool-approve-btn').addEventListener('click', async () => {
+      setApprovalState(card, true);
+      await sendApprovalDecision(approvalId, true);
+      resolve(true);
+    });
+    card.querySelector('.tool-deny-btn').addEventListener('click', async () => {
+      setApprovalState(card, false);
+      await sendApprovalDecision(approvalId, false);
+      resolve(false);
+    });
+  });
+
+  return { card, promise };
+}
+
+/** Update approval card to show the decision */
+function setApprovalState(card, approved) {
+  const actions = card.querySelector('.tool-approval-actions');
+  const warnings = card.querySelector('.tool-approval-warnings');
+  const status = card.querySelector('.tool-status');
+  if (actions) actions.remove();
+  if (warnings) warnings.remove();
+  if (status) {
+    status.textContent = approved ? '✅' : '❌';
+    status.classList.remove('spinning');
+  }
+  card.classList.add(approved ? 'approved' : 'denied');
+  const label = card.querySelector('.tool-name');
+  if (label) label.textContent = approved ? 'Approved' : 'Denied';
+}
+
+/** Send the allow/deny decision to the server */
+async function sendApprovalDecision(approvalId, approved) {
+  try {
+    await fetch('/v1/agent/approve-tool', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approval_id: approvalId, approved }),
+    });
+  } catch (err) {
+    console.error('Failed to send approval decision:', err);
+  }
 }

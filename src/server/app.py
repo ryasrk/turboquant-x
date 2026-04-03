@@ -100,6 +100,7 @@ def init_agent_registry() -> None:
         SaveNoteTool, RecallNoteTool, DeleteNoteTool,
         SqlQueryTool,
         DiffFilesTool, EncodeDecodeTool,
+        TerminalTool,
     )
 
     _agent_registry = ToolRegistry()
@@ -143,6 +144,9 @@ def init_agent_registry() -> None:
     # Utility
     _agent_registry.register(DiffFilesTool())
     _agent_registry.register(EncodeDecodeTool())
+
+    # Terminal (requires user approval)
+    _agent_registry.register(TerminalTool())
 
     # Web (optional deps)
     try:
@@ -376,9 +380,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning("Failed to initialize database: %s", e)
 
+    # Connect to MCP servers and register their tools
+    try:
+        from src.agent.mcp_loader import connect_mcp_servers
+        mcp_count = await connect_mcp_servers(_agent_registry)
+        if mcp_count > 0:
+            logger.info("MCP: %d external tools registered", mcp_count)
+    except Exception as e:
+        logger.warning("MCP server connection failed: %s", e)
+
     yield
 
     # Shutdown
+    try:
+        from src.agent.mcp_loader import shutdown_mcp_servers
+        await shutdown_mcp_servers()
+    except Exception:
+        pass
     _unload_engines()
     logger.info("Server shutdown complete")
 

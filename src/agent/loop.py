@@ -6,10 +6,12 @@ import json
 import logging
 import os
 import re
+import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
 
+from src.agent.approval import get_approval_store
 from src.agent.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -471,6 +473,57 @@ class AgentLoop:
                     seen_calls.add(call_key)
 
                     yield {"type": "tool_call", "id": tc_id, "name": name, "arguments": arguments}
+
+                    # Check if tool requires user approval before execution
+                    tool_obj = self.registry.get(name)
+                    if tool_obj is not None and getattr(tool_obj, "requires_approval", False):
+                        approval_id = f"approve_{uuid.uuid4().hex[:12]}"
+                        # Run validation pipeline if available (TerminalTool)
+                        validation = {}
+                        if hasattr(tool_obj, "validate"):
+                            cmd = arguments.get("command", "")
+                            validation = tool_obj.validate(cmd)
+                            # If hard-blocked by validation, skip approval flow
+                            if validation.get("blocked"):
+                                result_str = validation["blocked"]
+                                yield {"type": "tool_result", "id": tc_id, "name": name, "content": result_str}
+                                iteration_results.append({"name": name, "args": raw_args, "result": result_str})
+                                if name not in tools_used:
+                                    tools_used.append(name)
+                                continue
+                        yield {
+                            "type": "tool_approval_request",
+                            "id": tc_id,
+                            "approval_id": approval_id,
+                            "name": name,
+                            "arguments": arguments,
+                            "risk_level": validation.get("risk_level", "medium"),
+                            "intent": validation.get("intent", "unknown"),
+                            "warnings": validation.get("warnings", []),
+                        }
+                        # Wait for user to allow or deny
+                        store = get_approval_store()
+                        store.create(approval_id)
+                        approved = await store.wait_for_approval(approval_id)
+                        if not approved:
+                            result_str = "Command denied by user."
+                            yield {
+                                "type": "tool_approval_result",
+                                "id": tc_id,
+                                "approval_id": approval_id,
+                                "approved": False,
+                            }
+                            yield {"type": "tool_result", "id": tc_id, "name": name, "content": result_str}
+                            iteration_results.append({"name": name, "args": raw_args, "result": result_str})
+                            if name not in tools_used:
+                                tools_used.append(name)
+                            continue
+                        yield {
+                            "type": "tool_approval_result",
+                            "id": tc_id,
+                            "approval_id": approval_id,
+                            "approved": True,
+                        }
 
                     result_str = await self.registry.execute(name, arguments)
                     if len(result_str) > self.max_tool_result_chars:

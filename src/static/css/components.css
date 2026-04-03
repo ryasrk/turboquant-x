@@ -607,6 +607,204 @@ body { transition: padding-left 0.25s ease; }
 .agent-summary { display: flex; gap: 12px; align-items: center; padding: 8px; border-radius: 8px; background: rgba(var(--accent-rgb, 0,200,255), 0.05); margin-top: 8px; font-size: 0.8rem; }
 .agent-summary-label { font-weight: 700; }
 
+/* === Tool Approval Card === */
+.tool-approval {
+  border-left-color: #ff9800;
+  background: rgba(255, 152, 0, 0.08);
+}
+.tool-approval.approved {
+  border-left-color: var(--success, #4caf50);
+  background: rgba(76, 175, 80, 0.08);
+}
+.tool-approval.denied {
+  border-left-color: var(--alert, #f44336);
+  background: rgba(244, 67, 54, 0.08);
+}
+.tool-approval-command {
+  margin: 8px 0;
+}
+.tool-approval-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+.tool-approval-cmd {
+  margin: 4px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  font-family: monospace;
+  font-size: 0.9rem;
+  color: #ff9800;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.tool-approval.approved .tool-approval-cmd { color: var(--success, #4caf50); }
+.tool-approval.denied .tool-approval-cmd { color: var(--alert, #f44336); text-decoration: line-through; }
+.tool-approval-reason {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.tool-approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.tool-approve-btn, .tool-deny-btn {
+  padding: 6px 18px;
+  border-radius: 6px;
+  border: none;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.tool-approve-btn:hover, .tool-deny-btn:hover { opacity: 0.85; }
+.tool-approve-btn:active, .tool-deny-btn:active { transform: scale(0.97); }
+.tool-approve-btn {
+  background: var(--success, #4caf50);
+  color: #fff;
+}
+.tool-deny-btn {
+  background: var(--alert, #f44336);
+  color: #fff;
+}
+
+/* Risk level border variations */
+.tool-approval.risk-low    { border-left-color: var(--success, #4caf50); background: rgba(76, 175, 80, 0.06); }
+.tool-approval.risk-medium { border-left-color: #ff9800; background: rgba(255, 152, 0, 0.08); }
+.tool-approval.risk-high   { border-left-color: #f57c00; background: rgba(245, 124, 0, 0.10); }
+.tool-approval.risk-critical { border-left-color: var(--alert, #f44336); background: rgba(244, 67, 54, 0.12); }
+
+.tool-approval.risk-low .tool-approval-cmd    { color: var(--success, #4caf50); }
+.tool-approval.risk-high .tool-approval-cmd   { color: #f57c00; }
+.tool-approval.risk-critical .tool-approval-cmd { color: var(--alert, #f44336); }
+
+/* Risk badge */
+.tool-risk-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-left: auto;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+/* Intent / Meta row */
+.tool-approval-meta {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+.tool-intent-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+/* Warnings */
+.tool-approval-warnings {
+  margin: 6px 0;
+}
+.tool-approval-warning {
+  font-size: 0.8rem;
+  color: #ff9800;
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 4px;
+  background: rgba(255, 152, 0, 0.08);
+  border-left: 2px solid #ff9800;
+}
+.tool-approval.risk-critical .tool-approval-warning {
+  color: var(--alert, #f44336);
+  background: rgba(244, 67, 54, 0.08);
+  border-left-color: var(--alert, #f44336);
+}
+
+/* === MCP Server Panel === */
+.mcp-empty {
+  text-align: center;
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+.mcp-empty-icon { font-size: 1.8rem; margin-bottom: 4px; }
+.mcp-empty-hint { font-size: 0.75rem; margin-top: 4px; opacity: 0.7; }
+.mcp-empty-hint code {
+  background: rgba(255,255,255,0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.mcp-server-card {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid #9c27b0;
+  background: rgba(156, 39, 176, 0.08);
+}
+.mcp-server-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.mcp-server-icon { font-size: 1rem; }
+.mcp-server-name { color: #ce93d8; font-family: monospace; }
+.mcp-server-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.mcp-approval-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+
+.mcp-tool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.mcp-tool-item {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  font-family: monospace;
+  cursor: default;
+}
+.mcp-tool-item:hover { background: rgba(255,255,255,0.12); }
+.mcp-tool-name { }
+.mcp-tool-approval { font-size: 0.65rem; margin-left: 2px; }
+
+.mcp-tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+.mcp-sep { opacity: 0.4; }
+.mcp-loading {
+  text-align: center;
+  padding: 12px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
 #agent-btn {
   display: flex;
   align-items: center;

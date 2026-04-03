@@ -1,0 +1,56 @@
+# MCP (Model Context Protocol) Server Configuration
+#
+# Define external MCP servers whose tools will be available to the agent.
+# Each server's tools are auto-discovered on startup and registered with
+# a "mcp_{server}_{tool}" naming convention.
+#
+# Transport types:
+#   stdio — runs a subprocess, communicates via stdin/stdout (most common)
+#   sse   — connects to an HTTP SSE endpoint
+#
+# Example MCP servers you can install:
+#   npx -y @modelcontextprotocol/server-filesystem /path/to/dir
+#   npx -y @modelcontextprotocol/server-github
+#   npx -y @modelcontextprotocol/server-sqlite /path/to/db
+#   uvx mcp-server-git --repository /path/to/repo
+#   docker run -i --rm mcp/fetch
+
+# Set to true to enable MCP server connections at startup
+enabled: false
+
+# List of MCP servers to connect to
+servers:
+  # Example: Filesystem MCP server
+  # - name: filesystem
+  #   transport: stdio
+  #   command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/user/documents"]
+  #   require_approval: false
+  #   env: {}
+
+  # Example: GitHub MCP server
+  # - name: github
+  #   transport: stdio
+  #   command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+  #   require_approval: true     # require user approval for write operations
+  #   env:
+  #     GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
+
+  # Example: SQLite MCP server
+  # - name: sqlite
+  #   transport: stdio
+  #   command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "./data/my.db"]
+  #   require_approval: false
+
+  # Example: Git MCP server (Python-based)
+  # - name: git
+  #   transport: stdio
+  #   command: ["uvx", "mcp-server-git", "--repository", "."]
+  #   require_approval: true
+
+  # Example: SSE-based MCP server (remote)
+  # - name: remote-tools
+  #   transport: sse
+  #   url: "http://localhost:8080/mcp"
+  #   headers:
+  #     Authorization: "Bearer ${MCP_API_KEY}"
+  #   require_approval: false

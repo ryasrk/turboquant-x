@@ -16,6 +16,8 @@ from src.agent.tools.sql_tool import SqlQueryTool
 from src.agent.tools.sysinfo_tool import SystemInfoTool
 from src.agent.tools.diff_tool import DiffFilesTool
 from src.agent.tools.encode_tool import EncodeDecodeTool
+from src.agent.tools.terminal_tool import TerminalTool
+from src.agent.tools.mcp_bridge_tool import McpBridgeTool
 
 __all__ = [
     # File System
@@ -38,4 +40,8 @@ __all__ = [
     "SqlQueryTool",
     # Utility
     "DiffFilesTool", "EncodeDecodeTool",
+    # Terminal (requires approval)
+    "TerminalTool",
+    # MCP Bridge
+    "McpBridgeTool",
 ]

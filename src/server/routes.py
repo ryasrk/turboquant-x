@@ -25,6 +25,7 @@ from src.server.schemas import (
     ModelListResponse,
     ErrorResponse,
 )
+from src.agent.approval import get_approval_store
 from src.utils.memory import get_gpu_memory
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,75 @@ class _ThinkStreamFilter:
         self._buf = ""
         self._thought_buf = ""
         return remaining or None
+
+
+@router.post("/v1/agent/approve-tool")
+async def approve_tool(request: Request):
+    """Allow or deny a pending tool execution request.
+
+    Body: {"approval_id": str, "approved": bool}
+    """
+    body = await request.json()
+    approval_id = body.get("approval_id")
+    approved = body.get("approved", False)
+
+    if not approval_id or not isinstance(approval_id, str):
+        raise HTTPException(status_code=422, detail="Missing or invalid approval_id")
+
+    store = get_approval_store()
+    resolved = store.resolve(approval_id, bool(approved))
+    if not resolved:
+        raise HTTPException(status_code=404, detail="No pending approval with that ID")
+
+    return {"status": "ok", "approval_id": approval_id, "approved": approved}
+
+
+@router.get("/v1/agent/tools")
+async def list_agent_tools():
+    """List all registered agent tools (built-in + MCP)."""
+    from src.server.app import get_agent_registry
+
+    registry = get_agent_registry()
+    if registry is None:
+        return {"tools": []}
+
+    tools = []
+    for defn in registry.get_definitions():
+        fn = defn["function"]
+        tool_obj = registry.get(fn["name"])
+        tools.append({
+            "name": fn["name"],
+            "description": fn.get("description", ""),
+            "requires_approval": getattr(tool_obj, "requires_approval", False) if tool_obj else False,
+            "is_mcp": fn["name"].startswith("mcp_"),
+        })
+    return {"tools": tools, "count": len(tools)}
+
+
+@router.post("/v1/agent/mcp/reload")
+async def reload_mcp_servers():
+    """Disconnect all MCP servers and reconnect from config."""
+    from src.agent.mcp_loader import shutdown_mcp_servers, connect_mcp_servers
+    from src.server.app import get_agent_registry
+
+    registry = get_agent_registry()
+    if registry is None:
+        raise HTTPException(status_code=503, detail="Agent registry not initialized")
+
+    # Remove existing MCP tools from registry
+    mcp_tools = [name for name in registry.list_tools() if name.startswith("mcp_")]
+    for name in mcp_tools:
+        try:
+            registry.unregister(name)
+        except KeyError:
+            pass
+
+    # Disconnect existing servers
+    await shutdown_mcp_servers()
+
+    # Reconnect
+    count = await connect_mcp_servers(registry)
+    return {"status": "ok", "tools_registered": count, "removed": len(mcp_tools)}
 
 
 @router.post(

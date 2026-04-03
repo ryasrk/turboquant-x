@@ -29,6 +29,11 @@ class Tool(ABC):
     @abstractmethod
     async def execute(self, **kwargs: Any) -> str: ...
 
+    @property
+    def requires_approval(self) -> bool:
+        """Whether this tool requires user approval before execution."""
+        return False
+
     def to_schema(self) -> dict:
         """Return OpenAI function-calling format."""
         return {

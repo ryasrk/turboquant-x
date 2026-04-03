@@ -19,6 +19,7 @@ import {
   createToolResultCard,
   markToolCompleted,
   createAgentSummary,
+  createToolApprovalCard,
 } from './agent.js';
 
 const inputEl = document.getElementById('user-input');
@@ -120,6 +121,21 @@ export async function sendMessage() {
             activeToolCards[parsed.id] = card;
             asstWrapper.appendChild(card);
             getChatEl().scrollTop = getChatEl().scrollHeight;
+          } else if (parsed.type === 'tool_approval_request') {
+            // Show approval card and wait for user decision
+            const { card, promise } = createToolApprovalCard(
+              parsed.name,
+              parsed.arguments || {},
+              parsed.approval_id,
+              parsed.risk_level,
+              parsed.intent,
+              parsed.warnings,
+            );
+            card.dataset.toolId = parsed.id;
+            asstWrapper.appendChild(card);
+            getChatEl().scrollTop = getChatEl().scrollHeight;
+          } else if (parsed.type === 'tool_approval_result') {
+            // Approval resolved — no UI action needed (card already updated)
           } else if (parsed.type === 'tool_result') {
             const callCard = activeToolCards[parsed.id];
             if (callCard) markToolCompleted(callCard);

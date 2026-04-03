@@ -329,6 +329,22 @@
       </div>
     </div>
 
+    <!-- MCP Server Management -->
+    <div class="settings-section" id="mcp-section">
+      <div class="section-header">
+        <h3 class="section-title">🔌 MCP Servers</h3>
+        <button class="text-btn" id="mcp-reload-btn" title="Reload MCP servers from config">↻ Reload</button>
+      </div>
+      <div class="field-description" style="margin-bottom: 8px;">
+        External tool servers connected via Model Context Protocol.
+        Configure in <code>config/mcp.yaml</code>.
+      </div>
+      <div id="mcp-server-list" role="list" aria-live="polite" aria-label="MCP servers">
+        <div class="mcp-loading">Loading MCP status…</div>
+      </div>
+      <div id="mcp-tool-summary" class="mcp-tool-summary"></div>
+    </div>
+
     <button class="save-btn" id="save-settings-btn" aria-describedby="save-settings-desc">[ Save ]</button>
     <div id="save-settings-desc" class="sr-only">Save all configuration changes</div>
   </div>

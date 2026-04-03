@@ -8,6 +8,7 @@ import { initSettings, openSettings, syncModeFromHealth } from './settings.js';
 import { refreshModelList } from './models.js';
 import { initUpload, setVisionEnabled } from './upload.js';
 import { toggleAgent } from './agent.js';
+import { initMcpPanel } from './mcp.js';
 import {
   isLoggedIn, getUser, logout as authLogout,
   apiLogin, apiRegister, apiMe,
@@ -36,6 +37,7 @@ const cloudToggleHeader = document.getElementById('cloud-toggle');
 initSettings();
 initUpload();
 initInferenceToggle();
+initMcpPanel();
 
 // ── Inference type toggle (header) ───────────────────────────────────
 function initInferenceToggle() {
@@ -219,6 +221,16 @@ async function pollHealth() {
       headerModeSelect.value = d.inference_mode || 'standard';
     }
     syncModeFromHealth(d.inference_mode);
+
+    // Sync inference type (local/cloud) from server state
+    const serverIsCloud = d.inference_mode === 'cloud';
+    const clientIsCloud = state.settings.inferenceType === 'cloud';
+    if (serverIsCloud !== clientIsCloud) {
+      state.settings.inferenceType = serverIsCloud ? 'cloud' : 'local';
+      updateHeaderInferenceDisplay(state.settings.inferenceType);
+      updateHeaderModelSelect(state.settings.inferenceType);
+    }
+
     if (d.model_name && modelNameDisp) {
       modelNameDisp.textContent = `model: ${d.model_name}`;
       modelNameDisp.title = d.model_name;
