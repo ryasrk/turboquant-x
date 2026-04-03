@@ -406,6 +406,30 @@ class AgentLoop:
                 message = result["choices"][0]["message"]
                 tool_calls = message.get("tool_calls")
 
+                # If FC handler returned structured tool_calls, also strip any tool
+                # call tags from the content to prevent the model from seeing them
+                # in conversation history and re-issuing the same calls.
+                if tool_calls:
+                    raw_content = message.get("content", "") or ""
+                    if raw_content:
+                        cleaned = _strip_tool_call_tags(raw_content)
+                        cleaned = _strip_think_blocks(cleaned, tag=f"iter-{iteration + 1}-fc-cleanup")
+                        message["content"] = cleaned.strip() or None
+
+                    # Deduplicate tool_calls by (name, arguments)
+                    seen_tc_keys: set[str] = set()
+                    deduped: list[dict] = []
+                    for tc in tool_calls:
+                        key = f"{tc['function']['name']}:{tc['function']['arguments']}"
+                        if key not in seen_tc_keys:
+                            seen_tc_keys.add(key)
+                            deduped.append(tc)
+                        else:
+                            logger.debug("Deduped tool_call: %s", key)
+                    tool_calls = deduped
+                    if not tool_calls:
+                        tool_calls = None
+
                 # Qwen3 outputs tool calls as text tags — parse from content
                 if not tool_calls:
                     content = message.get("content", "") or ""
