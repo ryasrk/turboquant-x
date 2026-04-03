@@ -419,12 +419,16 @@ async def _cloud_chat(cloud_engine, request: ChatRequest):
     if request.stream:
         return _cloud_stream_response(cloud_engine, messages, request)
 
-    return _cloud_sync_response(cloud_engine, messages, request)
+    return await _cloud_sync_response(cloud_engine, messages, request)
 
 
-def _cloud_sync_response(cloud_engine, messages: list[dict], request: ChatRequest) -> ChatResponse:
+async def _cloud_sync_response(cloud_engine, messages: list[dict], request: ChatRequest) -> ChatResponse:
     """Handle non-streaming cloud chat completion."""
-    response_msg, stats = cloud_engine.chat(
+    import asyncio
+
+    # Run the blocking HTTP call in a thread so we don't block the event loop
+    response_msg, stats = await asyncio.to_thread(
+        cloud_engine.chat,
         messages=messages,
         max_tokens=request.max_tokens,
         temperature=request.temperature,
@@ -457,7 +461,11 @@ def _cloud_sync_response(cloud_engine, messages: list[dict], request: ChatReques
 def _cloud_stream_response(
     cloud_engine, messages: list[dict], request: ChatRequest
 ) -> EventSourceResponse:
-    """Handle streaming cloud chat completion via SSE."""
+    """Handle streaming cloud chat completion via SSE.
+
+    Uses the provider's native async streaming directly to avoid
+    blocking the event loop with sync-to-async bridges.
+    """
 
     async def event_generator():
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -476,17 +484,15 @@ def _cloud_stream_response(
         )
         yield {"data": first_chunk.model_dump_json()}
 
-        # Content chunks via sync generator
-        stream = cloud_engine.chat_stream(
-            messages=messages,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-        )
-
+        # Stream content directly from async provider
         try:
-            while True:
-                token = next(stream)
+            provider = cloud_engine._provider
+            async for token in provider.chat_stream(
+                messages=messages,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+            ):
                 chunk = StreamChunk(
                     id=completion_id,
                     model=model_name,
@@ -498,8 +504,9 @@ def _cloud_stream_response(
                     ],
                 )
                 yield {"data": chunk.model_dump_json()}
-        except StopIteration:
-            pass
+        except Exception as e:
+            logger.exception("Cloud stream error")
+            yield {"data": json.dumps({"type": "error", "message": str(e)})}
 
         # Final chunk
         final_chunk = StreamChunk(

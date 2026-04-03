@@ -184,6 +184,11 @@ class OpenAICompatibleProvider(CloudProvider):
                         continue
                     delta = choices[0].get("delta", {})
                     content = delta.get("content", "")
+                    # Some reasoning models (GLM-4.5, DeepSeek-R1) stream
+                    # reasoning in a separate field.  Fall back to it when
+                    # content is empty so the user sees *something*.
+                    if not content:
+                        content = delta.get("reasoning_content", "")
                     if content:
                         yield content
 
