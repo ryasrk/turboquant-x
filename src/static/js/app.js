@@ -175,6 +175,7 @@ if (headerModelSelect) {
       } finally {
         _modelSwitching = false;
         headerModelSelect.disabled = false;
+        pollHealth();
       }
       return;
     }
@@ -232,9 +233,17 @@ async function pollHealth() {
       updateHeaderModelSelect(state.settings.inferenceType);
     }
 
-    if (d.model_name && modelNameDisp) {
-      modelNameDisp.textContent = `model: ${d.model_name}`;
-      modelNameDisp.title = d.model_name;
+    if (modelNameDisp) {
+      if (d.model_name) {
+        modelNameDisp.textContent = `model: ${d.model_name}`;
+        modelNameDisp.title = d.model_name;
+      } else if (d.loading) {
+        modelNameDisp.textContent = 'model: loading…';
+        modelNameDisp.title = 'Model is loading';
+      } else {
+        modelNameDisp.textContent = 'model: none';
+        modelNameDisp.title = 'No model loaded';
+      }
     }
     if (d.uptime_s != null && uptimeDisp) {
       uptimeDisp.textContent = `uptime: ${Math.floor(d.uptime_s)}s`;
@@ -247,10 +256,16 @@ async function pollHealth() {
       if (headerModelSelect) headerModelSelect.disabled = true;
       if (headerModeSelect) headerModeSelect.disabled = true;
     }
-  } catch (_) {}
+  } catch (err) {
+    if (modelNameDisp) {
+      modelNameDisp.textContent = 'model: offline';
+      modelNameDisp.title = `Health check failed: ${err.message}`;
+    }
+  }
 }
 pollHealth();
 setInterval(pollHealth, 15000);
+window.addEventListener('settings-changed', () => pollHealth());
 
 // ── Context warning dismiss ───────────────────────────────────────────
 const ctxDismiss = document.getElementById('ctx-dismiss');

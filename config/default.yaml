@@ -141,7 +141,9 @@ server:
   cors_origins:
     - "http://localhost:3000"
     - "http://localhost:8000"
+    - "http://127.0.0.1:8000"
     - "http://172.20.10.10:8000"
+    - "https://localhost:8000"
 
 logging:
   level: "INFO"

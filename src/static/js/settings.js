@@ -39,6 +39,12 @@ export function initSettings() {
   
   // Initialize inference type from state or default to local
   currentInferenceType = state.settings.inferenceType || 'local';
+  
+  // Initialize cloud provider dropdown from saved state
+  if (providerSelect && state.settings.cloudProvider) {
+    providerSelect.value = state.settings.cloudProvider;
+  }
+  
   updateInferenceDisplay();
   
   // Initialize debug toggle with proper ARIA
@@ -83,10 +89,12 @@ export function initSettings() {
     });
   }
 
-  // Enhanced save with inference type support
-  saveBtn.addEventListener('click', async () => {
-    await saveEnhancedSettings();
-  });
+  // Re-check API key status when provider dropdown changes
+  if (providerSelect) {
+    providerSelect.addEventListener('change', () => {
+      checkCloudProviderStatus();
+    });
+  }
 }
 
 /** Enhanced inference toggle setup */
@@ -129,15 +137,54 @@ function setupInferenceToggle() {
   }
 }
 
-/** Set inference type (local/cloud) */
-function setInferenceType(type) {
+/** Set inference type (local/cloud) — also triggers server-side switch */
+async function setInferenceType(type) {
+  const prev = currentInferenceType;
   currentInferenceType = type;
   state.settings.inferenceType = type;
   updateInferenceDisplay();
   saveSettings();
-  
-  // Announce change to screen readers
-  showToast(`Switched to ${type} inference`, 'info');
+
+  try {
+    if (type === 'cloud') {
+      let provider = state.settings.cloudProvider || (providerSelect ? providerSelect.value : '');
+      // Auto-detect configured provider if none saved
+      if (!provider) {
+        try {
+          const data = await fetchCloudProviders();
+          const configured = data.providers?.find(p => p.configured);
+          if (configured) provider = configured.name;
+        } catch (_) {}
+      }
+      if (!provider) {
+        showToast('No cloud provider configured. Set an API key first.', 'error');
+        currentInferenceType = prev;
+        state.settings.inferenceType = prev;
+        updateInferenceDisplay();
+        saveSettings();
+        return;
+      }
+      showToast(`Switching to cloud (${provider})…`, 'info');
+      await switchProvider(provider);
+      state.settings.cloudProvider = provider;
+      if (providerSelect) providerSelect.value = provider;
+      showToast(`Cloud provider: ${provider}`, 'info');
+    } else {
+      const mode = state.settings.inferenceMode || (modeSelect ? modeSelect.value : '') || 'turboquant';
+      showToast(`Switching to local (${mode})…`, 'info');
+      await switchMode(mode);
+      state.settings.inferenceMode = mode;
+      showToast(`Local mode: ${mode}`, 'info');
+    }
+    window.dispatchEvent(new CustomEvent('settings-changed'));
+  } catch (e) {
+    showToast(`Switch failed: ${e.message}`, 'error');
+    // Revert on failure
+    currentInferenceType = prev;
+    state.settings.inferenceType = prev;
+    updateInferenceDisplay();
+    saveSettings();
+  }
 }
 
 /** Update inference display based on current type */
@@ -170,6 +217,8 @@ function updateInferenceDisplay() {
   if (cloudSettings) {
     if (currentInferenceType === 'cloud') {
       cloudSettings.classList.remove('hidden');
+      // Auto-check provider status when switched to cloud
+      checkCloudProviderStatus();
     } else {
       cloudSettings.classList.add('hidden');
     }
@@ -234,6 +283,8 @@ async function saveEnhancedSettings() {
       } catch (_) {}
     } finally {
       modeLoading.classList.remove('active');
+      // Trigger health poll to update status bar model name
+      window.dispatchEvent(new CustomEvent('settings-changed'));
     }
   } else {
     showToast('Configuration updated.');
@@ -328,7 +379,7 @@ function showApiConfigDialog() {
       state.settings.cloudProvider = provider;
       state.settings.inferenceType = 'cloud';
       saveSettings();
-      updateApiKeyStatus(true);
+      updateApiKeyStatus(true, provider, true);
       closeDialog();
     } catch (e) {
       showToast(`Connection failed: ${e.message}`, 'error');
@@ -346,18 +397,23 @@ function showApiConfigDialog() {
 }
 
 /** Update API key status indicator */
-function updateApiKeyStatus(configured) {
+function updateApiKeyStatus(configured, providerName, active) {
   if (!apiKeyStatus) return;
   const indicator = apiKeyStatus.querySelector('.status-indicator');
   const text = apiKeyStatus.querySelector('.status-text');
-  if (configured) {
+  const configBtn = apiKeyStatus.querySelector('.text-btn');
+  if (configured && active) {
+    indicator.className = 'status-indicator active';
+    text.textContent = 'Active';
+    if (configBtn) configBtn.textContent = 'Reconfigure';
+  } else if (configured) {
     indicator.className = 'status-indicator configured';
-    indicator.textContent = '●';
-    text.textContent = 'Connected';
+    text.textContent = 'Key set (from .env)';
+    if (configBtn) configBtn.textContent = 'Connect';
   } else {
     indicator.className = 'status-indicator not-configured';
-    indicator.textContent = '●';
     text.textContent = 'Not configured';
+    if (configBtn) configBtn.textContent = 'Configure';
   }
 }
 
@@ -366,9 +422,11 @@ async function checkCloudProviderStatus() {
   try {
     const data = await fetchCloudProviders();
     const provider = providerSelect ? providerSelect.value : '';
-    const p = (data.providers || []).find(p => p.name === provider);
-    updateApiKeyStatus(p?.configured || false);
-  } catch (_) {}
+    const p = (data.providers || []).find(prov => prov.name === provider);
+    updateApiKeyStatus(p?.configured || false, provider, p?.active || false);
+  } catch (_) {
+    updateApiKeyStatus(false);
+  }
 }
 
 /** Update model/provider display based on inference type */
@@ -391,7 +449,7 @@ async function switchCloudProvider(provider) {
   const result = await switchProvider(provider);
   state.settings.cloudProvider = provider;
   saveSettings();
-  updateApiKeyStatus(true);
+  updateApiKeyStatus(true, provider, true);
   return result;
 }
 
@@ -407,9 +465,25 @@ export function openSettings() {
 
 /** Sync mode selector from a health poll response. */
 export function syncModeFromHealth(inferenceMode) {
-  if (inferenceMode && !modeLoading.classList.contains('active')) {
-    modeSelect.value = inferenceMode;
-    if (headerModeSelect) headerModeSelect.value = inferenceMode;
-    state.settings.inferenceMode = inferenceMode;
+  if (!inferenceMode || modeLoading.classList.contains('active')) return;
+
+  // "cloud" is an inference type, not a local mode — don't set the mode dropdown
+  if (inferenceMode === 'cloud') {
+    currentInferenceType = 'cloud';
+    state.settings.inferenceType = 'cloud';
+    updateInferenceDisplay();
+    return;
+  }
+
+  // Local modes: standard, turboquant, zero-quant, ultra-quant
+  modeSelect.value = inferenceMode;
+  const headerMode = document.getElementById('header-mode-select');
+  if (headerMode) headerMode.value = inferenceMode;
+  state.settings.inferenceMode = inferenceMode;
+
+  if (currentInferenceType === 'cloud') {
+    currentInferenceType = 'local';
+    state.settings.inferenceType = 'local';
+    updateInferenceDisplay();
   }
 }

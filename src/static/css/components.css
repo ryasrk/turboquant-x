@@ -611,7 +611,14 @@ body { transition: padding-left 0.25s ease; }
 .tool-approval {
   border-left-color: #ff9800;
   background: rgba(255, 152, 0, 0.08);
+  animation: approval-entrance 0.3s ease-out;
 }
+
+@keyframes approval-entrance {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .tool-approval.approved {
   border-left-color: var(--success, #4caf50);
   background: rgba(76, 175, 80, 0.08);
@@ -662,6 +669,10 @@ body { transition: padding-left 0.25s ease; }
 }
 .tool-approve-btn:hover, .tool-deny-btn:hover { opacity: 0.85; }
 .tool-approve-btn:active, .tool-deny-btn:active { transform: scale(0.97); }
+.tool-approve-btn:focus-visible, .tool-deny-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .tool-approve-btn {
   background: var(--success, #4caf50);
   color: #fff;
@@ -1094,18 +1105,28 @@ body { transition: padding-left 0.25s ease; }
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .status-indicator.not-configured {
   background: var(--text-dim);
+  box-shadow: 0 0 4px rgba(58, 96, 128, 0.4);
 }
 
 .status-indicator.configured {
-  background: #4ade80;
+  background: #ff9800;
+  box-shadow: 0 0 6px rgba(255, 152, 0, 0.5);
 }
 
-.status-indicator.error {
-  background: var(--alert);
+.status-indicator.active {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+  animation: pulse-active 2s infinite;
+}
+
+@keyframes pulse-active {
+  0%, 100% { box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
+  50%      { box-shadow: 0 0 12px rgba(74, 222, 128, 0.8); }
 }
 
 .status-text {
@@ -1287,9 +1308,6 @@ body { transition: padding-left 0.25s ease; }
   padding: 8px 20px;
 }
 
-.status-indicator.configured { color: var(--safe); }
-.status-indicator.not-configured { color: var(--alert); }
-
 /* Responsive Design */
 @media (max-width: 768px) {
   .inference-cards {
@@ -1374,5 +1392,13 @@ body { transition: padding-left 0.25s ease; }
   .notif-card {
     transition: opacity 0.1s ease;
     transform: none;
+  }
+  
+  .tool-approval {
+    animation: none;
+  }
+  
+  .status-indicator.active {
+    animation: none;
   }
 }

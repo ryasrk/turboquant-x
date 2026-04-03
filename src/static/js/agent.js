@@ -196,23 +196,42 @@ export function createToolApprovalCard(name, args, approvalId, riskLevel, intent
       </div>
     ` : ''}
     <div class="tool-approval-actions">
-      <button class="tool-approve-btn" data-action="allow">✓ Allow</button>
-      <button class="tool-deny-btn" data-action="deny">✕ Deny</button>
+      <button class="tool-approve-btn" data-action="allow" title="Allow this command (Enter)">✓ Allow</button>
+      <button class="tool-deny-btn" data-action="deny" title="Deny this command (Esc)">✕ Deny</button>
     </div>
   `;
 
+  const approveBtn = card.querySelector('.tool-approve-btn');
+  const denyBtn = card.querySelector('.tool-deny-btn');
+
   const promise = new Promise((resolve) => {
-    card.querySelector('.tool-approve-btn').addEventListener('click', async () => {
+    approveBtn.addEventListener('click', async () => {
       setApprovalState(card, true);
       await sendApprovalDecision(approvalId, true);
       resolve(true);
     });
-    card.querySelector('.tool-deny-btn').addEventListener('click', async () => {
+    denyBtn.addEventListener('click', async () => {
       setApprovalState(card, false);
       await sendApprovalDecision(approvalId, false);
       resolve(false);
     });
+
+    // Keyboard shortcuts: Enter=Allow, Escape=Deny
+    function handleKeyboard(e) {
+      if (card.classList.contains('approved') || card.classList.contains('denied')) return;
+      if (e.key === 'Enter' && document.activeElement?.closest('.tool-approval') === card) {
+        e.preventDefault();
+        approveBtn.click();
+      } else if (e.key === 'Escape' && document.activeElement?.closest('.tool-approval') === card) {
+        e.preventDefault();
+        denyBtn.click();
+      }
+    }
+    card.addEventListener('keydown', handleKeyboard);
   });
+
+  // Auto-focus the Allow button after it appears in the DOM
+  requestAnimationFrame(() => approveBtn.focus());
 
   return { card, promise };
 }
