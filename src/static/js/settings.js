@@ -170,6 +170,12 @@ async function setInferenceType(type) {
       await switchProvider(provider);
       state.settings.cloudProvider = provider;
       if (providerSelect) providerSelect.value = provider;
+      // Cloud reasoning models need higher token budget
+      if (state.settings.maxTokens < 512) {
+        state.settings.maxTokens = 2048;
+        if (maxTokensEl) maxTokensEl.value = 2048;
+        saveSettings();
+      }
       showToast(`Cloud provider: ${provider}`, 'info');
     } else {
       const mode = state.settings.inferenceMode || (modeSelect ? modeSelect.value : '') || 'turboquant';
