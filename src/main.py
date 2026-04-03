@@ -78,6 +78,7 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         "inference_mode": config.get("inference_mode", "standard"),
         "turboquant": dict(config.get("turboquant", {})),
         "ultra_quant": dict(config.get("ultra_quant", {})),
+        "cloud": dict(config.get("cloud", {})),
     }
 
     # Model overrides
@@ -286,6 +287,44 @@ def build_ultra_quant_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_cloud_config(config: dict[str, Any]) -> Any:
+    """Build cloud provider config from YAML + env vars.
+
+    Returns a CloudConfig for the default provider, or None if cloud is not configured.
+    Environment variables: TURBOQUANT_CLOUD_{PROVIDER}_API_KEY override YAML api_key.
+    TURBOQUANT_CLOUD_PROVIDER selects the default provider.
+    TURBOQUANT_CLOUD_MODEL overrides the model.
+    """
+    from src.engine.cloud.registry import build_cloud_configs
+
+    configs = build_cloud_configs(config)
+    if not configs:
+        return None
+
+    cloud_section = config.get("cloud", {})
+
+    # Determine which provider to use as default
+    default_name = os.environ.get(
+        "TURBOQUANT_CLOUD_PROVIDER",
+        cloud_section.get("default_provider", ""),
+    )
+
+    # Model override from env
+    model_override = os.environ.get("TURBOQUANT_CLOUD_MODEL", "")
+
+    if default_name and default_name in configs:
+        chosen = configs[default_name]
+    else:
+        # Pick the first configured provider
+        chosen = next(iter(configs.values()))
+
+    if model_override:
+        from dataclasses import replace as _replace
+        chosen = _replace(chosen, model=model_override)
+
+    return chosen
+
+
 def setup_logging(config: dict[str, Any]) -> None:
     """Configure logging from config."""
     log_cfg = config.get("logging", {})
@@ -325,7 +364,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["standard", "turboquant", "zero-quant", "ultra-quant"],
+        choices=["standard", "turboquant", "zero-quant", "ultra-quant", "cloud"],
         default=None,
         help="Inference mode (overrides config)",
     )
@@ -336,6 +375,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="TurboQuant preset: quality (K8/V4), aggressive (K8/V2), symmetric (K4/V4)",
     )
+    parser.add_argument(
+        "--doctor",
+        nargs="?",
+        const="check",
+        default=None,
+        metavar="ACTION",
+        help="Config doctor: check (default), fix, or validate",
+    )
     return parser.parse_args(argv)
 
 
@@ -343,8 +390,37 @@ def main(argv: list[str] | None = None) -> None:
     """Main entry point."""
     args = parse_args(argv)
 
+    # ── Doctor mode ──────────────────────────────────────────────────
+    if args.doctor is not None:
+        from src.utils.doctor import run_doctor
+        action = args.doctor.lower()
+        fix = action == "fix"
+        validate = action == "validate"
+        report = run_doctor(fix=fix, validate_keys=validate)
+        sys.exit(0 if report.all_ok else 1)
+
+    # ── Load .env file (secrets) ─────────────────────────────────────
+    from src.utils.doctor import load_env_file, load_cloud_yaml
+    load_env_file()
+
     # Load and merge config
     config = load_config(args.config)
+
+    # ── Merge cloud.yaml into config ─────────────────────────────────
+    cloud_file_config = load_cloud_yaml()
+    if cloud_file_config.get("cloud"):
+        existing_cloud = config.get("cloud", {})
+        file_cloud = cloud_file_config["cloud"]
+        # cloud.yaml providers are the source of truth;
+        # default.yaml cloud section is a fallback
+        merged_cloud = {**existing_cloud, **file_cloud}
+        # Merge provider dicts deeply — cloud.yaml wins per-provider
+        existing_providers = existing_cloud.get("providers", {})
+        file_providers = file_cloud.get("providers", {})
+        merged_providers = {**existing_providers, **file_providers}
+        merged_cloud["providers"] = merged_providers
+        config["cloud"] = merged_cloud
+
     config = apply_env_overrides(config)
 
     # CLI args override everything
@@ -363,9 +439,22 @@ def main(argv: list[str] | None = None) -> None:
     # Setup
     setup_logging(config)
 
+    inference_mode = build_inference_mode(config)
+
+    # Cloud mode doesn't need model/kv configs
+    cloud_cfg = None
+    if inference_mode == InferenceMode.CLOUD:
+        cloud_cfg = build_cloud_config(config)
+        if cloud_cfg is None:
+            logger.error(
+                "Cloud mode selected but no cloud provider configured. "
+                "Add a 'cloud' section to your config or set "
+                "TURBOQUANT_CLOUD_OPENAI_API_KEY (or other provider) env var."
+            )
+            sys.exit(1)
+
     model_config = build_model_config(config)
     kv_config = build_kv_config(config)
-    inference_mode = build_inference_mode(config)
     turboquant_cfg = build_turboquant_config(config)
     zero_quant_cfg = build_zero_quant_config(config)
     ultra_quant_cfg = build_ultra_quant_config(config)
@@ -405,6 +494,13 @@ def main(argv: list[str] | None = None) -> None:
             ultra_quant_cfg["enable_mmap"],
             ultra_quant_cfg["enable_mlock_critical"],
         )
+    elif inference_mode == InferenceMode.CLOUD and cloud_cfg is not None:
+        logger.info(
+            "Cloud mode: provider=%s, model=%s, base_url=%s",
+            cloud_cfg.provider,
+            cloud_cfg.model or "(default)",
+            cloud_cfg.base_url or "(default)",
+        )
     logger.info("Server: %s:%d", host, port)
 
     # Create and run app
@@ -412,6 +508,7 @@ def main(argv: list[str] | None = None) -> None:
         model_config, kv_config, cors_origins, inference_mode,
         turboquant_cfg, zero_quant_cfg, ultra_quant_cfg,
         thought_log_path=config.get("logging", {}).get("thought_log"),
+        cloud_config=cloud_cfg,
     )
 
     import uvicorn

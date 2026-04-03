@@ -13,6 +13,10 @@ build/
 # Models (large binary files)
 models/*.gguf
 
+# Secrets
+.env
+config/.env
+
 # IDE
 .vscode/
 .idea/

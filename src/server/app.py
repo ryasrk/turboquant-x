@@ -32,11 +32,13 @@ class InferenceMode(str, Enum):
     TURBOQUANT = "turboquant"
     ZERO_QUANT = "zero-quant"
     ULTRA_QUANT = "ultra-quant"
+    CLOUD = "cloud"
 
 
 # Module-level engine references (set during lifespan)
 _engine: InferenceEngine | None = None
 _turbo_engine: Any = None  # TurboQuantEngine | ZeroQuantEngine | None
+_cloud_engine: Any = None  # CloudEngine | None
 _inference_mode: InferenceMode = InferenceMode.STANDARD
 _start_time: float = 0.0
 _switch_lock = threading.Lock()  # prevents concurrent mode/model switches
@@ -49,6 +51,11 @@ def get_engine() -> InferenceEngine:
     if _engine is None:
         raise RuntimeError("Inference engine not initialized")
     return _engine
+
+
+def get_cloud_engine():
+    """Get the CloudEngine (None if not in cloud mode)."""
+    return _cloud_engine
 
 
 def get_turbo_engine():
@@ -153,8 +160,12 @@ def init_agent_registry() -> None:
 
 def _unload_engines() -> None:
     """Unload existing engine(s) and clear global refs."""
-    global _engine, _turbo_engine
-    if _turbo_engine is not None:
+    global _engine, _turbo_engine, _cloud_engine
+    if _cloud_engine is not None:
+        _cloud_engine.unload()
+        _cloud_engine = None
+        _engine = None
+    elif _turbo_engine is not None:
         _turbo_engine.unload()
         _turbo_engine = None
     elif _engine is not None:
@@ -164,7 +175,23 @@ def _unload_engines() -> None:
 
 def _create_and_load_engine(app: FastAPI, mode: InferenceMode) -> None:
     """Create an engine for *mode* using configs from app.state, then load it."""
-    global _engine, _turbo_engine
+    global _engine, _turbo_engine, _cloud_engine
+
+    if mode == InferenceMode.CLOUD:
+        from src.engine.cloud_engine import CloudEngine
+
+        cloud_config = getattr(app.state, "cloud_config", None)
+        if cloud_config is None:
+            raise ValueError(
+                "Cloud mode requires cloud provider configuration. "
+                "Add a 'cloud' section to your config YAML."
+            )
+        _cloud_engine = CloudEngine(cloud_config)
+        _cloud_engine.load_model()
+        # _engine stays None in cloud mode — routes check _cloud_engine first
+        _engine = None
+        _turbo_engine = None
+        return
 
     model_config: ModelConfig = app.state.model_config
     kv_config: KVCacheConfig = app.state.kv_config
@@ -365,6 +392,7 @@ def create_app(
     zero_quant_config: dict[str, Any] | None = None,
     ultra_quant_config: dict[str, Any] | None = None,
     thought_log_path: str | None = None,
+    cloud_config: Any | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -372,8 +400,9 @@ def create_app(
         model_config: Model configuration. Defaults to env-based config.
         kv_config: KV cache configuration. Defaults to Q8_0/Q8_0.
         cors_origins: Allowed CORS origins. Defaults to localhost only.
-        inference_mode: "standard" or "turboquant".
+        inference_mode: "standard", "turboquant", "zero-quant", "ultra-quant", or "cloud".
         turboquant_config: TurboQuant compression settings (k_bits, v_bits, block_size).
+        cloud_config: CloudConfig for cloud mode.
 
     Returns:
         Configured FastAPI application.
@@ -395,6 +424,7 @@ def create_app(
     app.state.zero_quant_config = zero_quant_config or {}
     app.state.ultra_quant_config = ultra_quant_config or {}
     app.state.thought_log_path = thought_log_path
+    app.state.cloud_config = cloud_config
 
     # CORS middleware
     origins = cors_origins or ["http://localhost:3000", "http://localhost:8000"]

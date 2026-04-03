@@ -82,6 +82,58 @@ ultra_quant:
   # turbo:        K8/V4 boundary, K4/V2 middle — recommended, ~3.5 avg bits
   # extreme:      K4/V2 boundary, K4/V2 middle, split_middle — ~2.5 avg bits, some quality loss
 
+# Cloud LLM providers (only used when inference_mode = "cloud")
+# Supports: openai, anthropic, moonshot (Kimi), zhipu (GLM), deepseek,
+#           groq, together, openrouter, siliconflow, custom
+#
+# API keys can be set here or via environment variables:
+#   TURBOQUANT_CLOUD_OPENAI_API_KEY, TURBOQUANT_CLOUD_ANTHROPIC_API_KEY, etc.
+#
+# Select active provider via:
+#   TURBOQUANT_CLOUD_PROVIDER=openai   (env var)
+#   or default_provider below
+#
+# Override model via:
+#   TURBOQUANT_CLOUD_MODEL=gpt-4o      (env var)
+cloud:
+  default_provider: "openai"
+  providers:
+    openai:
+      api_key: ""                        # or set TURBOQUANT_CLOUD_OPENAI_API_KEY
+      model: "gpt-4o"
+      max_tokens: 4096
+      temperature: 0.7
+      # base_url: "https://api.openai.com/v1"   # default
+    anthropic:
+      api_key: ""                        # or set TURBOQUANT_CLOUD_ANTHROPIC_API_KEY
+      model: "claude-sonnet-4-20250514"
+      max_tokens: 4096
+      temperature: 0.7
+    moonshot:                            # Kimi AI
+      api_key: ""                        # or set TURBOQUANT_CLOUD_MOONSHOT_API_KEY
+      model: "moonshot-v1-128k"
+      max_tokens: 4096
+      temperature: 0.7
+      # base_url: "https://api.moonshot.cn/v1"   # default
+    zhipu:                               # GLM / ChatGLM
+      api_key: ""                        # or set TURBOQUANT_CLOUD_ZHIPU_API_KEY
+      model: "glm-4.5"
+      max_tokens: 4096
+      temperature: 0.7
+      # base_url: "https://open.bigmodel.cn/api/paas/v4"   # default
+    deepseek:
+      api_key: ""                        # or set TURBOQUANT_CLOUD_DEEPSEEK_API_KEY
+      model: "deepseek-chat"
+      max_tokens: 4096
+      temperature: 0.7
+    # custom:                            # Any OpenAI-compatible endpoint
+    #   api_key: ""
+    #   base_url: "https://your-endpoint.com/v1"
+    #   model: "your-model-name"
+    #   max_tokens: 4096
+    #   extra_headers:
+    #     X-Custom-Header: "value"
+
 server:
   host: "0.0.0.0"
   port: 8000

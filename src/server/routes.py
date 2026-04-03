@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from src.server.app import get_engine, get_turbo_engine, get_inference_mode, get_uptime, is_loading, InferenceMode
+from src.server.app import get_engine, get_turbo_engine, get_cloud_engine, get_inference_mode, get_uptime, is_loading, InferenceMode
 from src.server.schemas import (
     ChatRequest,
     ChatResponse,
@@ -129,7 +129,20 @@ async def chat_completions(request: ChatRequest):
     """Chat completion endpoint — OpenAI-compatible.
 
     Supports both streaming and non-streaming modes.
+    Routes to cloud engine when in cloud mode, local engine otherwise.
     """
+    cloud_engine = get_cloud_engine()
+    mode = get_inference_mode()
+
+    # Cloud mode — route to cloud engine
+    if mode == InferenceMode.CLOUD and cloud_engine is not None:
+        if not cloud_engine.is_loaded:
+            raise HTTPException(
+                status_code=503,
+                detail="Cloud engine not loaded. Check provider configuration.",
+            )
+        return await _cloud_chat(cloud_engine, request)
+
     engine = get_engine()
 
     if not engine.is_loaded:
@@ -308,6 +321,162 @@ def _stream_response(
     return EventSourceResponse(event_generator())
 
 
+async def _cloud_chat(cloud_engine, request: ChatRequest):
+    """Route chat to cloud engine (non-streaming or streaming).
+
+    When tools are enabled, routes through CloudAgentLoop for
+    native cloud function calling.
+    """
+    # Convert Pydantic messages to dicts
+    messages = []
+    for m in request.messages:
+        if isinstance(m.content, list):
+            text_parts = [p.get("text", "") for p in m.content if isinstance(p, dict) and p.get("type") == "text"]
+            content = " ".join(text_parts) if text_parts else ""
+        else:
+            content = m.content
+        msg = {"role": m.role, "content": content}
+        if m.tool_call_id:
+            msg["tool_call_id"] = m.tool_call_id
+        if m.name:
+            msg["name"] = m.name
+        messages.append(msg)
+
+    # Agent mode: route through cloud tool-calling loop
+    if request.tools:
+        return _cloud_agent_response(cloud_engine, messages, request)
+
+    if request.stream:
+        return _cloud_stream_response(cloud_engine, messages, request)
+
+    return _cloud_sync_response(cloud_engine, messages, request)
+
+
+def _cloud_sync_response(cloud_engine, messages: list[dict], request: ChatRequest) -> ChatResponse:
+    """Handle non-streaming cloud chat completion."""
+    response_msg, stats = cloud_engine.chat(
+        messages=messages,
+        max_tokens=request.max_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+    )
+
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+
+    return ChatResponse(
+        id=completion_id,
+        model=cloud_engine.model_name,
+        choices=[
+            ChatChoice(
+                index=0,
+                message=ChatMessage(
+                    role=response_msg["role"],
+                    content=response_msg["content"],
+                ),
+                finish_reason="stop",
+            )
+        ],
+        usage=UsageStats(
+            prompt_tokens=stats.prompt_tokens,
+            completion_tokens=stats.completion_tokens,
+            total_tokens=stats.total_tokens,
+        ),
+    )
+
+
+def _cloud_stream_response(
+    cloud_engine, messages: list[dict], request: ChatRequest
+) -> EventSourceResponse:
+    """Handle streaming cloud chat completion via SSE."""
+
+    async def event_generator():
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        model_name = cloud_engine.model_name
+
+        # First chunk: role
+        first_chunk = StreamChunk(
+            id=completion_id,
+            model=model_name,
+            choices=[
+                StreamChoice(
+                    index=0,
+                    delta=StreamDelta(role="assistant"),
+                )
+            ],
+        )
+        yield {"data": first_chunk.model_dump_json()}
+
+        # Content chunks via sync generator
+        stream = cloud_engine.chat_stream(
+            messages=messages,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+        )
+
+        try:
+            while True:
+                token = next(stream)
+                chunk = StreamChunk(
+                    id=completion_id,
+                    model=model_name,
+                    choices=[
+                        StreamChoice(
+                            index=0,
+                            delta=StreamDelta(content=token),
+                        )
+                    ],
+                )
+                yield {"data": chunk.model_dump_json()}
+        except StopIteration:
+            pass
+
+        # Final chunk
+        final_chunk = StreamChunk(
+            id=completion_id,
+            model=model_name,
+            choices=[
+                StreamChoice(
+                    index=0,
+                    delta=StreamDelta(),
+                    finish_reason="stop",
+                )
+            ],
+        )
+        yield {"data": final_chunk.model_dump_json()}
+        yield {"data": "[DONE]"}
+
+    return EventSourceResponse(event_generator())
+
+
+def _cloud_agent_response(cloud_engine, messages: list[dict], request: ChatRequest) -> EventSourceResponse:
+    """Handle cloud agent mode with native tool calling via SSE."""
+    async def event_generator():
+        from src.agent.cloud_loop import CloudAgentLoop
+        from src.server.app import get_agent_registry
+
+        registry = get_agent_registry()
+        if registry is None:
+            yield {"data": json.dumps({"type": "error", "message": "Agent tools not initialized"})}
+            yield {"data": "[DONE]"}
+            return
+
+        loop = CloudAgentLoop(registry)
+
+        async for event in loop.run(
+            cloud_engine,
+            messages,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+        ):
+            yield {"data": json.dumps(event)}
+
+        yield {"data": "[DONE]"}
+
+    return EventSourceResponse(event_generator())
+
+
 def _agent_response(messages: list[dict], request: ChatRequest) -> EventSourceResponse:
     """Handle agent mode with tool calling via SSE."""
     async def event_generator():
@@ -342,14 +511,22 @@ def _agent_response(messages: list[dict], request: ChatRequest) -> EventSourceRe
 async def health_check():
     """Health check endpoint with model and GPU status."""
     try:
-        engine = get_engine()
-        model_loaded = engine.is_loaded
-        turbo = get_turbo_engine()
-        if turbo is not None:
-            stats = turbo.get_stats()
+        cloud = get_cloud_engine()
+        mode = get_inference_mode()
+
+        if mode == InferenceMode.CLOUD and cloud is not None:
+            model_loaded = cloud.is_loaded
+            stats = cloud.get_stats()
+            status = "healthy" if model_loaded else "degraded"
         else:
-            stats = engine.get_stats()
-        status = "healthy" if model_loaded else "degraded"
+            engine = get_engine()
+            model_loaded = engine.is_loaded
+            turbo = get_turbo_engine()
+            if turbo is not None:
+                stats = turbo.get_stats()
+            else:
+                stats = engine.get_stats()
+            status = "healthy" if model_loaded else "degraded"
     except RuntimeError:
         model_loaded = False
         stats = {}
@@ -417,8 +594,15 @@ async def health_check():
 async def list_models():
     """List available models."""
     try:
-        engine = get_engine()
-        models = [ModelInfo(id=engine.model_config.model_name)]
+        cloud = get_cloud_engine()
+        mode = get_inference_mode()
+
+        if mode == InferenceMode.CLOUD and cloud is not None:
+            cloud_models = cloud.list_models()
+            models = [ModelInfo(id=m) for m in cloud_models] if cloud_models else [ModelInfo(id=cloud.model_name)]
+        else:
+            engine = get_engine()
+            models = [ModelInfo(id=engine.model_config.model_name)]
     except RuntimeError:
         models = []
 
