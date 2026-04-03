@@ -214,6 +214,28 @@ body { transition: padding-left 0.25s ease; }
   pointer-events: none;
 }
 
+/* Cloud reasoning models — always-on indicator */
+#thinking-btn.cloud-reasoning {
+  background: rgba(0, 255, 136, 0.15);
+  color: var(--accent);
+  border-color: var(--accent);
+  cursor: default;
+  animation: reasoning-pulse 2s ease-in-out infinite;
+}
+#thinking-btn.cloud-reasoning::after {
+  content: ' ●';
+  font-size: 0.6em;
+  color: var(--accent);
+  vertical-align: super;
+}
+@keyframes reasoning-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(0, 255, 136, 0.2); }
+  50%      { box-shadow: 0 0 10px rgba(0, 255, 136, 0.4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #thinking-btn.cloud-reasoning { animation: none; }
+}
+
 /* ── Settings panel ────────────────────────────────────────────────── */
 #settings-overlay {
   display: none;

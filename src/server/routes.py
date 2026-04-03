@@ -659,8 +659,18 @@ async def health_check():
     _thinking_prefixes = ("qwen3", "qwq", "deepseek-r1")
     supports_thinking = any(model_name.lower().startswith(p) for p in _thinking_prefixes)
 
+    # Cloud reasoning models (GLM-4.5, DeepSeek, o1) have built-in CoT
+    if stats and stats.get("supports_reasoning"):
+        supports_thinking = True
+
     _tools_prefixes = ("qwen2.5", "qwen3", "qwq", "functionary", "hermes")
     supports_tools = any(model_name.lower().startswith(p) for p in _tools_prefixes)
+
+    # Cloud models with native tool calling
+    if mode == InferenceMode.CLOUD and cloud is not None and cloud.is_loaded:
+        _cloud_tool_providers = ("openai", "anthropic", "zhipu", "deepseek")
+        if cloud.provider_name in _cloud_tool_providers:
+            supports_tools = True
 
     return HealthResponse(
         status=status,

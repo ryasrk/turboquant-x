@@ -112,16 +112,28 @@ async function populateHeaderProviders() {
 
 // ── Thinking support ──────────────────────────────────────────────────
 let _supportsThinking = false;
+let _isCloudReasoning = false;
 
-function updateThinkingUI(supports) {
+function updateThinkingUI(supports, cloudReasoning = false) {
   _supportsThinking = supports;
-  if (!supports) {
+  _isCloudReasoning = cloudReasoning;
+
+  if (cloudReasoning) {
+    // Cloud reasoning models always think — not user-toggled
+    state.thinking = true;
+    thinkingBtn.textContent = '◈ Reasoning';
+    thinkingBtn.classList.remove('off', 'disabled');
+    thinkingBtn.classList.add('cloud-reasoning');
+    thinkingBtn.title = 'This cloud model has built-in chain-of-thought reasoning';
+    thinkingBtn.setAttribute('aria-pressed', 'true');
+  } else if (!supports) {
     state.thinking = false;
     thinkingBtn.textContent = '◈ Think N/A';
     thinkingBtn.classList.add('off', 'disabled');
+    thinkingBtn.classList.remove('cloud-reasoning');
     thinkingBtn.title = 'This model does not support thinking mode';
   } else {
-    thinkingBtn.classList.remove('disabled');
+    thinkingBtn.classList.remove('disabled', 'cloud-reasoning');
     thinkingBtn.title = 'Toggle chain-of-thought thinking';
     thinkingBtn.textContent = state.thinking ? '◈ Think ON' : '◈ Think';
     thinkingBtn.classList.toggle('off', !state.thinking);
@@ -217,7 +229,8 @@ async function populateHeaderModels() {
 async function pollHealth() {
   try {
     const d = await fetchHealth();
-    updateThinkingUI(!!d.supports_thinking);
+    const isCloud = d.inference_mode === 'cloud';
+    updateThinkingUI(!!d.supports_thinking, isCloud && !!d.supports_thinking);
     setVisionEnabled(!!d.supports_vision);
     if (headerModeSelect) {
       headerModeSelect.value = d.inference_mode || 'standard';

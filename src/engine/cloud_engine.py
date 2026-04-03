@@ -19,6 +19,38 @@ from src.engine.inference import GenerationStats
 
 logger = logging.getLogger(__name__)
 
+# Known context window sizes for cloud models (in tokens).
+# Used to drive the context meter in the UI.
+_CLOUD_CONTEXT_WINDOWS: dict[str, int] = {
+    # OpenAI
+    "gpt-4o": 128_000, "gpt-4o-mini": 128_000,
+    "gpt-4-turbo": 128_000, "gpt-4": 8_192,
+    "gpt-3.5-turbo": 16_385, "o1": 200_000,
+    # Anthropic
+    "claude-sonnet-4-20250514": 200_000, "claude-3-opus": 200_000,
+    "claude-3-haiku": 200_000,
+    # Zhipu / GLM
+    "glm-4": 128_000, "glm-4-plus": 128_000,
+    "glm-4.5": 128_000, "glm-4.5-flash": 128_000,
+    "glm-4-flash": 128_000, "glm-4-long": 1_000_000,
+    # DeepSeek
+    "deepseek-chat": 128_000, "deepseek-reasoner": 128_000,
+    # Moonshot / Kimi
+    "moonshot-v1-8k": 8_000, "moonshot-v1-32k": 32_000,
+    "moonshot-v1-128k": 128_000,
+    # Groq
+    "llama-3.3-70b-versatile": 128_000,
+    "llama-3.1-8b-instant": 128_000,
+    # Fallback for unknown models
+}
+
+# Cloud models that include built-in chain-of-thought reasoning.
+_CLOUD_REASONING_MODELS = {
+    "glm-4.5", "glm-4.5-flash", "glm-4-plus",
+    "deepseek-reasoner", "deepseek-chat",
+    "o1", "o1-mini", "o1-preview",
+}
+
 
 class CloudEngine:
     """Cloud LLM inference engine.
@@ -262,20 +294,41 @@ class CloudEngine:
         )
         return response_msg["content"], stats
 
+    @property
+    def context_window(self) -> int:
+        """Best-effort context window size for the current cloud model."""
+        model = self.model_name.lower()
+        # Exact match first
+        if model in _CLOUD_CONTEXT_WINDOWS:
+            return _CLOUD_CONTEXT_WINDOWS[model]
+        # Prefix match (e.g. 'gpt-4o-2024-08-06' → gpt-4o)
+        for key, val in _CLOUD_CONTEXT_WINDOWS.items():
+            if model.startswith(key):
+                return val
+        return 128_000  # safe default for modern models
+
+    @property
+    def supports_reasoning(self) -> bool:
+        """Whether this cloud model has native chain-of-thought reasoning."""
+        model = self.model_name.lower()
+        return any(model.startswith(r) for r in _CLOUD_REASONING_MODELS)
+
     def get_stats(self) -> dict[str, Any]:
         """Get current engine status."""
+        ctx = self.context_window
         return {
             "model_name": self.model_name,
             "provider": self._config.provider,
             "is_loaded": self._loaded,
             "mode": "cloud",
             "base_url": self._config.base_url or "(default)",
-            "n_ctx": 0,
+            "n_ctx": ctx,
             "kv_cache_k": "n/a",
             "kv_cache_v": "n/a",
             "flash_attention": False,
-            "context_max": 0,
+            "context_max": ctx,
             "context_used": 0,
+            "supports_reasoning": self.supports_reasoning,
         }
 
     def list_models(self) -> list[str]:

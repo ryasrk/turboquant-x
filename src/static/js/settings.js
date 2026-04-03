@@ -69,8 +69,10 @@ export function initSettings() {
   // Thinking toggle (only if model supports it — managed by app.js)
   thinkingBtn.addEventListener('click', () => {
     if (thinkingBtn.classList.contains('disabled')) return;
+    // Cloud reasoning models always reason — not user-toggled
+    if (thinkingBtn.classList.contains('cloud-reasoning')) return;
     state.thinking = !state.thinking;
-    thinkingBtn.textContent = state.thinking ? '◈ Think' : '◈ Think';
+    thinkingBtn.textContent = state.thinking ? '◈ Think ON' : '◈ Think';
     thinkingBtn.classList.toggle('off', !state.thinking);
   });
 

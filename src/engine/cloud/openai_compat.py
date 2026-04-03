@@ -68,6 +68,19 @@ class OpenAICompatibleProvider(CloudProvider):
             **config.extra_headers,
         }
 
+    # Models that use a separate reasoning/thinking budget before producing
+    # visible content.  Need higher min token count so the model has room
+    # for both reasoning AND the actual answer.
+    _REASONING_MODELS = {"glm-4.5", "glm-4.5-flash", "glm-4-plus", "deepseek-reasoner", "deepseek-chat"}
+    _REASONING_MIN_TOKENS = 512  # minimum to allow visible content after reasoning
+
+    def _effective_max_tokens(self, requested: int | None) -> int:
+        """Ensure reasoning models get enough tokens for both thinking and content."""
+        tokens = requested or self._config.max_tokens
+        if self._model.lower() in self._REASONING_MODELS:
+            tokens = max(tokens, self._REASONING_MIN_TOKENS)
+        return tokens
+
     def _build_payload(
         self,
         messages: list[dict[str, str]],
@@ -80,7 +93,7 @@ class OpenAICompatibleProvider(CloudProvider):
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
-            "max_tokens": max_tokens or self._config.max_tokens,
+            "max_tokens": self._effective_max_tokens(max_tokens),
             "temperature": temperature if temperature is not None else self._config.temperature,
             "top_p": top_p if top_p is not None else self._config.top_p,
             "stream": stream,
@@ -117,11 +130,20 @@ class OpenAICompatibleProvider(CloudProvider):
         usage = data.get("usage", {})
 
         # Content: some models (GLM-4.5, DeepSeek-R1) put reasoning in
-        # a separate field and may leave content empty when max_tokens
-        # is exhausted by reasoning.  Fall back to reasoning_content.
+        # a separate field.  We keep them separate: content is the user-
+        # visible answer, reasoning_content is internal thinking.
         content = message.get("content", "") or ""
-        if not content and message.get("reasoning_content"):
-            content = message["reasoning_content"]
+        reasoning = message.get("reasoning_content", "") or ""
+
+        # If no visible content was produced (model spent all tokens on
+        # reasoning), synthesize a short message rather than leaking
+        # the raw thinking to the user.
+        if not content and reasoning:
+            content = (
+                "[The model used all available tokens for internal reasoning "
+                "and did not produce a visible response. "
+                "Try increasing max_tokens or simplifying your question.]"
+            )
 
         # Extract native tool calls if present
         raw_tool_calls = message.get("tool_calls")
