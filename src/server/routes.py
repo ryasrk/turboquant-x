@@ -485,6 +485,7 @@ def _cloud_stream_response(
         yield {"data": first_chunk.model_dump_json()}
 
         # Stream content directly from async provider
+        think_filter = _ThinkStreamFilter()
         try:
             provider = cloud_engine._provider
             async for token in provider.chat_stream(
@@ -493,13 +494,17 @@ def _cloud_stream_response(
                 temperature=request.temperature,
                 top_p=request.top_p,
             ):
+                # Filter out <think>…</think> blocks (reasoning tokens)
+                filtered = think_filter.feed(token)
+                if not filtered:
+                    continue
                 chunk = StreamChunk(
                     id=completion_id,
                     model=model_name,
                     choices=[
                         StreamChoice(
                             index=0,
-                            delta=StreamDelta(content=token),
+                            delta=StreamDelta(content=filtered),
                         )
                     ],
                 )
@@ -507,6 +512,21 @@ def _cloud_stream_response(
         except Exception as e:
             logger.exception("Cloud stream error")
             yield {"data": json.dumps({"type": "error", "message": str(e)})}
+
+        # Flush any remaining buffered text from the think filter
+        remaining = think_filter.flush()
+        if remaining:
+            chunk = StreamChunk(
+                id=completion_id,
+                model=model_name,
+                choices=[
+                    StreamChoice(
+                        index=0,
+                        delta=StreamDelta(content=remaining),
+                    )
+                ],
+            )
+            yield {"data": chunk.model_dump_json()}
 
         # Final chunk
         final_chunk = StreamChunk(
