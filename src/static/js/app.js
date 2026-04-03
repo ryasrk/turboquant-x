@@ -51,9 +51,10 @@ function initInferenceToggle() {
     setHeaderInferenceType('cloud');
   });
   
-  // Initialize display
+  // Initialize display and model select for current type
   const currentType = state.settings.inferenceType || 'local';
   updateHeaderInferenceDisplay(currentType);
+  updateHeaderModelSelect(currentType);
 }
 
 function setHeaderInferenceType(type) {
@@ -273,7 +274,10 @@ scrollBottomBtn.addEventListener('click', () => {
 
 // ── Model list ────────────────────────────────────────────────────────
 refreshModelList();
-populateHeaderModels();
+// Only populate local models if in local mode (cloud handled by initInferenceToggle)
+if (state.settings.inferenceType !== 'cloud') {
+  populateHeaderModels();
+}
 
 // ── Input handling ────────────────────────────────────────────────────
 inputEl.addEventListener('input', () => {
