@@ -1,7 +1,7 @@
 /** Settings panel — enhanced with local/cloud toggle, accessibility, and user guidance. */
 
 import { state, saveSettings } from './state.js';
-import { switchMode, fetchHealth, switchProvider, fetchCloudProviders } from './api.js';
+import { switchMode, fetchHealth, switchProvider, fetchCloudProviders, fetchProviderModels, switchCloudModel } from './api.js';
 import { showToast } from './ui.js';
 
 const overlay       = document.getElementById('settings-overlay');
@@ -24,6 +24,8 @@ const cloudCard     = document.getElementById('cloud-card');
 const localSettings = document.getElementById('local-settings');
 const cloudSettings = document.getElementById('cloud-settings');
 const providerSelect = document.getElementById('provider-select');
+const browseModelsBtn = document.getElementById('browse-models-btn');
+const selectedModelLabel = document.getElementById('selected-model-label');
 const apiKeyStatus  = document.getElementById('api-key-status');
 const configureApiBtn = document.getElementById('configure-api-btn');
 
@@ -95,7 +97,26 @@ export function initSettings() {
   if (providerSelect) {
     providerSelect.addEventListener('change', () => {
       checkCloudProviderStatus();
+      // Reset selected model label when provider changes
+      if (selectedModelLabel) {
+        selectedModelLabel.textContent = 'Select a model…';
+        selectedModelLabel.classList.add('placeholder');
+      }
     });
+  }
+
+  // Browse models button — opens model picker modal
+  if (browseModelsBtn) {
+    browseModelsBtn.addEventListener('click', () => {
+      const provider = providerSelect ? providerSelect.value : '';
+      if (provider) showModelPicker(provider);
+    });
+  }
+
+  // Show current model on init
+  if (selectedModelLabel && state.settings.cloudModel) {
+    selectedModelLabel.textContent = state.settings.cloudModel;
+    selectedModelLabel.classList.remove('placeholder');
   }
 }
 
@@ -435,6 +456,236 @@ async function checkCloudProviderStatus() {
   } catch (_) {
     updateApiKeyStatus(false);
   }
+}
+
+/**
+ * Show model picker modal for a cloud provider.
+ * Fetches models from the server, renders a searchable list,
+ * and on selection switches provider + model together.
+ */
+async function showModelPicker(provider) {
+  // Remove existing modal
+  const existing = document.getElementById('model-picker-dialog');
+  if (existing) existing.remove();
+
+  const providerLabel = _PICKER_PROVIDER_NAMES[provider] || provider;
+
+  const modal = document.createElement('div');
+  modal.id = 'model-picker-dialog';
+  modal.className = 'model-picker-overlay';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', `Select model for ${providerLabel}`);
+  modal.innerHTML = `
+    <div class="model-picker-panel">
+      <div class="model-picker-header">
+        <span class="model-picker-title">◈ Models</span>
+        <button class="close-btn model-picker-close" aria-label="Close">✕</button>
+      </div>
+      <div class="model-picker-provider-row">
+        <label for="picker-provider-select">Provider</label>
+        <select id="picker-provider-select" aria-label="Select cloud provider"></select>
+      </div>
+      <div class="model-picker-search">
+        <input type="text" placeholder="Search models…" aria-label="Search models" />
+      </div>
+      <div class="model-picker-list" role="listbox" aria-label="Available models">
+        <div class="model-picker-loading">Loading models…</div>
+      </div>
+      <div class="model-picker-footer">
+        <span class="model-picker-count"></span>
+        <button class="text-btn model-picker-close-btn">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const pickerProviderSelect = modal.querySelector('#picker-provider-select');
+  const listEl = modal.querySelector('.model-picker-list');
+  const searchInput = modal.querySelector('.model-picker-search input');
+  const countEl = modal.querySelector('.model-picker-count');
+  const closeBtn = modal.querySelector('.model-picker-close');
+  const cancelBtn = modal.querySelector('.model-picker-close-btn');
+
+  function closeModal() { modal.remove(); }
+
+  closeBtn.addEventListener('click', closeModal);
+  cancelBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+  modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+  // Populate provider dropdown in the picker
+  let activeProvider = provider;
+  try {
+    const data = await fetchCloudProviders();
+    for (const p of (data.providers || [])) {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      const label = _PICKER_PROVIDER_NAMES[p.name] || p.name;
+      opt.textContent = p.configured ? `● ${label}` : label;
+      opt.selected = p.name === provider;
+      pickerProviderSelect.appendChild(opt);
+    }
+  } catch (_) {
+    // Fallback static list
+    for (const [val, label] of Object.entries(_PICKER_PROVIDER_NAMES)) {
+      if (val === 'custom') continue;
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = label;
+      opt.selected = val === provider;
+      pickerProviderSelect.appendChild(opt);
+    }
+  }
+
+  // When provider changes in picker, re-fetch models
+  pickerProviderSelect.addEventListener('change', () => {
+    activeProvider = pickerProviderSelect.value;
+    searchInput.value = '';
+    loadModels(activeProvider);
+  });
+
+  // Focus search input
+  setTimeout(() => searchInput.focus(), 100);
+
+  let allModels = [];
+
+  async function loadModels(prov) {
+    listEl.innerHTML = '<div class="model-picker-loading">Loading models…</div>';
+    countEl.textContent = '';
+    allModels = [];
+    try {
+      const data = await fetchProviderModels(prov);
+      allModels = (data.models || []).sort((a, b) => a.localeCompare(b));
+      if (allModels.length === 0) {
+        listEl.innerHTML = `<div class="model-picker-empty">${
+          data.error ? _escapeHtml(data.error) : 'No models found — check your API key'
+        }</div>`;
+        countEl.textContent = '0 models';
+      } else {
+        renderModelList(allModels);
+        countEl.textContent = `${allModels.length} models`;
+      }
+    } catch (e) {
+      listEl.innerHTML = `<div class="model-picker-empty">Failed to load models</div>`;
+      countEl.textContent = '';
+    }
+  }
+
+  // Filter on search
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.toLowerCase().trim();
+    const filtered = q ? allModels.filter(m => m.toLowerCase().includes(q)) : allModels;
+    renderModelList(filtered);
+    countEl.textContent = `${filtered.length} / ${allModels.length} models`;
+  });
+
+  function renderModelList(models) {
+    if (models.length === 0) {
+      listEl.innerHTML = '<div class="model-picker-empty">No matching models</div>';
+      return;
+    }
+    const currentModel = state.settings.cloudModel || '';
+    listEl.innerHTML = models.map(m => {
+      const isActive = m === currentModel;
+      return `<div class="model-picker-item${isActive ? ' active' : ''}" 
+                   role="option" tabindex="0" data-model="${_escapeAttr(m)}"
+                   aria-selected="${isActive}">
+        <span class="model-id">${_escapeHtml(m)}</span>
+        ${isActive ? '<span class="model-active-badge">current</span>' : ''}
+      </div>`;
+    }).join('');
+
+    // Click handler on each model item
+    listEl.querySelectorAll('.model-picker-item').forEach(item => {
+      item.addEventListener('click', () => selectModel(item.dataset.model));
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          selectModel(item.dataset.model);
+        }
+      });
+    });
+  }
+
+  async function selectModel(model) {
+    const prov = activeProvider;
+    const provLabel = _PICKER_PROVIDER_NAMES[prov] || prov;
+    // Disable all items during switch
+    listEl.querySelectorAll('.model-picker-item').forEach(el => {
+      el.style.pointerEvents = 'none';
+      el.style.opacity = '0.5';
+    });
+    const clickedEl = listEl.querySelector(`[data-model="${CSS.escape(model)}"]`);
+    if (clickedEl) {
+      clickedEl.style.opacity = '1';
+      clickedEl.innerHTML = `<span class="model-id">${_escapeHtml(model)}</span><span class="model-active-badge">connecting…</span>`;
+    }
+
+    try {
+      // Switch provider + model together
+      await switchProvider(prov);
+      await switchCloudModel(model);
+
+      state.settings.cloudProvider = prov;
+      state.settings.cloudModel = model;
+      state.settings.inferenceType = 'cloud';
+      if (providerSelect) providerSelect.value = prov;
+      saveSettings();
+
+      // Update browse button label
+      if (selectedModelLabel) {
+        selectedModelLabel.textContent = model;
+        selectedModelLabel.classList.remove('placeholder');
+      }
+
+      // Update header provider dropdown selection + label
+      const headerSelect = document.getElementById('header-model-select');
+      if (headerSelect) {
+        headerSelect.value = prov;
+        const opt = headerSelect.querySelector(`option[value="${CSS.escape(prov)}"]`);
+        if (opt) {
+          const shortModel = model.includes('/') ? model.split('/').pop() : model;
+          opt.textContent = `● ${provLabel} — ${shortModel}`;
+        }
+      }
+
+      showToast(`${provLabel}: ${model}`, 'info');
+      window.dispatchEvent(new CustomEvent('settings-changed'));
+      closeModal();
+    } catch (e) {
+      showToast(`Switch failed: ${e.message}`, 'error');
+      // Re-enable items
+      listEl.querySelectorAll('.model-picker-item').forEach(el => {
+        el.style.pointerEvents = '';
+        el.style.opacity = '';
+      });
+    }
+  }
+
+  // Initial load
+  loadModels(activeProvider);
+}
+
+// Short provider names for the model picker (local copy)
+const _PICKER_PROVIDER_NAMES = {
+  openai: 'OpenAI', nvidia: 'NVIDIA NIM', anthropic: 'Anthropic',
+  moonshot: 'Moonshot', zhipu: 'Zhipu', deepseek: 'DeepSeek',
+  groq: 'Groq', together: 'Together AI', openrouter: 'OpenRouter',
+  siliconflow: 'SiliconFlow', custom: 'Custom',
+};
+
+/** Export showModelPicker for use by app.js header */
+export { showModelPicker };
+
+function _escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+function _escapeAttr(str) {
+  return str.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Update model/provider display based on inference type */

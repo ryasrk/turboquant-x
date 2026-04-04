@@ -11,16 +11,17 @@ logger = logging.getLogger(__name__)
 
 # Supported providers and their display names
 SUPPORTED_PROVIDERS: dict[str, str] = {
-    "openai": "OpenAI (GPT-4o, GPT-4, o1, o3)",
-    "anthropic": "Anthropic (Claude Opus, Sonnet, Haiku)",
-    "moonshot": "Moonshot AI / Kimi",
-    "zhipu": "Zhipu AI / GLM-4",
+    "openai": "OpenAI",
+    "nvidia": "NVIDIA NIM",
+    "anthropic": "Anthropic",
+    "moonshot": "Moonshot",
+    "zhipu": "Zhipu",
     "deepseek": "DeepSeek",
-    "groq": "Groq (LLaMA, Mixtral)",
+    "groq": "Groq",
     "together": "Together AI",
-    "openrouter": "OpenRouter (multi-provider gateway)",
+    "openrouter": "OpenRouter",
     "siliconflow": "SiliconFlow",
-    "custom": "Custom OpenAI-compatible endpoint",
+    "custom": "Custom",
 }
 
 

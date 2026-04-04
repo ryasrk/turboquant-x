@@ -14,6 +14,15 @@ providers:
     timeout: 120
     # base_url: "https://api.openai.com/v1"  # default
 
+  nvidia:  # NVIDIA NIM / Build API
+    # api_key loaded from .env: TURBOQUANT_CLOUD_NVIDIA_API_KEY
+    model: "openai/gpt-oss-120b"
+    max_tokens: 4096
+    temperature: 1.0
+    top_p: 1.0
+    timeout: 120
+    # base_url: "https://integrate.api.nvidia.com/v1"  # default
+
   anthropic:
     # api_key loaded from .env: TURBOQUANT_CLOUD_ANTHROPIC_API_KEY
     model: "claude-sonnet-4-20250514"

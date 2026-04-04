@@ -88,7 +88,7 @@ export function appendMessage(role, content, streaming = false) {
 
   const roleEl = document.createElement('div');
   roleEl.className = 'msg-role';
-  roleEl.textContent = role === 'user' ? '▶ operator' : '◈ tq-neural';
+  roleEl.textContent = role === 'user' ? '▶ User' : '◈ tq-neural';
 
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
@@ -111,6 +111,7 @@ export function appendMessage(role, content, streaming = false) {
  *
  * Thoughts are stripped server-side and logged to file.  If any
  * ``<think>`` blocks leak through, they are silently removed.
+ * Adds copy buttons for code blocks and a copy-all button.
  */
 export function renderAssistantContent(bubble, text) {
   bubble.innerHTML = '';
@@ -123,7 +124,41 @@ export function renderAssistantContent(bubble, text) {
   const answerEl = document.createElement('div');
   answerEl.className = 'msg-answer md-content';
   answerEl.innerHTML = renderMarkdown(clean);
+
+  // Add copy buttons to code blocks
+  answerEl.querySelectorAll('pre > code').forEach(codeEl => {
+    const pre = codeEl.parentElement;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'code-block-wrapper';
+    pre.parentElement.insertBefore(wrapper, pre);
+    wrapper.appendChild(pre);
+    const btn = document.createElement('button');
+    btn.className = 'copy-code-btn';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code');
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(codeEl.textContent).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      });
+    });
+    wrapper.appendChild(btn);
+  });
+
   bubble.appendChild(answerEl);
+
+  // Add copy-all button for the full message
+  const copyAll = document.createElement('button');
+  copyAll.className = 'copy-msg-btn';
+  copyAll.innerHTML = '⧉ Copy';
+  copyAll.setAttribute('aria-label', 'Copy full message');
+  copyAll.addEventListener('click', () => {
+    navigator.clipboard.writeText(clean).then(() => {
+      copyAll.innerHTML = '✓ Copied!';
+      setTimeout(() => { copyAll.innerHTML = '⧉ Copy'; }, 1500);
+    });
+  });
+  bubble.appendChild(copyAll);
 }
 
 export function setStreaming(on) {
@@ -142,7 +177,13 @@ export function setStreaming(on) {
  * This saves client bandwidth and avoids exposing scaffolding tokens
  * in the UI.  If any ``<think>`` tags leak through (e.g. older server),
  * they are silently removed here as a safety net.
+ *
+ * Renders markdown live during streaming so the user sees formatted text.
  */
+let _streamRafId = 0;
+let _streamPendingText = '';
+let _streamBubble = null;
+
 export function updateStreamBubble(bubble, text) {
   // Safety-net strip in case server filter missed anything
   const clean = text
@@ -150,14 +191,48 @@ export function updateStreamBubble(bubble, text) {
     .replace(/<think>[\s\S]*$/g, '')               // orphaned open tag
     .replace(/^[\s\S]*?<\/think>/g, '')            // orphaned close tag
     .trim();
-  const cursor = bubble.querySelector('.cursor');
-  bubble.textContent = clean;
-  if (cursor) bubble.appendChild(cursor);
-  else {
-    const c = document.createElement('span');
-    c.className = 'cursor';
-    bubble.appendChild(c);
+
+  // Throttle rendering with requestAnimationFrame for performance
+  _streamPendingText = clean;
+  _streamBubble = bubble;
+  if (!_streamRafId) {
+    _streamRafId = requestAnimationFrame(_flushStreamRender);
   }
+}
+
+/** Cancel any pending stream RAF before final render. */
+export function cancelStreamRender() {
+  if (_streamRafId) {
+    cancelAnimationFrame(_streamRafId);
+    _streamRafId = 0;
+  }
+  _streamBubble = null;
+  _streamPendingText = '';
+}
+
+function _flushStreamRender() {
+  _streamRafId = 0;
+  const bubble = _streamBubble;
+  const clean = _streamPendingText;
+  if (!bubble) return;
+
+  // Render markdown
+  const answerEl = bubble.querySelector('.msg-answer') || (() => {
+    const el = document.createElement('div');
+    el.className = 'msg-answer md-content';
+    bubble.innerHTML = '';
+    bubble.appendChild(el);
+    return el;
+  })();
+  answerEl.innerHTML = renderMarkdown(clean);
+
+  // Ensure cursor is present
+  let cursor = bubble.querySelector('.cursor');
+  if (!cursor) {
+    cursor = document.createElement('span');
+    cursor.className = 'cursor';
+  }
+  bubble.appendChild(cursor);
 }
 
 export function updateTokenCount() {

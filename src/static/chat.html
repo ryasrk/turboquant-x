@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TurboQuant-X ∞ Neural Interface</title>
-  <link rel="stylesheet" href="/static/css/theme.css?v=8" />
-  <link rel="stylesheet" href="/static/css/layout.css?v=8" />
-  <link rel="stylesheet" href="/static/css/components.css?v=8" />
+  <link rel="stylesheet" href="/static/css/theme.css?v=26" />
+  <link rel="stylesheet" href="/static/css/layout.css?v=26" />
+  <link rel="stylesheet" href="/static/css/components.css?v=26" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
 </head>
@@ -96,6 +96,12 @@
       <option>loading…</option>
     </select>
     
+    <!-- Theme Toggle -->
+    <button id="theme-toggle" class="icon-btn theme-toggle-btn" title="Toggle light/dark theme" aria-label="Toggle theme">
+      <span class="theme-icon-dark">🌙</span>
+      <span class="theme-icon-light">☀️</span>
+    </button>
+
     <!-- Advanced Settings Button -->
     <button class="settings-btn" id="settings-btn" aria-label="Open settings">
       <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
@@ -303,11 +309,16 @@
         <div class="settings-field">
           <div class="field-label">Provider</div>
           <select class="select-input" id="provider-select" aria-describedby="provider-description">
-            <option value="openai">OpenAI (GPT-4)</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="zhipu">Zhipu (GLM)</option>
-            <option value="moonshot">Moonshot (Kimi)</option>
+            <option value="openai">OpenAI</option>
+            <option value="nvidia">NVIDIA NIM</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="zhipu">Zhipu</option>
+            <option value="moonshot">Moonshot</option>
             <option value="deepseek">DeepSeek</option>
+            <option value="groq">Groq</option>
+            <option value="together">Together AI</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="siliconflow">SiliconFlow</option>
           </select>
           <div id="provider-description" class="field-description">Select your preferred cloud AI provider</div>
         </div>
@@ -318,6 +329,17 @@
             <span class="status-text">Checking…</span>
             <button class="text-btn" id="configure-api-btn" aria-label="Configure API key for selected cloud provider">Configure</button>
           </div>
+        </div>
+      </div>
+      
+      <div class="settings-row" id="cloud-model-row">
+        <div class="settings-field" style="width:100%">
+          <div class="field-label">Model</div>
+          <button class="model-browse-btn" id="browse-models-btn" aria-label="Browse and select a model for this provider">
+            <span class="model-browse-label" id="selected-model-label">Select a model…</span>
+            <span class="model-browse-icon">▾</span>
+          </button>
+          <div class="field-description">Click to browse available models</div>
         </div>
       </div>
     </div>
@@ -369,6 +391,6 @@
   </div>
 </div>
 
-<script type="module" src="/static/js/app.js?v=8"></script>
+<script type="module" src="/static/js/app.js?v=26"></script>
 </body>
 </html>

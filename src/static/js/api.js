@@ -59,6 +59,25 @@ export async function fetchCloudProviders() {
   return r.json();
 }
 
+export async function fetchProviderModels(provider) {
+  const r = await fetch(`/v1/cloud-providers/${encodeURIComponent(provider)}/models`);
+  if (!r.ok) throw new Error(`Provider models: ${r.status}`);
+  return r.json();
+}
+
+export async function switchCloudModel(model) {
+  const r = await fetch('/v1/switch-cloud-model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || r.statusText);
+  }
+  return r.json();
+}
+
 /**
  * Start a streaming chat completion. Returns the ReadableStream reader.
  * @param {Array} messages - Chat messages

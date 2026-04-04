@@ -1,10 +1,10 @@
 /** Main entry — wires all modules together. */
 
 import { state } from './state.js';
-import { fetchHealth, switchMode, fetchAvailableModels, switchModel, switchProvider } from './api.js';
+import { fetchHealth, switchMode, fetchAvailableModels, switchModel, switchProvider, fetchCloudProviders } from './api.js';
 import { showToast, appendMessage, renderAssistantContent, getChatEl, updateContextMeter } from './ui.js';
 import { sendMessage, clearSession } from './chat.js';
-import { initSettings, openSettings, syncModeFromHealth } from './settings.js';
+import { initSettings, openSettings, syncModeFromHealth, showModelPicker } from './settings.js';
 import { refreshModelList } from './models.js';
 import { initUpload, setVisionEnabled } from './upload.js';
 import { toggleAgent } from './agent.js';
@@ -32,6 +32,22 @@ const headerModeSelect  = document.getElementById('header-mode-select');
 const headerModelSelect = document.getElementById('header-model-select');
 const localToggleHeader = document.getElementById('local-toggle');
 const cloudToggleHeader = document.getElementById('cloud-toggle');
+const themeToggle = document.getElementById('theme-toggle');
+
+// ── Theme (light/dark) ───────────────────────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem('tq-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('tq-theme', next);
+    });
+  }
+}
+initTheme();
 
 // ── Init modules ──────────────────────────────────────────────────────
 initSettings();
@@ -90,23 +106,47 @@ function updateHeaderModelSelect(type) {
   }
 }
 
+// Short display names for header provider dropdown
+const _PROVIDER_SHORT_NAMES = {
+  openai: 'OpenAI', nvidia: 'NVIDIA NIM', anthropic: 'Anthropic',
+  moonshot: 'Moonshot', zhipu: 'Zhipu', deepseek: 'DeepSeek',
+  groq: 'Groq', together: 'Together AI', openrouter: 'OpenRouter',
+  siliconflow: 'SiliconFlow', custom: 'Custom',
+};
+
 async function populateHeaderProviders() {
   if (!headerModelSelect) return;
-  const providers = [
-    { name: 'OpenAI (GPT-4)', value: 'openai' },
-    { name: 'Anthropic (Claude)', value: 'anthropic' },
-    { name: 'Zhipu (GLM)', value: 'zhipu' },
-    { name: 'Moonshot (Kimi)', value: 'moonshot' },
-    { name: 'DeepSeek', value: 'deepseek' }
-  ];
-  
-  headerModelSelect.innerHTML = '';
-  for (const provider of providers) {
-    const opt = document.createElement('option');
-    opt.value = provider.value;
-    opt.textContent = provider.name;
-    opt.selected = provider.value === (state.settings.cloudProvider || 'openai');
-    headerModelSelect.appendChild(opt);
+  try {
+    const data = await fetchCloudProviders();
+    headerModelSelect.innerHTML = '';
+    const activeModel = state.settings.cloudModel || '';
+    for (const p of (data.providers || [])) {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      const shortName = _PROVIDER_SHORT_NAMES[p.name] || p.name;
+      // Show model name for the active/selected provider
+      const isSelected = p.name === (state.settings.cloudProvider || data.active_provider || 'openai');
+      let label = p.configured ? `● ${shortName}` : shortName;
+      if (isSelected && activeModel) {
+        // Shorten long model IDs (e.g. "moonshotai/kimi-k2.5" → "kimi-k2.5")
+        const shortModel = activeModel.includes('/') ? activeModel.split('/').pop() : activeModel;
+        label += ` — ${shortModel}`;
+      }
+      opt.textContent = label;
+      opt.selected = isSelected;
+      headerModelSelect.appendChild(opt);
+    }
+  } catch (_) {
+    // Fallback to static list
+    headerModelSelect.innerHTML = '';
+    for (const [value, name] of Object.entries(_PROVIDER_SHORT_NAMES)) {
+      if (value === 'custom') continue;
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = name;
+      opt.selected = value === (state.settings.cloudProvider || 'openai');
+      headerModelSelect.appendChild(opt);
+    }
   }
 }
 
@@ -167,28 +207,29 @@ if (headerModeSelect) {
 
 // ── Header model switcher ─────────────────────────────────────────────
 let _modelSwitching = false;
+const _KNOWN_PROVIDERS = new Set(Object.keys(_PROVIDER_SHORT_NAMES));
 if (headerModelSelect) {
+  // In cloud mode, any click opens the model picker for the selected provider.
+  // The picker itself has a provider dropdown so users can also switch there.
+  headerModelSelect.addEventListener('mousedown', (e) => {
+    if (state.settings.inferenceType === 'cloud') {
+      const provider = headerModelSelect.value;
+      // Guard: only intercept if value is a real provider (not a .gguf filename)
+      if (provider && _KNOWN_PROVIDERS.has(provider)) {
+        e.preventDefault();
+        headerModelSelect.blur();
+        showModelPicker(provider);
+      }
+    }
+  });
+
   headerModelSelect.addEventListener('change', async () => {
     const value = headerModelSelect.value;
     if (_modelSwitching || !value) return;
 
-    // Cloud mode: switch provider on server
-    if (state.settings.inferenceType === 'cloud') {
-      _modelSwitching = true;
-      headerModelSelect.disabled = true;
-      const displayName = headerModelSelect.selectedOptions[0]?.textContent || value;
-      showToast(`Switching to ${displayName}…`);
-      try {
-        const result = await switchProvider(value);
-        state.settings.cloudProvider = value;
-        showToast(`Cloud provider: ${displayName} (${result.model})`, 'info');
-      } catch (e) {
-        showToast(`Provider switch failed: ${e.message}`, 'error');
-      } finally {
-        _modelSwitching = false;
-        headerModelSelect.disabled = false;
-        pollHealth();
-      }
+    // Cloud mode: open model picker modal for selected provider
+    if (state.settings.inferenceType === 'cloud' && _KNOWN_PROVIDERS.has(value)) {
+      showModelPicker(value);
       return;
     }
 
@@ -246,9 +287,36 @@ async function pollHealth() {
       updateHeaderModelSelect(state.settings.inferenceType);
     }
 
+    // Track cloud provider and model name; sync header dropdown
+    if (serverIsCloud && d.provider) {
+      // Sync provider selection
+      if (d.provider !== state.settings.cloudProvider) {
+        state.settings.cloudProvider = d.provider;
+        if (headerModelSelect) {
+          headerModelSelect.value = d.provider;
+        }
+      }
+      // Sync model name and update selected option text
+      if (d.model_name) {
+        state.settings.cloudModel = d.model_name;
+        if (headerModelSelect) {
+          const opt = headerModelSelect.querySelector(`option[value="${CSS.escape(d.provider)}"]`);
+          if (opt) {
+            const shortName = _PROVIDER_SHORT_NAMES[d.provider] || d.provider;
+            const shortModel = d.model_name.includes('/') ? d.model_name.split('/').pop() : d.model_name;
+            opt.textContent = `● ${shortName} — ${shortModel}`;
+          }
+        }
+      }
+    }
+
     if (modelNameDisp) {
       if (d.model_name) {
-        modelNameDisp.textContent = `model: ${d.model_name}`;
+        const isCloud = d.inference_mode === 'cloud';
+        const displayName = isCloud && d.provider
+          ? `${d.provider}: ${d.model_name}`
+          : `model: ${d.model_name}`;
+        modelNameDisp.textContent = displayName;
         modelNameDisp.title = d.model_name;
       } else if (d.loading) {
         modelNameDisp.textContent = 'model: loading…';

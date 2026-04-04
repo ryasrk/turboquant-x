@@ -195,11 +195,34 @@ export function renderMarkdown(text) {
   }
 
   // Join and wrap consecutive text lines into paragraphs
-  return restoreMath(out
-    .join('\n')
+  // Protect block elements from paragraph wrapping
+  const blockElements = [];
+  let joined = out.join('\n');
+
+  // Extract block-level elements before paragraph wrapping
+  joined = joined.replace(/(<(?:pre|ul|ol|blockquote|h[1-6])[^>]*>[\s\S]*?<\/(?:pre|ul|ol|blockquote|h[1-6])>|<hr>)/g, (match) => {
+    const idx = blockElements.length;
+    blockElements.push(match);
+    return `\x01BLOCK${idx}\x01`;
+  });
+
+  // Wrap remaining text in paragraphs
+  joined = joined
     .replace(/\n{2,}/g, '</p><p>')
     .replace(/^/, '<p>')
     .replace(/$/, '</p>')
     .replace(/<p><\/p>/g, '')
-    .replace(/<p>(<(?:h[1-6]|ul|ol|pre|blockquote|hr)[^]*?<\/(?:h[1-6]|ul|ol|pre|blockquote)>|<hr>)<\/p>/g, '$1'));
+    .replace(/<p>\s*<\/p>/g, '');
+
+  // Restore block elements (unwrap from any <p> tags)
+  for (let i = 0; i < blockElements.length; i++) {
+    joined = joined.replace(
+      new RegExp(`<p>\\s*\x01BLOCK${i}\x01\\s*</p>`, 'g'),
+      blockElements[i],
+    );
+    // Also handle case where placeholder isn't wrapped in <p>
+    joined = joined.replace(`\x01BLOCK${i}\x01`, blockElements[i]);
+  }
+
+  return restoreMath(joined);
 }

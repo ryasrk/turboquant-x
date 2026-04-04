@@ -94,6 +94,7 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     model_name: str = ""
     inference_mode: str = "standard"
+    provider: str | None = None
     loading: bool = False
     supports_thinking: bool = False
     supports_tools: bool = False

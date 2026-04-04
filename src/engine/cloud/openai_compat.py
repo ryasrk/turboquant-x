@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Default base URLs per provider
 _DEFAULT_BASE_URLS: dict[str, str] = {
     "openai": "https://api.openai.com/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
     "moonshot": "https://api.moonshot.cn/v1",
     "zhipu": "https://open.bigmodel.cn/api/paas/v4",
     "deepseek": "https://api.deepseek.com/v1",
@@ -33,6 +34,7 @@ _DEFAULT_BASE_URLS: dict[str, str] = {
 # Default models per provider
 _DEFAULT_MODELS: dict[str, str] = {
     "openai": "gpt-4o",
+    "nvidia": "openai/gpt-oss-120b",
     "moonshot": "moonshot-v1-8k",
     "zhipu": "glm-4.5",
     "deepseek": "deepseek-chat",
@@ -71,15 +73,34 @@ class OpenAICompatibleProvider(CloudProvider):
     # Models that use a separate reasoning/thinking budget before producing
     # visible content.  Need higher min token count so the model has room
     # for both reasoning AND the actual answer.
-    _REASONING_MODELS = {"glm-4.5", "glm-4.5-flash", "glm-4-plus", "deepseek-reasoner", "deepseek-chat"}
+    _REASONING_MODELS = {
+        "glm-4.5", "glm-4.5-flash", "glm-4-plus", "deepseek-reasoner", "deepseek-chat",
+        # NVIDIA NIM reasoning models
+        "moonshotai/kimi-k2.5", "nvidia/nemotron-3-super-120b-a12b", "z-ai/glm5",
+    }
     _REASONING_MIN_TOKENS = 512  # minimum to allow visible content after reasoning
+
+    # NVIDIA NIM models that need chat_template_kwargs to enable thinking
+    _NVIDIA_THINKING_MODELS: dict[str, dict[str, Any]] = {
+        "moonshotai/kimi-k2.5": {"thinking": True},
+        "nvidia/nemotron-3-super-120b-a12b": {"enable_thinking": True},
+        "z-ai/glm5": {"enable_thinking": True, "clear_thinking": False},
+    }
 
     def _effective_max_tokens(self, requested: int | None) -> int:
         """Ensure reasoning models get enough tokens for both thinking and content."""
         tokens = requested or self._config.max_tokens
-        if self._model.lower() in self._REASONING_MODELS:
+        model_lower = self._model.lower()
+        if model_lower in self._REASONING_MODELS or any(model_lower.startswith(r) for r in self._REASONING_MODELS):
             tokens = max(tokens, self._REASONING_MIN_TOKENS)
         return tokens
+
+    def _is_reasoning_model(self) -> bool:
+        """Check if the current model has built-in reasoning."""
+        model_lower = self._model.lower()
+        return model_lower in self._REASONING_MODELS or any(
+            model_lower.startswith(r) for r in self._REASONING_MODELS
+        )
 
     def _build_payload(
         self,
@@ -98,6 +119,13 @@ class OpenAICompatibleProvider(CloudProvider):
             "top_p": top_p if top_p is not None else self._config.top_p,
             "stream": stream,
         }
+        # NVIDIA NIM models need chat_template_kwargs for thinking
+        thinking_kwargs = self._NVIDIA_THINKING_MODELS.get(self._model)
+        if thinking_kwargs:
+            payload["chat_template_kwargs"] = thinking_kwargs
+            # Some NVIDIA reasoning models also accept reasoning_budget
+            if "nvidia/nemotron" in self._model.lower():
+                payload["reasoning_budget"] = self._effective_max_tokens(max_tokens)
         # Pass through any extra kwargs (e.g. tools, response_format)
         for k, v in kwargs.items():
             if v is not None:

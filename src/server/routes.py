@@ -668,15 +668,21 @@ async def health_check():
 
     # Cloud models with native tool calling
     if mode == InferenceMode.CLOUD and cloud is not None and cloud.is_loaded:
-        _cloud_tool_providers = ("openai", "anthropic", "zhipu", "deepseek")
+        _cloud_tool_providers = ("openai", "nvidia", "anthropic", "zhipu", "deepseek")
         if cloud.provider_name in _cloud_tool_providers:
             supports_tools = True
+
+    # Provider name for cloud mode status bar display
+    cloud_provider_name = None
+    if mode == InferenceMode.CLOUD and cloud is not None and cloud.is_loaded:
+        cloud_provider_name = cloud.provider_name
 
     return HealthResponse(
         status=status,
         model_loaded=model_loaded,
         model_name=model_name,
         inference_mode=get_inference_mode().value,
+        provider=cloud_provider_name,
         loading=is_loading(),
         supports_thinking=supports_thinking,
         supports_tools=supports_tools,
@@ -891,6 +897,30 @@ async def switch_provider_endpoint(request: Request):
         raise HTTPException(status_code=500, detail=f"Provider switch failed: {e}")
 
 
+@router.post("/v1/switch-cloud-model")
+async def switch_cloud_model_endpoint(request: Request):
+    """Switch to a different model on the active cloud provider (no reload)."""
+    body = await request.json()
+    model = body.get("model", "").strip()
+    if not model:
+        raise HTTPException(status_code=422, detail="'model' field is required")
+
+    cloud = get_cloud_engine()
+    if cloud is None or not cloud.is_loaded:
+        raise HTTPException(status_code=409, detail="No cloud engine is active")
+
+    try:
+        cloud.switch_model(model)
+        return {
+            "status": "ok",
+            "provider": cloud.provider_name,
+            "model": model,
+        }
+    except Exception as e:
+        logger.exception("Cloud model switch failed")
+        raise HTTPException(status_code=500, detail=f"Cloud model switch failed: {e}")
+
+
 @router.get("/v1/cloud-providers")
 async def list_cloud_providers(request: Request):
     """List available cloud providers and their configuration status."""
@@ -915,3 +945,55 @@ async def list_cloud_providers(request: Request):
         })
 
     return {"providers": providers, "active_provider": current_provider}
+
+
+@router.get("/v1/cloud-providers/{provider_name}/models")
+async def list_provider_models(provider_name: str, request: Request):
+    """List available models for a specific cloud provider.
+
+    Creates a temporary provider connection to fetch the model list
+    from the provider's /models endpoint.
+    """
+    import asyncio
+    import os
+    from src.engine.cloud.registry import SUPPORTED_PROVIDERS, build_cloud_configs, create_provider
+    from src.engine.cloud.provider import CloudConfig
+
+    if provider_name not in SUPPORTED_PROVIDERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown provider: {provider_name}. Valid: {list(SUPPORTED_PROVIDERS.keys())}",
+        )
+
+    # Check if we already have an active engine for this provider
+    cloud = get_cloud_engine()
+    if cloud is not None and cloud.is_loaded and cloud.provider_name == provider_name:
+        models = await asyncio.to_thread(cloud.list_models)
+        return {"provider": provider_name, "models": models}
+
+    # Build a temporary provider to list models
+    cloud_section = getattr(request.app.state, "_cloud_yaml_config", {})
+    configs = build_cloud_configs({"cloud": cloud_section})
+
+    if provider_name in configs:
+        cfg = configs[provider_name]
+    else:
+        env_key = f"TURBOQUANT_CLOUD_{provider_name.upper()}_API_KEY"
+        api_key = os.environ.get(env_key, "")
+        if not api_key:
+            return {"provider": provider_name, "models": [], "error": "No API key configured"}
+        providers_cfg = cloud_section.get("providers", {}).get(provider_name, {})
+        cfg = CloudConfig(
+            provider=provider_name,
+            api_key=api_key,
+            base_url=providers_cfg.get("base_url"),
+            model=providers_cfg.get("model", ""),
+        )
+
+    try:
+        provider = create_provider(cfg)
+        models = await asyncio.to_thread(provider.list_models)
+        return {"provider": provider_name, "models": models}
+    except Exception as e:
+        logger.warning("Failed to list models for %s: %s", provider_name, e)
+        return {"provider": provider_name, "models": [], "error": str(e)}

@@ -26,6 +26,11 @@ _CLOUD_CONTEXT_WINDOWS: dict[str, int] = {
     "gpt-4o": 128_000, "gpt-4o-mini": 128_000,
     "gpt-4-turbo": 128_000, "gpt-4": 8_192,
     "gpt-3.5-turbo": 16_385, "o1": 200_000,
+    # NVIDIA NIM
+    "openai/gpt-oss-120b": 131_072, "nvidia/llama-3.1-nemotron-ultra-253b-v1": 131_072,
+    "meta/llama-3.3-70b-instruct": 131_072, "deepseek-ai/deepseek-r1": 131_072,
+    "moonshotai/kimi-k2.5": 131_072, "nvidia/nemotron-3-super-120b-a12b": 131_072,
+    "z-ai/glm5": 131_072, "minimaxai/minimax-m2.5": 131_072,
     # Anthropic
     "claude-sonnet-4-20250514": 200_000, "claude-3-opus": 200_000,
     "claude-3-haiku": 200_000,
@@ -49,6 +54,8 @@ _CLOUD_REASONING_MODELS = {
     "glm-4.5", "glm-4.5-flash", "glm-4-plus",
     "deepseek-reasoner", "deepseek-chat",
     "o1", "o1-mini", "o1-preview",
+    # NVIDIA NIM reasoning models
+    "moonshotai/kimi-k2.5", "nvidia/nemotron-3-super-120b-a12b", "z-ai/glm5",
 }
 
 

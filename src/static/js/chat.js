@@ -12,6 +12,7 @@ import {
   getChatEl,
   getWelcomeEl,
   updateStreamBubble,
+  cancelStreamRender,
 } from './ui.js';
 import {
   isAgentEnabled,
@@ -236,6 +237,7 @@ export async function sendMessage() {
 
     const cursor = bubble.querySelector('.cursor');
     if (cursor) cursor.remove();
+    cancelStreamRender();  // Cancel any pending RAF before final render
     renderAssistantContent(bubble, assistantText);
 
     // Debug stats
