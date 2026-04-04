@@ -1131,6 +1131,55 @@ body {
   word-break: break-all;
 }
 
+/* JSON Editor */
+.ws-json-editor {
+  width: 100%;
+  min-height: 200px;
+  max-height: 500px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  resize: vertical;
+  tab-size: 2;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+.ws-json-editor:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.ws-json-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ws-json-save-btn,
+.ws-json-format-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(76, 175, 80, 0.08);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  transition: background 0.2s;
+}
+.ws-json-save-btn:hover { background: rgba(76, 175, 80, 0.2); }
+.ws-json-format-btn:hover { background: rgba(33, 150, 243, 0.15); }
+.ws-json-save-btn:disabled { opacity: 0.5; cursor: wait; }
+.ws-json-status {
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.ws-json-ok { color: #4caf50; }
+.ws-json-err { color: #e53935; }
+
 /* ── Reduced motion ────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .ws-spinner {

@@ -510,12 +510,61 @@ function showWorkflowPreview(workflow) {
   container.innerHTML = `
     <h4>Generated Workflow: ${escapeHtml(workflow.name || 'Untitled')}</h4>
     <div class="ws-node-pipeline" role="list" aria-label="Workflow nodes">${pipelineHtml || '<span class="ws-node-empty">No nodes</span>'}</div>
-    <details>
-      <summary>Raw JSON</summary>
-      <pre class="ws-json-preview">${escapeHtml(JSON.stringify(workflow, null, 2))}</pre>
+    <details id="ws-json-editor-details">
+      <summary>Raw JSON Editor</summary>
+      <textarea id="ws-json-editor" class="ws-json-editor" spellcheck="false">${escapeHtml(JSON.stringify(workflow, null, 2))}</textarea>
+      <div class="ws-json-actions">
+        <button id="ws-json-save" class="ws-json-save-btn">💾 Save JSON</button>
+        <button id="ws-json-format" class="ws-json-format-btn">{ } Format</button>
+        <span id="ws-json-status" class="ws-json-status"></span>
+      </div>
     </details>
   `;
   container.classList.remove('hidden');
+
+  // Wire up JSON editor buttons
+  $('#ws-json-format')?.addEventListener('click', () => {
+    const editor = $('#ws-json-editor');
+    const status = $('#ws-json-status');
+    if (!editor) return;
+    try {
+      const parsed = JSON.parse(editor.value);
+      editor.value = JSON.stringify(parsed, null, 2);
+      if (status) { status.textContent = 'Formatted ✓'; status.className = 'ws-json-status ws-json-ok'; }
+    } catch (e) {
+      if (status) { status.textContent = `Invalid JSON: ${e.message}`; status.className = 'ws-json-status ws-json-err'; }
+    }
+  });
+
+  $('#ws-json-save')?.addEventListener('click', async () => {
+    const editor = $('#ws-json-editor');
+    const status = $('#ws-json-status');
+    if (!editor || !activeWsId) return;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(editor.value);
+    } catch (e) {
+      if (status) { status.textContent = `Invalid JSON: ${e.message}`; status.className = 'ws-json-status ws-json-err'; }
+      return;
+    }
+
+    const btn = $('#ws-json-save');
+    if (btn) { btn.disabled = true; btn.textContent = '💾 Saving…'; }
+    try {
+      await apiFetch(`/v1/workspaces/${encodeURIComponent(activeWsId)}/design/json`, {
+        method: 'PUT',
+        body: JSON.stringify({ workflow_json: parsed }),
+      });
+      if (status) { status.textContent = 'Saved ✓'; status.className = 'ws-json-status ws-json-ok'; }
+      // Refresh preview with new data
+      showWorkflowPreview(parsed);
+    } catch (err) {
+      if (status) { status.textContent = `Save failed: ${err.message}`; status.className = 'ws-json-status ws-json-err'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Save JSON'; }
+    }
+  });
 }
 
 // ── UI: Action buttons ─────────────────────────────────────────────────

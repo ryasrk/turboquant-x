@@ -66,6 +66,11 @@ class WorkspaceChatRequest(BaseModel):
     model: str | None = Field(None, description="Cloud model override")
 
 
+class WorkflowJsonUpdate(BaseModel):
+    """Update the raw workflow JSON stored in the latest design."""
+    workflow_json: dict = Field(..., description="Complete workflow JSON object")
+
+
 # ── Design lifecycle states ──────────────────────────────────────────
 
 DESIGN_STATES = {"draft", "designing", "designed", "approved", "rejected", "active", "failed"}
@@ -529,6 +534,43 @@ async def remove_workflow(workspace_id: str, user: dict = Depends(get_current_us
         "message": "Workspace reset to draft"
             + (" — n8n workflow deleted" if n8n_deleted else "")
             + (" — n8n cleanup skipped" if wf_id and not n8n_deleted else ""),
+    }
+
+
+@router.put("/{workspace_id}/design/json")
+async def update_design_json(
+    workspace_id: str,
+    body: WorkflowJsonUpdate,
+    user: dict = Depends(get_current_user),
+):
+    """Update the raw workflow JSON in the latest design record.
+
+    Allows direct editing of the workflow JSON before redeploying.
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    design = _get_latest_design(workspace_id)
+    if not design:
+        # No existing design — create one so the JSON is stored
+        design = create_workspace_design(workspace_id, "(manual edit)")
+        if ws["status"] == "draft":
+            update_workspace(workspace_id, user["user_id"], status="designed")
+
+    workflow_json = body.workflow_json
+    if not workflow_json.get("nodes") and not workflow_json.get("connections"):
+        raise HTTPException(status_code=422, detail="Workflow JSON must contain nodes or connections.")
+
+    update_workspace_design(
+        design["id"],
+        result_data=json.dumps(workflow_json),
+        status="designed",
+    )
+
+    return {
+        "ok": True,
+        "design_id": design["id"],
+        "node_count": len(workflow_json.get("nodes", [])),
+        "message": "Design JSON updated. Use Redeploy to push to n8n.",
     }
 
 
