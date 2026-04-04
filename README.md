@@ -7,12 +7,17 @@ It supports two broad operating modes:
 - Local inference through llama.cpp with `standard`, `turboquant`, `zero-quant`, and `ultra-quant` execution modes
 - Cloud inference through provider adapters for OpenAI, NVIDIA, Anthropic, Moonshot, Zhipu, DeepSeek, and Groq
 
+Additionally, TurboQuant-X provides an **n8n workflow automation** layer — a workspace UI for managing n8n integrations with AI-powered workflow design, a library of ~290 community templates, and 24 agent tools for full n8n control.
+
 ## What This Repository Contains
 
 - FastAPI server with chat, health, model switching, cloud switching, auth, sessions, and document download endpoints
 - Browser chat UI at `/` with streaming responses, settings, auth overlay, sessions, model/provider selection, and agent mode
 - TurboQuant KV-cache compression pipeline plus optional C++ acceleration backend
 - Agent tool system with file, code, shell, SQL, RAG, web, memory, MCP, and document-generation tools
+- n8n workflow automation workspace with AI-powered workflow design and management
+- Template library with ~290 community templates and official n8n.io gallery search
+- 24 n8n agent tools for workflow CRUD, execution monitoring, credential management, node discovery, and template deployment
 - Benchmark suite for speed, quality, perplexity, multi-turn, and needle-in-a-haystack evaluation
 
 ## Key Capabilities
@@ -31,6 +36,10 @@ It supports two broad operating modes:
 ```text
 turboquant-x/
 ├── config/                # default.yaml, cloud.yaml, runtime secrets in config/.env
+├── data/
+│   ├── n8n_templates/     # ~290 community workflow templates (JSON)
+│   ├── skills/            # agent skill files loaded into workspace AI
+│   └── uploads/           # user file uploads
 ├── docs/                  # architecture and deeper technical documentation
 ├── benchmarks/            # benchmarking scripts and report generation
 ├── models/                # local GGUF model files
@@ -38,8 +47,8 @@ turboquant-x/
 ├── src/
 │   ├── agent/             # tool definitions and agent loop support
 │   ├── engine/            # local inference, cloud providers, compression engines
-│   ├── server/            # FastAPI app, routes, auth, database
-│   ├── static/            # browser UI assets
+│   ├── server/            # FastAPI app, routes, auth, database, n8n integration
+│   ├── static/            # browser UI assets (chat, workspaces, admin)
 │   ├── turboquant/        # compression pipeline code
 │   ├── turboquant_cpp/    # optional compiled extension target
 │   └── utils/             # doctor, GPU helpers, memory utilities
@@ -375,6 +384,73 @@ Agent metadata endpoints:
 | `GET /v1/agent/tools` | list registered tools |
 | `POST /v1/agent/approve-tool` | approve a pending tool action |
 | `POST /v1/agent/mcp/reload` | reload MCP-backed tools |
+
+## n8n Workflow Automation
+
+TurboQuant-X integrates with [n8n](https://n8n.io) to provide AI-powered workflow automation through workspaces.
+
+### Workspace System
+
+Each workspace links to an n8n workflow and provides an AI chat agent with full n8n control:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/workspaces` | list user workspaces |
+| `POST /v1/workspaces` | create a workspace |
+| `POST /v1/workspaces/{id}/chat` | chat with the n8n agent (SSE stream) |
+| `POST /v1/workspaces/{id}/design` | AI-generate a workflow from a description |
+| `POST /v1/workspaces/{id}/deploy` | deploy generated JSON to n8n |
+
+### n8n Agent Tools (24 tools)
+
+The workspace agent has 24 tools organized into categories:
+
+**Workflow Management:**
+`n8n_workflow_status`, `n8n_get_workflow`, `n8n_list_workflows`, `n8n_create_workflow`, `n8n_update_workflow`, `n8n_delete_workflow`, `n8n_activate_workflow`
+
+**Execution Monitoring:**
+`n8n_list_executions`, `n8n_execution_detail`, `n8n_diagnose_error`, `n8n_execute_workflow`
+
+**Credentials:**
+`n8n_list_credentials`, `n8n_get_credential`, `n8n_update_credential`
+
+**Node Discovery:**
+`n8n_list_node_types`, `n8n_install_node`, `n8n_get_node_types`
+
+**Template Library:**
+`n8n_search_templates`, `n8n_get_template_detail`, `n8n_search_official`, `n8n_fetch_official_template`
+
+**Analysis:**
+`n8n_suggest_improvements`, `n8n_get_settings`
+
+### Tool Chaining
+
+Template tools output raw JSON that pipes directly into create/update tools:
+
+```
+n8n_search_templates("telegram bot AI")
+  → n8n_get_template_detail(template_id=255)
+    → n8n_create_workflow(workflow_json=<output>, name="My Telegram Bot")
+```
+
+Both `n8n_create_workflow` and `n8n_update_workflow` accept a `workflow_json` string parameter (full workflow JSON) or individual `name`/`nodes`/`connections` parameters.
+
+### Template Library
+
+- **~290 community templates** in `data/n8n_templates/` covering WhatsApp, Telegram, Slack, OpenAI, Google, email, CRM, and more
+- **Official n8n.io gallery** search via API for thousands of additional templates
+- Templates are indexed on startup with keyword search and relevance scoring
+
+### Agent Skills
+
+The workspace agent loads skill files from `data/skills/` that provide step-by-step instructions for common tasks:
+
+- `build-workflow-from-template.md` — search → adapt → deploy workflow from templates
+- `diagnose-fix-workflow.md` — error diagnosis and resolution patterns
+- `manage-credentials.md` — credential lifecycle management
+- `optimize-workflow.md` — workflow performance analysis and improvement
+- `manage-workflows.md` — full workflow lifecycle operations
+- `install-discover-nodes.md` — node type discovery and community package installation
 
 ## Document Generation
 
