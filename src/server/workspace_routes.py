@@ -408,10 +408,10 @@ async def start_design(workspace_id: str, body: DesignRequest, user: dict = Depe
     """
     ws = _get_user_workspace(workspace_id, user)
 
-    if ws["status"] not in ("draft", "designed", "rejected", "approved"):
+    if ws["status"] not in ("draft", "designed", "rejected", "approved", "failed"):
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot start design from state '{ws['status']}'. Must be draft, designed, rejected, or approved.",
+            detail=f"Cannot start design from state '{ws['status']}'. Must be draft, designed, rejected, approved, or failed.",
         )
 
     return EventSourceResponse(_design_event_stream(workspace_id, user, body.prompt, body.model))
