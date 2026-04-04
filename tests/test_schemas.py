@@ -68,7 +68,7 @@ class TestChatRequest:
 
     def test_valid_request_with_defaults(self, _msg):
         req = ChatRequest(messages=[_msg])
-        assert req.max_tokens == 2048
+        assert req.max_tokens == 4096
         assert req.temperature == 0.7
         assert req.top_p == 0.95
         assert req.stream is False

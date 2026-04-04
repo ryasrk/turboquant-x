@@ -26,7 +26,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     """Chat completion request — OpenAI-compatible."""
     messages: list[ChatMessage] = Field(..., min_length=1, max_length=100)
-    max_tokens: int = Field(default=2048, ge=1, le=16384)
+    max_tokens: int = Field(default=4096, ge=1, le=16384)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
     stream: bool = False

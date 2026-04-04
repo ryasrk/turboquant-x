@@ -904,7 +904,7 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None)
     try:
         loop = CloudAgentLoop(n8n_registry)
 
-        async for event in loop.run(engine_to_use, messages):
+        async for event in loop.run(engine_to_use, messages, max_tokens=4096):
             yield {"data": json.dumps(event)}
 
         yield {"data": "[DONE]"}

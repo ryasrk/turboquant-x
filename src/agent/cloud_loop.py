@@ -65,7 +65,7 @@ class CloudAgentLoop:
         cloud_engine: Any,  # CloudEngine
         messages: list[dict[str, Any]],
         *,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         temperature: float = 0.7,
         top_p: float = 0.95,
     ) -> AsyncGenerator[dict[str, Any], None]:
