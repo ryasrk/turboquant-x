@@ -19,6 +19,7 @@ import logging
 import os
 import time
 import uuid
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -56,6 +57,13 @@ class WorkspacePatch(BaseModel):
 class DesignRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10_000)
     model: str | None = Field(None, description="Cloud model override, e.g. 'glm-4.5-flash', 'deepseek-chat'")
+
+
+class WorkspaceChatRequest(BaseModel):
+    """Chat message for the workspace agent (n8n-scoped tools)."""
+    message: str = Field(..., min_length=1, max_length=10_000)
+    history: list[dict] = Field(default_factory=list, description="Previous messages [{role, content}]")
+    model: str | None = Field(None, description="Cloud model override")
 
 
 # ── Design lifecycle states ──────────────────────────────────────────
@@ -415,7 +423,8 @@ async def approve_design(workspace_id: str, user: dict = Depends(get_current_use
         raise HTTPException(status_code=409, detail=f"Cannot approve from state '{ws['status']}'. Must be 'designed'.")
 
     design = _get_latest_design(workspace_id)
-    workflow_id = ws.get("n8n_workflow_id") or (design and design.get("n8n_workflow_id"))
+    raw_wf_id = ws.get("n8n_workflow_id") or (design and design.get("n8n_workflow_id"))
+    workflow_id: str | None = str(raw_wf_id) if raw_wf_id else None
 
     update_workspace(workspace_id, user["user_id"], status="approved")
     if design:
@@ -484,6 +493,45 @@ async def reject_design(workspace_id: str, user: dict = Depends(get_current_user
     return {"ok": True, "status": "rejected"}
 
 
+@router.delete("/{workspace_id}/workflow")
+async def remove_workflow(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Remove the linked n8n workflow and/or reset workspace to draft.
+
+    If an n8n workflow is linked, attempts to delete it from n8n.
+    Always resets the workspace status to 'draft' so a new design can be started.
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    if ws["status"] == "draft":
+        raise HTTPException(status_code=409, detail="Workspace is already in draft state")
+
+    wf_id = ws.get("n8n_workflow_id")
+
+    # Try to delete from n8n if there's a workflow linked and n8n is reachable
+    n8n_deleted = False
+    if wf_id and await verify_n8n_access(user):
+        try:
+            from src.server.n8n_setup import n8n_api_call
+            resp = await n8n_api_call("DELETE", f"/rest/workflows/{wf_id}")
+            n8n_deleted = resp.status_code in (200, 204)
+            if n8n_deleted:
+                logger.info("Deleted n8n workflow %s", wf_id)
+        except Exception:
+            logger.warning("Could not delete workflow %s from n8n", wf_id, exc_info=True)
+
+    # Clear the workflow link and reset status to draft
+    update_workspace(workspace_id, user["user_id"], status="draft", n8n_workflow_id="")
+
+    return {
+        "ok": True,
+        "status": "draft",
+        "n8n_deleted": n8n_deleted,
+        "message": "Workspace reset to draft"
+            + (" — n8n workflow deleted" if n8n_deleted else "")
+            + (" — n8n cleanup skipped" if wf_id and not n8n_deleted else ""),
+    }
+
+
 @router.get("/{workspace_id}/status")
 async def get_workspace_status(workspace_id: str, user: dict = Depends(get_current_user)):
     """Poll the current workspace + n8n workflow status."""
@@ -529,8 +577,14 @@ async def get_executions(workspace_id: str, user: dict = Depends(get_current_use
         return {"executions": [], "message": "No n8n workflow linked"}
 
     from src.server.n8n_manager import get_executions as _get_execs
-    execs = await _get_execs(workflow_id=n8n_wf_id, limit=20)
-    return {"executions": execs}
+    try:
+        execs = await _get_execs(workflow_id=n8n_wf_id, limit=20)
+        return {"executions": execs}
+    except (httpx.ConnectError, httpx.HTTPStatusError):
+        return {"executions": [], "message": "n8n not reachable"}
+    except Exception as exc:
+        logger.warning("Failed to list executions: %s", exc)
+        return {"executions": [], "message": "Could not fetch executions"}
 
 
 @router.get("/{workspace_id}/executions/{execution_id}")
@@ -540,8 +594,14 @@ async def get_execution_detail_route(
     """Get detailed execution data including node outputs and errors."""
     _get_user_workspace(workspace_id, user)
     from src.server.n8n_manager import get_execution_summary
-    summary = await get_execution_summary(execution_id)
-    return {"summary": summary}
+    try:
+        summary = await get_execution_summary(execution_id)
+        return {"summary": summary}
+    except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
+        raise HTTPException(status_code=502, detail=f"n8n unreachable: {exc}") from exc
+    except Exception as exc:
+        logger.warning("Failed to get execution detail %s: %s", execution_id, exc)
+        raise HTTPException(status_code=502, detail="Could not fetch execution detail from n8n") from exc
 
 
 class NodeInstallRequest(BaseModel):
@@ -572,3 +632,175 @@ async def list_available_nodes(
         "total": len(nodes),
         "nodes": [{"name": n.get("name", ""), "displayName": n.get("displayName", "")} for n in nodes[:500]],
     }
+
+
+# ── Workspace Agent Chat ─────────────────────────────────────────────
+
+def _load_agent_skills() -> str:
+    """Load agent skill files from data/skills/ and return as a combined string."""
+    skills_dir = Path(__file__).resolve().parents[2] / "data" / "skills"
+    if not skills_dir.is_dir():
+        return ""
+    parts = []
+    for md_file in sorted(skills_dir.glob("*.md")):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            parts.append(content.strip())
+        except OSError:
+            continue
+    if not parts:
+        return ""
+    return "\n\n---\n\n".join(parts)
+
+
+_AGENT_SKILLS_CACHE: str | None = None
+
+
+def _get_agent_skills() -> str:
+    global _AGENT_SKILLS_CACHE
+    if _AGENT_SKILLS_CACHE is None:
+        _AGENT_SKILLS_CACHE = _load_agent_skills()
+    return _AGENT_SKILLS_CACHE
+
+
+_N8N_SYSTEM_PROMPT = (
+    "You are a proactive workspace assistant specialised in n8n workflow automation. "
+    "You have tools to inspect, diagnose, update, and manage n8n workflows, "
+    "executions, credentials, and community nodes.\n\n"
+    "You also have access to a library of ~290 community templates and the official "
+    "n8n.io template gallery. When the user asks to build or improve a workflow:\n"
+    "1. Search local templates first (n8n_search_templates) for a close match.\n"
+    "2. If no good local match, search official templates (n8n_search_official).\n"
+    "3. Get the full JSON (n8n_get_template_detail or n8n_fetch_official_template).\n"
+    "4. Deploy directly: pass the JSON output as workflow_json to n8n_create_workflow.\n"
+    "   - The template tools output raw JSON that pipes directly into create/update tools.\n"
+    "   - Override the name with the name parameter if needed.\n"
+    "5. Install any missing node types with n8n_install_node.\n\n"
+    "TOOL CHAINING:\n"
+    "- Template → Deploy: n8n_get_template_detail → n8n_create_workflow(workflow_json=output)\n"
+    "- Get → Update: n8n_get_workflow → modify → n8n_update_workflow(workflow_json=modified)\n"
+    "- Both n8n_create_workflow and n8n_update_workflow accept workflow_json (full JSON string) "
+    "or individual name/nodes/connections params.\n\n"
+    "CRITICAL RULES:\n"
+    "1. ALWAYS use your tools FIRST before asking the user for information. "
+    "If you have a workflow ID, call n8n_workflow_status immediately.\n"
+    "2. When asked about errors, call n8n_list_executions (filter status='error') "
+    "then n8n_diagnose_error on the failed execution. DO NOT ask for execution IDs.\n"
+    "3. When the user says 'fix', 'help', or 'error' — start by gathering data with tools.\n"
+    "4. NEVER respond with 'I need more information' if you have tools that can look it up.\n"
+    "5. After tool results, synthesize a clear diagnosis and actionable fix.\n"
+    "6. When building workflows, always search for existing templates first before designing from scratch.\n\n"
+    "Keep answers concise and actionable. Show what you found, what went wrong, and how to fix it."
+)
+
+
+@router.post("/{workspace_id}/chat")
+async def workspace_agent_chat(
+    workspace_id: str,
+    body: WorkspaceChatRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Chat with an n8n-scoped agent for this workspace. Returns SSE stream.
+
+    The agent has access only to n8n tools (workflow status, executions,
+    credentials, node install, diagnose, update, suggest improvements).
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    # Inject workspace context into the system prompt
+    wf_id = ws.get("n8n_workflow_id") or ""
+    context_note = "\n\nWorkspace context:"
+    context_note += f"\n- Workspace ID: {workspace_id}"
+    context_note += f"\n- Workspace title: {ws.get('title', 'Untitled')}"
+    context_note += f"\n- Status: {ws['status']}"
+    if wf_id:
+        context_note += f"\n- n8n Workflow ID: {wf_id}"
+        context_note += "\n\nYou HAVE the workflow ID. Use n8n_workflow_status and n8n_list_executions immediately — do NOT ask the user for it."
+    else:
+        context_note += "\n- No n8n workflow linked yet."
+
+    system_msg = _N8N_SYSTEM_PROMPT + context_note
+
+    # Inject agent skills
+    skills_text = _get_agent_skills()
+    if skills_text:
+        system_msg += "\n\n## Your Skills Reference\n\n" + skills_text
+
+    # Build message history
+    messages: list[dict] = [{"role": "system", "content": system_msg}]
+    for m in body.history[-20:]:  # cap history
+        role = m.get("role", "user")
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": m.get("content", "")})
+    messages.append({"role": "user", "content": body.message})
+
+    return EventSourceResponse(_workspace_chat_stream(messages, body.model))
+
+
+async def _workspace_chat_stream(messages: list[dict], model: str | None = None):
+    """SSE generator for workspace agent chat using only n8n tools.
+
+    If the server is running in local mode (STANDARD/TURBOQUANT/etc.),
+    a temporary cloud engine is created on-the-fly from the stored cloud
+    config — so workspace chat works regardless of inference mode.
+    """
+    from src.agent.cloud_loop import CloudAgentLoop
+    from src.server.app import get_agent_registry, get_or_create_cloud_engine
+
+    registry = get_agent_registry()
+    if registry is None:
+        yield {"data": json.dumps({"type": "error", "message": "Agent tools not initialized"})}
+        yield {"data": "[DONE]"}
+        return
+
+    # Filter to n8n tools only
+    n8n_registry = registry.subset("n8n_")
+
+    if not n8n_registry.list_tools():
+        yield {"data": json.dumps({"type": "error", "message": "No n8n tools available"})}
+        yield {"data": "[DONE]"}
+        return
+
+    cloud_engine, is_temporary = get_or_create_cloud_engine()
+    if cloud_engine is None:
+        yield {"data": json.dumps({
+            "type": "error",
+            "message": (
+                "No cloud engine available. "
+                "Configure a cloud provider in config/cloud.yaml or set "
+                "TURBOQUANT_CLOUD_<PROVIDER>_API_KEY environment variable."
+            ),
+        })}
+        yield {"data": "[DONE]"}
+        return
+
+    # If a model override was requested, create a dedicated temporary engine
+    # with that model (avoids mutating the shared global engine).
+    engine_to_use = cloud_engine
+    dispose_engine = is_temporary
+    if model and model != cloud_engine.model_name:
+        try:
+            from dataclasses import replace as dc_replace
+            from src.engine.cloud_engine import CloudEngine
+            override_cfg = dc_replace(cloud_engine._config, model=model)
+            engine_to_use = CloudEngine(override_cfg)
+            engine_to_use.load_model()
+            dispose_engine = True
+        except Exception:
+            logger.debug("Model override to %s failed, using default", model)
+            # Fall back to the original engine
+
+    try:
+        loop = CloudAgentLoop(n8n_registry)
+
+        async for event in loop.run(engine_to_use, messages):
+            yield {"data": json.dumps(event)}
+
+        yield {"data": "[DONE]"}
+    finally:
+        # Clean up temporary engine (whether from model override or fallback creation)
+        if dispose_engine:
+            try:
+                engine_to_use.unload()
+            except Exception:
+                pass

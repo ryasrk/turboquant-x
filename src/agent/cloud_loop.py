@@ -23,8 +23,9 @@ MAX_TOOL_RESULT_CHARS = 16_000
 
 _AGENT_SYSTEM_PROMPT = (
     "You are a helpful AI assistant with access to tools. "
-    "Use tools when you need real-time data, file operations, calculations, "
-    "web searches, or any information you don't have. "
+    "ALWAYS use tools first when you need real-time data, file operations, "
+    "calculations, web searches, or any information you don't already have. "
+    "NEVER ask the user for information your tools can look up. "
     "After receiving tool results, synthesize a clear answer. "
     "Format responses with markdown for readability."
 )
@@ -195,10 +196,12 @@ class CloudAgentLoop:
                         tools_used.append(name)
 
                     # Build tool result message for next iteration
+                    # Note: OpenAI format uses only role, tool_call_id, content
+                    # "name" is NOT part of the tool message spec and causes 400
+                    # errors on some providers (e.g. zhipu)
                     iteration_tool_messages.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "name": name,
                         "content": result_str,
                     })
 
@@ -226,14 +229,38 @@ class CloudAgentLoop:
                     return
 
                 # Add assistant message with tool_calls + tool results to history
+                # When tool_calls are present, some providers (zhipu) require
+                # content to be null/None rather than an empty string.
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
-                    "content": content or "",
+                    "content": content or None,
                 }
                 if tool_calls:
-                    assistant_msg["tool_calls"] = tool_calls
+                    # Sanitize tool_calls to ensure OpenAI-compatible format:
+                    # Each must have id, type="function", function={name, arguments(str)}
+                    sanitized_tcs = []
+                    for tc in tool_calls:
+                        fn = tc.get("function", {})
+                        raw_args = fn.get("arguments", "{}")
+                        if not isinstance(raw_args, str):
+                            raw_args = json.dumps(raw_args)
+                        sanitized_tcs.append({
+                            "id": tc.get("id", f"call_{iteration}"),
+                            "type": "function",
+                            "function": {
+                                "name": fn.get("name", ""),
+                                "arguments": raw_args,
+                            },
+                        })
+                    assistant_msg["tool_calls"] = sanitized_tcs
                 messages.append(assistant_msg)
                 messages.extend(iteration_tool_messages)
+
+                # Debug: log messages being sent next iteration
+                logger.debug(
+                    "Next iteration messages (last 3): %s",
+                    json.dumps(messages[-3:], indent=2, ensure_ascii=False)[:2000],
+                )
 
             # Exhausted max iterations
             yield {
@@ -244,8 +271,17 @@ class CloudAgentLoop:
             }
 
         except Exception as e:
-            logger.exception("Cloud agent loop error")
-            yield {"type": "error", "message": str(e)}
+            logger.exception("Cloud agent loop error: %s", e)
+            # Include more detail for API errors (e.g. 400 from provider)
+            error_detail = str(e)
+            if hasattr(e, 'response'):
+                try:
+                    resp_body = e.response.text[:500]  # type: ignore[union-attr]
+                    logger.error("Provider response body: %s", resp_body)
+                    error_detail += f" — Response: {resp_body}"
+                except Exception:
+                    pass
+            yield {"type": "error", "message": error_detail}
 
     @staticmethod
     def _parse_tool_calls_from_text(content: str) -> list[dict] | None:

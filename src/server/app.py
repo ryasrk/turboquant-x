@@ -41,6 +41,7 @@ class InferenceMode(str, Enum):
 _engine: InferenceEngine | None = None
 _turbo_engine: Any = None  # TurboQuantEngine | ZeroQuantEngine | None
 _cloud_engine: Any = None  # CloudEngine | None
+_cloud_config_cache: Any = None  # CloudConfig — always stored, even in local mode
 _inference_mode: InferenceMode = InferenceMode.STANDARD
 _start_time: float = 0.0
 _switch_lock = threading.Lock()  # prevents concurrent mode/model switches
@@ -58,6 +59,32 @@ def get_engine() -> InferenceEngine:
 def get_cloud_engine():
     """Get the CloudEngine (None if not in cloud mode)."""
     return _cloud_engine
+
+
+def get_or_create_cloud_engine():
+    """Get the active CloudEngine, or create a temporary one from stored config.
+
+    This enables workspace agent chat even when the server runs in local mode
+    (STANDARD, TURBOQUANT, etc.) — as long as cloud provider credentials exist
+    in the config/cloud.yaml or environment variables.
+
+    Returns (CloudEngine, is_temporary: bool) or (None, False).
+    """
+    if _cloud_engine is not None and _cloud_engine.is_loaded:
+        return _cloud_engine, False
+
+    # Try to create a temporary engine from cached config
+    if _cloud_config_cache is None:
+        return None, False
+
+    try:
+        from src.engine.cloud_engine import CloudEngine
+        temp_engine = CloudEngine(_cloud_config_cache)
+        temp_engine.load_model()
+        return temp_engine, True
+    except Exception:
+        logger.warning("Failed to create temporary cloud engine for workspace chat")
+        return None, False
 
 
 def get_turbo_engine():
@@ -105,7 +132,15 @@ def init_agent_registry() -> None:
         TerminalTool,
         GenerateWordTool, GeneratePdfTool, GenerateCsvTool,
         N8nWorkflowStatusTool, N8nListExecutionsTool, N8nExecutionDetailTool,
-        N8nDiagnoseErrorTool, N8nInstallNodeTool,
+        N8nDiagnoseErrorTool, N8nInstallNodeTool, N8nListCredentialsTool,
+        N8nCreateCredentialTool, N8nDeleteCredentialTool, N8nUpdateWorkflowTool,
+        N8nSuggestImprovementsTool,
+        N8nListWorkflowsTool, N8nGetWorkflowFullTool, N8nCreateWorkflowTool,
+        N8nDeleteWorkflowTool, N8nActivateWorkflowTool, N8nExecuteWorkflowTool,
+        N8nGetCredentialDataTool, N8nUpdateCredentialTool, N8nGetSettingsTool,
+        N8nGetNodeTypesTool,
+        N8nSearchTemplatesTool, N8nGetTemplateDetailTool,
+        N8nSearchOfficialTemplatesTool, N8nFetchOfficialTemplateTool,
     )
 
     _agent_registry = ToolRegistry()
@@ -164,6 +199,27 @@ def init_agent_registry() -> None:
     _agent_registry.register(N8nExecutionDetailTool())
     _agent_registry.register(N8nDiagnoseErrorTool())
     _agent_registry.register(N8nInstallNodeTool())
+    _agent_registry.register(N8nListCredentialsTool())
+    _agent_registry.register(N8nCreateCredentialTool())
+    _agent_registry.register(N8nDeleteCredentialTool())
+    _agent_registry.register(N8nUpdateWorkflowTool())
+    _agent_registry.register(N8nSuggestImprovementsTool())
+    # n8n Full-Access
+    _agent_registry.register(N8nListWorkflowsTool())
+    _agent_registry.register(N8nGetWorkflowFullTool())
+    _agent_registry.register(N8nCreateWorkflowTool())
+    _agent_registry.register(N8nDeleteWorkflowTool())
+    _agent_registry.register(N8nActivateWorkflowTool())
+    _agent_registry.register(N8nExecuteWorkflowTool())
+    _agent_registry.register(N8nGetCredentialDataTool())
+    _agent_registry.register(N8nUpdateCredentialTool())
+    _agent_registry.register(N8nGetSettingsTool())
+    _agent_registry.register(N8nGetNodeTypesTool())
+    # n8n Templates
+    _agent_registry.register(N8nSearchTemplatesTool())
+    _agent_registry.register(N8nGetTemplateDetailTool())
+    _agent_registry.register(N8nSearchOfficialTemplatesTool())
+    _agent_registry.register(N8nFetchOfficialTemplateTool())
 
     # Web (optional deps)
     try:
@@ -473,6 +529,19 @@ def create_app(
     app.state.thought_log_path = thought_log_path
     app.state.cloud_config = cloud_config
     app.state._cloud_yaml_config = cloud_yaml_config or {}
+
+    # Cache cloud config at module level so workspace chat can create
+    # a temporary cloud engine even when server runs in local mode
+    global _cloud_config_cache
+    if cloud_config is not None:
+        _cloud_config_cache = cloud_config
+    elif cloud_yaml_config:
+        # Build cloud config from YAML even in non-cloud mode
+        try:
+            from src.main import build_cloud_config
+            _cloud_config_cache = build_cloud_config({"cloud": cloud_yaml_config})
+        except Exception:
+            logger.debug("Could not build cloud config from YAML for workspace chat fallback")
 
     # CORS middleware
     origins = list(cors_origins or ["http://localhost:3000", "http://localhost:8000"])

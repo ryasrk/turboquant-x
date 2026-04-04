@@ -377,7 +377,7 @@ async def generate_workflow_via_llm(
 
     Uses TurboQuant-X's own chat completions endpoint internally.
     """
-    from src.server.app import get_engine, get_cloud_engine
+    from src.server.app import get_engine, get_or_create_cloud_engine
 
     yield {"event": "thinking", "message": "Analyzing your automation request..."}
 
@@ -389,10 +389,36 @@ async def generate_workflow_via_llm(
     except Exception:
         logger.warning("Could not fetch n8n node types for prompt")
 
-    # Build system prompt with dynamic node list
+    # Search for relevant community templates as reference
+    template_context = ""
+    try:
+        from src.server.n8n_templates import search_templates, get_template_by_id, strip_credentials
+        matches = search_templates(prompt, limit=3)
+        if matches:
+            yield {"event": "thinking", "message": f"Found {len(matches)} relevant template(s) for reference..."}
+            ref_parts = []
+            for m in matches[:2]:  # at most 2 full references
+                tpl = get_template_by_id(m["id"])
+                if tpl and tpl.get("workflow"):
+                    cleaned = strip_credentials(tpl["workflow"])
+                    ref_parts.append(
+                        f"### Community template: {m['name']} (category: {m['category']})\n"
+                        f"```json\n{json.dumps(cleaned, indent=2)}\n```"
+                    )
+            if ref_parts:
+                template_context = (
+                    "\n\n## Reference Templates (adapt these to match the user's request)\n\n"
+                    + "\n\n".join(ref_parts)
+                )
+    except Exception:
+        logger.debug("Template search for designer context failed")
+
+    # Build system prompt with dynamic node list and template context
     system_content = SYSTEM_PROMPT
     if node_list_str:
         system_content += f"\n\n## {node_list_str}"
+    if template_context:
+        system_content += template_context
 
     # Build messages for the LLM
     messages = [
@@ -406,8 +432,8 @@ async def generate_workflow_via_llm(
     try:
         import asyncio
 
-        # Try cloud engine first, fall back to local
-        cloud_engine = get_cloud_engine()
+        # Try cloud engine first (active or temporary), fall back to local
+        cloud_engine, is_temp_engine = get_or_create_cloud_engine()
         local_engine = None
         try:
             local_engine = get_engine()
@@ -415,23 +441,33 @@ async def generate_workflow_via_llm(
             pass
 
         response_text = ""
-        original_model: str | None = None
 
         if cloud_engine and cloud_engine.is_loaded:
-            # If a model override is requested, temporarily switch
+            # If a model override is requested, create a dedicated temporary engine
+            engine_to_use = cloud_engine
+            dispose_after = is_temp_engine
             if model and model != cloud_engine.model_name:
-                original_model = cloud_engine.model_name
-                cloud_engine.switch_model(model)
+                try:
+                    from dataclasses import replace as dc_replace
+                    from src.engine.cloud_engine import CloudEngine
+                    override_cfg = dc_replace(cloud_engine._config, model=model)
+                    engine_to_use = CloudEngine(override_cfg)
+                    engine_to_use.load_model()
+                    dispose_after = True
+                except Exception:
+                    logger.debug("Model override to %s failed, using default", model)
 
             try:
                 msg, _stats = await asyncio.to_thread(
-                    cloud_engine.chat, messages, max_tokens=4096, temperature=0.3
+                    engine_to_use.chat, messages, max_tokens=4096, temperature=0.3
                 )
                 response_text = msg.get("content", "")
             finally:
-                # Restore original model
-                if original_model:
-                    cloud_engine.switch_model(original_model)
+                if dispose_after:
+                    try:
+                        engine_to_use.unload()
+                    except Exception:
+                        pass
         elif local_engine and local_engine.is_loaded:
             result = await asyncio.to_thread(
                 local_engine.chat, messages, max_tokens=4096, temperature=0.3

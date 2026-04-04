@@ -223,8 +223,79 @@ async def get_execution_detail(execution_id: str) -> dict[str, Any]:
 
     resp = await n8n_api_call("GET", f"/rest/executions/{execution_id}")
     resp.raise_for_status()
-    data = resp.json()
-    return data.get("data", data) if isinstance(data, dict) else data
+    raw = resp.json()
+    detail = raw.get("data", raw) if isinstance(raw, dict) else raw
+
+    # n8n may return the inner 'data' (run results) as a JSON string
+    if isinstance(detail, dict) and isinstance(detail.get("data"), str):
+        import json as _json
+        try:
+            detail["data"] = _json.loads(detail["data"])
+        except (ValueError, TypeError):
+            pass
+
+    # n8n v2 uses a compact flattened-array format for execution data.
+    # Reconstruct error info from the flat array so downstream consumers
+    # get a consistent dict structure.
+    if isinstance(detail, dict) and isinstance(detail.get("data"), list):
+        detail["_raw_data"] = detail["data"]
+        detail["data"] = _reconstruct_execution_data(detail["data"])
+
+    return detail
+
+
+def _reconstruct_execution_data(flat: list) -> dict[str, Any]:
+    """Reconstruct error info from n8n v2's compressed execution array.
+
+    The array format is: [{schema}, {startData}, {resultData}, {execData}, ...]
+    where inner values like "5" are references to flat[5].
+    We extract error info by searching for known error patterns.
+    """
+    result: dict[str, Any] = {"resultData": {}}
+
+    # Search for error objects in the flat array
+    for item in flat:
+        if isinstance(item, dict):
+            # Look for error-like objects (have 'name'+'message' or 'error' key)
+            if "message" in item and "name" in item and "stack" in item:
+                # This looks like a resolved error reference
+                pass
+            if "error" in item and "runData" in item:
+                # This is the resultData schema — resolve references
+                error_ref = item.get("error")
+                if isinstance(error_ref, str) and error_ref.isdigit():
+                    idx = int(error_ref)
+                    if idx < len(flat) and isinstance(flat[idx], dict):
+                        # Resolve the nested error fields
+                        err_obj = {}
+                        for ek, ev in flat[idx].items():
+                            if isinstance(ev, str) and ev.isdigit():
+                                ref_idx = int(ev)
+                                if ref_idx < len(flat):
+                                    err_obj[ek] = flat[ref_idx]
+                                else:
+                                    err_obj[ek] = ev
+                            else:
+                                err_obj[ek] = ev
+                        result["resultData"]["error"] = err_obj
+                    elif isinstance(error_ref, str):
+                        result["resultData"]["error"] = {"message": error_ref}
+
+    # Also look for string items that match common error patterns
+    for item in flat:
+        if isinstance(item, str) and (
+            "Error" in item or "error" in item
+        ) and len(item) > 10 and not item.startswith("{"):
+            # Could be an error message or stack trace
+            if "resultData" not in result:
+                result["resultData"] = {}
+            if "error" not in result["resultData"]:
+                if "\n" in item:  # Stack trace
+                    result["resultData"].setdefault("error", {})["stack"] = item
+                else:  # Error message
+                    result["resultData"].setdefault("error", {})["message"] = item
+
+    return result
 
 
 async def get_execution_summary(execution_id: str) -> str:
@@ -240,10 +311,34 @@ async def get_execution_summary(execution_id: str) -> str:
         "",
     ]
 
-    # Node execution results
-    run_data = detail.get("data", {}).get("resultData", {}).get("runData", {})
+    # Get run data — 'data' is a dict (already parsed by get_execution_detail)
+    inner_data = detail.get("data", {})
+    if not isinstance(inner_data, dict):
+        inner_data = {}
+    result_data = inner_data.get("resultData", {})
+    if not isinstance(result_data, dict):
+        result_data = {}
+
+    # Show top-level execution error if present
+    top_error = result_data.get("error")
+    if isinstance(top_error, dict):
+        lines.append(f"Error: {top_error.get('name', 'Unknown')}: {top_error.get('message', 'no message')}")
+        lines.append("")
+    elif isinstance(top_error, str):
+        lines.append(f"Error: {top_error}")
+        lines.append("")
+
+    # Show per-node errors
+    run_data = result_data.get("runData", {})
+    if not isinstance(run_data, dict):
+        run_data = {}
+
     for node_name, node_runs in run_data.items():
+        if not isinstance(node_runs, list):
+            node_runs = [node_runs]
         for run in node_runs:
+            if not isinstance(run, dict):
+                continue
             status = "OK" if not run.get("error") else "ERROR"
             lines.append(f"  [{status}] {node_name}")
             if run.get("error"):

@@ -115,6 +115,7 @@
           <button id="ws-approve-btn" class="ws-approve-btn" aria-label="Approve design">✓ Approve</button>
           <button id="ws-modify-btn" class="ws-modify-btn" aria-label="Modify design">✎ Modify</button>
           <button id="ws-reject-btn" class="ws-reject-btn" aria-label="Reject design">✗ Reject</button>
+          <button id="ws-remove-workflow-btn" class="ws-remove-btn hidden" aria-label="Remove workflow and reset to draft">🗑 Reset / Remove</button>
         </div>
       </section>
 
@@ -144,6 +145,27 @@
         <div id="ws-exec-list" class="ws-exec-list" role="list" aria-live="polite"></div>
         <div id="ws-exec-empty" class="ws-exec-empty hidden">
           <span>No executions yet — run your workflow to see results here</span>
+        </div>
+      </section>
+
+      <!-- Workspace Agent Chat -->
+      <section id="ws-chat-section" class="ws-panel hidden" aria-label="Workspace assistant">
+        <h3 class="ws-panel-title">◈ Assistant
+          <button id="ws-chat-clear" class="ws-icon-action" title="Clear chat" aria-label="Clear chat history">🗑</button>
+        </h3>
+        <div id="ws-chat-messages" class="ws-chat-messages" role="log" aria-live="polite"></div>
+        <div class="ws-chat-input-area">
+          <label for="ws-chat-input" class="sr-only">Ask the workspace assistant</label>
+          <textarea
+            id="ws-chat-input"
+            placeholder="Ask about workflows, diagnose errors, manage credentials…"
+            rows="2"
+            aria-label="Workspace assistant message"
+          ></textarea>
+          <button id="ws-chat-send" class="ws-primary-btn ws-chat-send-btn" aria-label="Send message">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 8l12-6-4 6 4 6z"/></svg>
+            Send
+          </button>
         </div>
       </section>
     </div>

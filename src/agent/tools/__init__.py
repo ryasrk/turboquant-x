@@ -21,7 +21,17 @@ from src.agent.tools.mcp_bridge_tool import McpBridgeTool
 from src.agent.tools.document_tools import GenerateWordTool, GeneratePdfTool, GenerateCsvTool
 from src.agent.tools.n8n_tools import (
     N8nWorkflowStatusTool, N8nListExecutionsTool, N8nExecutionDetailTool,
-    N8nDiagnoseErrorTool, N8nInstallNodeTool,
+    N8nDiagnoseErrorTool, N8nInstallNodeTool, N8nListCredentialsTool,
+    N8nCreateCredentialTool, N8nDeleteCredentialTool, N8nUpdateWorkflowTool,
+    N8nSuggestImprovementsTool,
+    # Full-access tools
+    N8nListWorkflowsTool, N8nGetWorkflowFullTool, N8nCreateWorkflowTool,
+    N8nDeleteWorkflowTool, N8nActivateWorkflowTool, N8nExecuteWorkflowTool,
+    N8nGetCredentialDataTool, N8nUpdateCredentialTool, N8nGetSettingsTool,
+    N8nGetNodeTypesTool,
+    # Template tools
+    N8nSearchTemplatesTool, N8nGetTemplateDetailTool,
+    N8nSearchOfficialTemplatesTool, N8nFetchOfficialTemplateTool,
 )
 
 __all__ = [
@@ -53,5 +63,15 @@ __all__ = [
     "GenerateWordTool", "GeneratePdfTool", "GenerateCsvTool",
     # n8n Workflow Management
     "N8nWorkflowStatusTool", "N8nListExecutionsTool", "N8nExecutionDetailTool",
-    "N8nDiagnoseErrorTool", "N8nInstallNodeTool",
+    "N8nDiagnoseErrorTool", "N8nInstallNodeTool", "N8nListCredentialsTool",
+    "N8nCreateCredentialTool", "N8nDeleteCredentialTool", "N8nUpdateWorkflowTool",
+    "N8nSuggestImprovementsTool",
+    # n8n Full-Access
+    "N8nListWorkflowsTool", "N8nGetWorkflowFullTool", "N8nCreateWorkflowTool",
+    "N8nDeleteWorkflowTool", "N8nActivateWorkflowTool", "N8nExecuteWorkflowTool",
+    "N8nGetCredentialDataTool", "N8nUpdateCredentialTool", "N8nGetSettingsTool",
+    "N8nGetNodeTypesTool",
+    # n8n Templates
+    "N8nSearchTemplatesTool", "N8nGetTemplateDetailTool",
+    "N8nSearchOfficialTemplatesTool", "N8nFetchOfficialTemplateTool",
 ]

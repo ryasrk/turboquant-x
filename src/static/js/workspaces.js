@@ -56,7 +56,12 @@ async function createWorkspace(title) {
 }
 
 async function deleteWorkspace(id) {
-  await apiFetch(`/v1/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  try {
+    await apiFetch(`/v1/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch (err) {
+    // 404 = already gone — treat as success
+    if (!err.message?.includes('not found') && !err.message?.includes('404')) throw err;
+  }
   workspaces = workspaces.filter((w) => w.id !== id);
   if (activeWsId === id) {
     activeWsId = null;
@@ -231,6 +236,26 @@ async function rejectDesign(workspaceId) {
   await refreshActiveWorkspace(workspaceId);
 }
 
+async function removeWorkflow(workspaceId) {
+  const ws = workspaces.find((w) => w.id === workspaceId);
+  const hasWf = ws?.n8n_workflow_id;
+  const msg = hasWf
+    ? 'Remove the linked workflow and reset this workspace to draft? The workflow will also be deleted from n8n if reachable.'
+    : 'Reset this workspace to draft? The current design will be cleared.';
+  if (!confirm(msg)) return;
+  try {
+    await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/workflow`, { method: 'DELETE' });
+    hideActions();
+    hideN8nIframe();
+    // Clear workflow preview
+    const preview = $('#ws-workflow-preview');
+    if (preview) preview.classList.add('hidden');
+    await refreshActiveWorkspace(workspaceId);
+  } catch (err) {
+    alert(`Failed to remove workflow: ${err.message}`);
+  }
+}
+
 async function fetchDesignHistory(workspaceId) {
   const data = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/designs`);
   return data?.designs ?? [];
@@ -310,6 +335,9 @@ function renderWorkspaceList(list) {
 
 // ── UI: Workspace detail ───────────────────────────────────────────────
 
+let chatHistory = [];
+let chatStreaming = false;
+
 function selectWorkspace(ws) {
   activeWsId = ws.id;
   sessionStorage.setItem('tq-active-ws', ws.id);
@@ -341,6 +369,12 @@ function selectWorkspace(ws) {
   } else {
     $('#ws-exec-section')?.classList.add('hidden');
   }
+
+  // Show workspace agent chat
+  $('#ws-chat-section')?.classList.remove('hidden');
+  chatHistory = [];
+  const msgContainer = $('#ws-chat-messages');
+  if (msgContainer) msgContainer.innerHTML = '';
 
   // Close mobile sidebar
   $('#ws-sidebar')?.classList.remove('open');
@@ -479,8 +513,19 @@ function showActions(state = 'designed') {
   const modifyBtn = $('#ws-modify-btn');
   const rejectBtn = $('#ws-reject-btn');
 
+  // Show/hide remove workflow button — available when not in draft
+  const removeBtn = $('#ws-remove-workflow-btn');
+  const ws = workspaces.find((w) => w.id === activeWsId);
+  if (removeBtn) {
+    if (ws && ws.status !== 'draft') {
+      removeBtn.classList.remove('hidden');
+    } else {
+      removeBtn.classList.add('hidden');
+    }
+  }
+
   if (state === 'approved' || state === 'active') {
-    // Already approved/active: only modify is available
+    // Already approved/active: only modify and remove are available
     approveBtn?.setAttribute('disabled', '');
     rejectBtn?.setAttribute('disabled', '');
     modifyBtn?.removeAttribute('disabled');
@@ -791,6 +836,10 @@ export function initWorkspaces() {
     if (activeWsId) rejectDesign(activeWsId);
   });
 
+  $('#ws-remove-workflow-btn')?.addEventListener('click', () => {
+    if (activeWsId) removeWorkflow(activeWsId);
+  });
+
   // Design history toggle
   $('#ws-history-toggle')?.addEventListener('click', () => {
     const list = $('#ws-history-list');
@@ -905,6 +954,140 @@ export function initWorkspaces() {
       $('#ws-design-btn')?.click();
     }
   });
+
+  // ── Workspace Agent Chat ──────────────────────────────────────
+  $('#ws-chat-send')?.addEventListener('click', () => sendChatMessage());
+  $('#ws-chat-input')?.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  });
+  $('#ws-chat-clear')?.addEventListener('click', () => {
+    chatHistory = [];
+    const el = $('#ws-chat-messages');
+    if (el) el.innerHTML = '';
+  });
+}
+
+// ── Workspace Agent Chat ───────────────────────────────────────────────
+
+function appendChatBubble(cls, html) {
+  const container = $('#ws-chat-messages');
+  if (!container) return null;
+  const div = document.createElement('div');
+  div.className = `ws-chat-msg ${cls}`;
+  div.innerHTML = html;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function escapeChat(s) {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+
+async function sendChatMessage() {
+  if (chatStreaming) return;
+  const input = $('#ws-chat-input');
+  const msg = input?.value?.trim();
+  if (!msg || !activeWsId) return;
+
+  input.value = '';
+  chatHistory.push({ role: 'user', content: msg });
+  appendChatBubble('user', escapeChat(msg));
+
+  const modelSelect = $('#ws-model-select');
+  const model = modelSelect?.value || null;
+
+  chatStreaming = true;
+  const sendBtn = $('#ws-chat-send');
+  sendBtn?.classList.add('ws-chat-streaming');
+  sendBtn && (sendBtn.disabled = true);
+
+  let assistantText = '';
+  let assistantBubble = null;
+
+  try {
+    const resp = await fetch(`/v1/workspaces/${activeWsId}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+      },
+      body: JSON.stringify({ message: msg, history: chatHistory.slice(-20), model }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      appendChatBubble('assistant', `<em>Error: ${escapeChat(err.detail || resp.statusText)}</em>`);
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (raw === '[DONE]') continue;
+
+        let evt;
+        try { evt = JSON.parse(raw); } catch { continue; }
+
+        const evtType = evt.type || 'info';
+
+        if (evtType === 'content') {
+          const delta = evt.delta || '';
+          assistantText += delta;
+          if (!assistantBubble) {
+            assistantBubble = appendChatBubble('assistant', '');
+          }
+          assistantBubble.innerHTML = formatMarkdown(assistantText);
+        } else if (evtType === 'tool_call') {
+          appendChatBubble('tool-call', `🔧 ${escapeChat(evt.name || 'tool')}(${escapeChat(JSON.stringify(evt.arguments || {}).slice(0, 100))})`);
+        } else if (evtType === 'tool_result') {
+          const content = evt.content || '';
+          const short = content.length > 300 ? content.slice(0, 300) + '…' : content;
+          appendChatBubble('tool-result', escapeChat(short));
+        } else if (evtType === 'error') {
+          appendChatBubble('assistant', `<em>Error: ${escapeChat(evt.message || 'Unknown error')}</em>`);
+        }
+      }
+    }
+
+    if (assistantText) {
+      chatHistory.push({ role: 'assistant', content: assistantText });
+    }
+  } catch (err) {
+    appendChatBubble('assistant', `<em>Connection error: ${escapeChat(err.message)}</em>`);
+  } finally {
+    chatStreaming = false;
+    sendBtn?.classList.remove('ws-chat-streaming');
+    sendBtn && (sendBtn.disabled = false);
+    input?.focus();
+  }
+}
+
+function formatMarkdown(text) {
+  // Minimal markdown: code blocks, inline code, bold, italic, links
+  return text
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
 }
 
 // ── Auto-init on DOM ready ─────────────────────────────────────────────

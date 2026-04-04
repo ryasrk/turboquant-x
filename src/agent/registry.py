@@ -45,3 +45,11 @@ class ToolRegistry:
 
     def list_tools(self) -> list[str]:
         return list(self._tools.keys())
+
+    def subset(self, prefix: str) -> "ToolRegistry":
+        """Return a new registry containing only tools whose name starts with *prefix*."""
+        filtered = ToolRegistry()
+        for name, tool in self._tools.items():
+            if name.startswith(prefix):
+                filtered._tools[name] = tool
+        return filtered

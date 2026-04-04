@@ -180,6 +180,7 @@ class OpenAICompatibleProvider(CloudProvider):
             tool_calls = [
                 {
                     "id": tc.get("id", f"call_{i}"),
+                    "type": "function",
                     "function": {
                         "name": tc["function"]["name"],
                         "arguments": tc["function"].get("arguments", "{}"),
