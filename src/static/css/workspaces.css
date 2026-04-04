@@ -517,6 +517,38 @@ body {
   display: none;
 }
 
+.ws-redeploy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: rgba(33, 150, 243, 0.08);
+  border: 1px solid #2196F3;
+  color: #2196F3;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.ws-redeploy-btn:hover {
+  background: rgba(33, 150, 243, 0.18);
+  box-shadow: 0 0 12px rgba(33, 150, 243, 0.2);
+}
+.ws-redeploy-btn:focus-visible {
+  outline: 2px solid #2196F3;
+  outline-offset: 2px;
+}
+.ws-redeploy-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.ws-redeploy-btn.hidden {
+  display: none;
+}
+
 /* ── Design progress ───────────────────────────────────────────────── */
 .ws-progress-indicator {
   display: flex;

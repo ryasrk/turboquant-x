@@ -256,6 +256,21 @@ async function removeWorkflow(workspaceId) {
   }
 }
 
+async function redeployWorkflow(workspaceId) {
+  if (!confirm('Re-deploy the design to n8n? This will update the n8n workflow with the latest design data.')) return;
+  const btn = $('#ws-redeploy-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⟳ Deploying…'; }
+  try {
+    const result = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/redeploy`, { method: 'POST' });
+    alert(`${result.message || 'Redeployed successfully'} (${result.node_count} nodes)`);
+    await refreshActiveWorkspace(workspaceId);
+  } catch (err) {
+    alert(`Redeploy failed: ${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⟳ Redeploy'; }
+  }
+}
+
 async function fetchDesignHistory(workspaceId) {
   const data = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/designs`);
   return data?.designs ?? [];
@@ -515,12 +530,21 @@ function showActions(state = 'designed') {
 
   // Show/hide remove workflow button — available when not in draft
   const removeBtn = $('#ws-remove-workflow-btn');
+  const redeployBtn = $('#ws-redeploy-btn');
   const ws = workspaces.find((w) => w.id === activeWsId);
   if (removeBtn) {
     if (ws && ws.status !== 'draft') {
       removeBtn.classList.remove('hidden');
     } else {
       removeBtn.classList.add('hidden');
+    }
+  }
+  // Show redeploy button when workspace has a design (designed/approved/active)
+  if (redeployBtn) {
+    if (ws && ['designed', 'approved', 'active'].includes(ws.status)) {
+      redeployBtn.classList.remove('hidden');
+    } else {
+      redeployBtn.classList.add('hidden');
     }
   }
 
@@ -838,6 +862,10 @@ export function initWorkspaces() {
 
   $('#ws-remove-workflow-btn')?.addEventListener('click', () => {
     if (activeWsId) removeWorkflow(activeWsId);
+  });
+
+  $('#ws-redeploy-btn')?.addEventListener('click', () => {
+    if (activeWsId) redeployWorkflow(activeWsId);
   });
 
   // Design history toggle

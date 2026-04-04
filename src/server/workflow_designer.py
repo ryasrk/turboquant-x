@@ -633,6 +633,26 @@ async def n8n_import_workflow(
     base_url = (n8n_base_url or os.getenv("N8N_BACKEND_URL", "http://localhost:5678")).rstrip("/")
     api_key = n8n_api_key or os.getenv("N8N_API_KEY", "")
 
+    # Normalize the payload: only send fields n8n expects, and ensure
+    # required defaults are present.  Raw LLM output may contain extra
+    # keys (pinData, meta, etc.) that the internal REST API ignores or
+    # that cause it to return an empty workflow.
+    payload: dict[str, Any] = {
+        "name": workflow_json.get("name", "Untitled Workflow"),
+        "nodes": workflow_json.get("nodes", []),
+        "connections": workflow_json.get("connections", {}),
+        "active": workflow_json.get("active", False),
+        "settings": workflow_json.get("settings", {"executionOrder": "v1"}),
+    }
+    if "staticData" in workflow_json:
+        payload["staticData"] = workflow_json["staticData"]
+
+    logger.info(
+        "Importing workflow to n8n: name=%s nodes=%d",
+        payload["name"],
+        len(payload["nodes"]),
+    )
+
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         if api_key:
             # Method 1: Public API with explicit API key
@@ -641,7 +661,7 @@ async def n8n_import_workflow(
                 "Accept": "application/json",
                 "X-N8N-API-KEY": api_key,
             }
-            resp = await client.post(f"{base_url}/api/v1/workflows", headers=headers, json=workflow_json)
+            resp = await client.post(f"{base_url}/api/v1/workflows", headers=headers, json=payload)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
         else:
@@ -652,11 +672,20 @@ async def n8n_import_workflow(
             headers = {"Cookie": cookie_str} if cookie_str else {}
             resp = await client.post(
                 f"{base_url}/rest/workflows",
-                json=workflow_json,
+                json=payload,
                 headers=headers,
             )
             resp.raise_for_status()
             result = resp.json().get("data", resp.json())
 
-        logger.info("Imported workflow into n8n: id=%s name=%s", result.get("id"), result.get("name"))
+        created_nodes = len(result.get("nodes", []))
+        logger.info(
+            "Imported workflow into n8n: id=%s name=%s nodes=%d",
+            result.get("id"), result.get("name"), created_nodes,
+        )
+        if created_nodes == 0 and len(payload["nodes"]) > 0:
+            logger.warning(
+                "n8n returned 0 nodes but we sent %d — workflow may not have imported correctly",
+                len(payload["nodes"]),
+            )
         return result

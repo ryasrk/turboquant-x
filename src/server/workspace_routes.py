@@ -532,6 +532,75 @@ async def remove_workflow(workspace_id: str, user: dict = Depends(get_current_us
     }
 
 
+@router.post("/{workspace_id}/redeploy")
+async def redeploy_workflow(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Re-deploy the latest design JSON to n8n.
+
+    Useful when the original import produced an empty workflow.  If an
+    n8n workflow ID already exists, it is updated in-place.  Otherwise a
+    new workflow is created and the workspace is linked to it.
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    # Find the latest design with result data
+    design = _get_latest_design(workspace_id)
+    if not design or not design.get("result_data"):
+        raise HTTPException(status_code=404, detail="No design data found to redeploy.")
+
+    try:
+        workflow_json = json.loads(design["result_data"])
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(status_code=422, detail="Design data is not valid JSON.")
+
+    if not workflow_json.get("nodes"):
+        raise HTTPException(status_code=422, detail="Design has no nodes to deploy.")
+
+    if not await ensure_n8n_ready():
+        raise HTTPException(status_code=503, detail="n8n is not available.")
+
+    existing_wf_id = ws.get("n8n_workflow_id")
+
+    from src.server.n8n_setup import n8n_api_call
+
+    # Normalize the payload
+    payload = {
+        "name": workflow_json.get("name", ws.get("title", "Untitled")),
+        "nodes": workflow_json["nodes"],
+        "connections": workflow_json.get("connections", {}),
+        "active": False,
+        "settings": workflow_json.get("settings", {"executionOrder": "v1"}),
+    }
+
+    if existing_wf_id:
+        # Update existing workflow in-place
+        resp = await n8n_api_call("PUT", f"/rest/workflows/{existing_wf_id}", json_data=payload)
+        resp.raise_for_status()
+        result = resp.json()
+        wf = result.get("data", result) if isinstance(result, dict) else result
+        node_count = len(wf.get("nodes", []))
+        return {
+            "ok": True,
+            "action": "updated",
+            "workflow_id": existing_wf_id,
+            "node_count": node_count,
+            "message": f"Re-deployed {node_count} nodes to workflow {existing_wf_id}",
+        }
+    else:
+        # Create new workflow
+        from src.server.workflow_designer import n8n_import_workflow
+        result = await n8n_import_workflow(workflow_json)
+        new_id = result.get("id")
+        if new_id:
+            update_workspace(workspace_id, user["user_id"], n8n_workflow_id=str(new_id))
+        return {
+            "ok": True,
+            "action": "created",
+            "workflow_id": new_id,
+            "node_count": len(result.get("nodes", [])),
+            "message": f"Created new workflow {new_id}",
+        }
+
+
 @router.get("/{workspace_id}/status")
 async def get_workspace_status(workspace_id: str, user: dict = Depends(get_current_user)):
     """Poll the current workspace + n8n workflow status."""
