@@ -12,7 +12,7 @@ import logging
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from starlette.websockets import WebSocketState
 
 from src.server.n8n_auth import get_n8n_base_url, get_n8n_headers, N8N_API_KEY
@@ -63,6 +63,45 @@ def _forward_headers(request: Request) -> dict[str, str]:
             out["Cookie"] = cookie_str
 
     return out
+
+
+# ── Auto-login: set n8n session cookie in browser ────────────────────
+
+@router.get("/workspace/n8n-login")
+async def n8n_auto_login():
+    """Auto-login to n8n and redirect to the editor.
+
+    Sets the n8n session cookie in the browser so the editor
+    sees the user as authenticated without requiring manual login.
+    """
+    if N8N_API_KEY:
+        # API key mode — no session cookie needed, redirect directly
+        return RedirectResponse(url="/workspace/n8n/", status_code=302)
+
+    from src.server.n8n_setup import ensure_n8n_ready, get_session_cookies
+
+    if not await ensure_n8n_ready():
+        raise HTTPException(status_code=503, detail="n8n not available")
+
+    cookie_str = get_session_cookies()
+    if not cookie_str:
+        raise HTTPException(status_code=503, detail="n8n session not established")
+
+    # Build redirect response with n8n session cookie set for the browser
+    response = RedirectResponse(url="/workspace/n8n/", status_code=302)
+    for part in cookie_str.split(";"):
+        part = part.strip()
+        if "=" in part:
+            name, value = part.split("=", 1)
+            response.set_cookie(
+                key=name.strip(),
+                value=value.strip(),
+                path="/workspace/n8n/",
+                samesite="lax",
+                httponly=False,  # n8n editor JS needs to read this
+            )
+
+    return response
 
 
 @router.api_route(
