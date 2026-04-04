@@ -382,15 +382,102 @@ async def generate_workflow_via_llm(
 
     yield {"event": "thinking", "message": "Analyzing your automation request..."}
 
-    # Fetch available node types to constrain the LLM
-    node_list_str = ""
+    # ── Fetch raw node data for filtering ────────────────────────
+    all_nodes: list[dict] = []
     try:
-        from src.server.n8n_manager import get_core_node_list
-        node_list_str = await get_core_node_list()
+        from src.server.n8n_manager import get_available_nodes
+        all_nodes = await get_available_nodes()
     except Exception:
         logger.warning("Could not fetch n8n node types for prompt")
 
-    # Search for relevant community templates as reference
+    # ── Filter nodes relevant to the user's prompt ──────────────
+    prompt_lower = prompt.lower()
+    prompt_keywords = set(prompt_lower.split())
+
+    # Build keyword mapping for common services/concepts
+    _KEYWORD_MAP: dict[str, list[str]] = {
+        "telegram": ["telegram"],
+        "slack": ["slack"],
+        "discord": ["discord"],
+        "email": ["email", "gmail", "smtp", "imap"],
+        "gmail": ["gmail", "email"],
+        "github": ["github"],
+        "google": ["google", "sheets", "drive", "calendar"],
+        "sheets": ["googlesheets", "sheets"],
+        "drive": ["googledrive", "drive"],
+        "http": ["httprequest", "http", "webhook", "api"],
+        "webhook": ["webhook", "httprequest"],
+        "api": ["httprequest", "webhook", "api"],
+        "database": ["postgres", "mysql", "mongodb", "redis", "database"],
+        "postgres": ["postgres"],
+        "mysql": ["mysql"],
+        "ai": ["langchain", "openai", "ai"],
+        "openai": ["openai", "langchain"],
+        "schedule": ["cron", "schedule", "trigger"],
+        "cron": ["cron", "schedule"],
+        "file": ["ftp", "ssh", "file", "binary", "readbinary", "writebinary"],
+        "rss": ["rssfeed", "rss"],
+        "twitter": ["twitter"],
+        "notion": ["notion"],
+        "airtable": ["airtable"],
+        "jira": ["jira"],
+        "trello": ["trello"],
+        "whatsapp": ["whatsapp"],
+        "sms": ["twilio", "sms"],
+        "reminder": ["cron", "schedule", "trigger", "telegram", "slack", "email"],
+        "notification": ["telegram", "slack", "email", "discord", "whatsapp"],
+        "monitor": ["httprequest", "cron", "schedule", "trigger", "webhook"],
+    }
+
+    # Find relevant node names based on prompt keywords
+    relevant_terms: set[str] = set()
+    for word in prompt_keywords:
+        if word in _KEYWORD_MAP:
+            relevant_terms.update(_KEYWORD_MAP[word])
+        # Also match partial keywords like "tele" -> telegram
+        for key, terms in _KEYWORD_MAP.items():
+            if key.startswith(word) or word.startswith(key):
+                relevant_terms.update(terms)
+
+    # Always include core logic/utility nodes
+    essential_patterns = [
+        "manual", "trigger", "cron", "schedule",
+        ".if", ".switch", ".merge", ".code", ".set",
+        ".httprequest", ".function", ".noop",
+        ".executeworkflow",
+    ]
+
+    def is_relevant(node_name: str) -> bool:
+        lower = node_name.lower()
+        # Essential nodes always included
+        if any(p in lower for p in essential_patterns):
+            return True
+        # Match against prompt-derived terms
+        for term in relevant_terms:
+            if term in lower:
+                return True
+        # Direct match against prompt
+        parts = lower.replace("n8n-nodes-base.", "").replace("@n8n/", "").split(".")
+        return any(part in prompt_lower for part in parts if len(part) > 2)
+
+    filtered_nodes = [n for n in all_nodes if is_relevant(n.get("name", ""))]
+
+    # Build compact node list string
+    if filtered_nodes:
+        node_names = sorted(set(n.get("name", "") for n in filtered_nodes))
+        node_list_str = "Available n8n node types (relevant to your request, use ONLY these):\n"
+        node_list_str += "\n".join(f"  - {n}" for n in node_names[:50])
+        if len(node_names) > 50:
+            node_list_str += f"\n  ... and {len(node_names) - 50} more"
+    elif all_nodes:
+        # Fallback: just list first 40 common nodes
+        node_list_str = "Available n8n node types (common ones):\n"
+        common = sorted(set(n.get("name", "") for n in all_nodes))[:40]
+        node_list_str += "\n".join(f"  - {n}" for n in common)
+    else:
+        node_list_str = ""
+
+    # ── Search for relevant templates (compact) ─────────────────
     template_context = ""
     try:
         from src.server.n8n_templates import search_templates, get_template_by_id, strip_credentials
@@ -414,7 +501,7 @@ async def generate_workflow_via_llm(
     except Exception:
         logger.debug("Template search for designer context failed")
 
-    # Build system prompt with dynamic node list and template context
+    # Build system prompt with filtered node list and template context
     system_content = SYSTEM_PROMPT
     if node_list_str:
         system_content += f"\n\n## {node_list_str}"
