@@ -242,11 +242,11 @@ class TestBuildModelConfig:
 class TestBuildKvConfig:
     """Tests for build_kv_config()."""
 
-    def test_builds_with_turbo4_defaults(self) -> None:
+    def test_builds_with_q4_0_defaults(self) -> None:
         kv = build_kv_config({})
         assert isinstance(kv, KVCacheConfig)
         assert kv.cache_type_k == CacheType.Q8_0
-        assert kv.cache_type_v == CacheType.TURBO4
+        assert kv.cache_type_v == CacheType.Q4_0
         assert kv.flash_attention is True
 
     def test_builds_from_config(self, sample_config: dict) -> None:

@@ -95,6 +95,18 @@ class CloudEngine:
         return self._config.model or "cloud-model"
 
     @property
+    def supports_vision(self) -> bool:
+        """Check if the current cloud model supports vision/image inputs."""
+        _VISION_MODELS = {
+            "gpt-4o", "gpt-4-turbo",
+            "claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
+            "claude-3.5-sonnet", "claude-4-opus",
+            "glm-4v",
+        }
+        model = self.model_name.lower()
+        return any(v in model for v in _VISION_MODELS)
+
+    @property
     def model_config(self) -> _CloudModelConfig:
         """Return a duck-typed model config for compatibility with routes."""
         return _CloudModelConfig(
@@ -136,13 +148,13 @@ class CloudEngine:
 
     def chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         max_tokens: int = 2048,
         temperature: float = 0.7,
         top_p: float = 0.95,
         thinking: bool = True,
         **kwargs: Any,
-    ) -> tuple[dict[str, str], GenerationStats]:
+    ) -> tuple[dict[str, Any], GenerationStats]:
         """Chat completion via cloud provider.
 
         Returns:
@@ -179,7 +191,7 @@ class CloudEngine:
 
     def chat_stream(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         max_tokens: int = 2048,
         temperature: float = 0.7,
         top_p: float = 0.95,
@@ -251,7 +263,7 @@ class CloudEngine:
 
     def _collect_stream_sync(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         max_tokens: int,
         temperature: float,
         top_p: float,
@@ -264,7 +276,7 @@ class CloudEngine:
 
     async def _collect_stream(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         max_tokens: int,
         temperature: float,
         top_p: float,

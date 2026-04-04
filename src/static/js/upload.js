@@ -1,22 +1,34 @@
-/** Image upload — pick files, preview thumbnails, attach to messages. */
+/** File upload — pick files, preview thumbnails & document chips, attach to messages. */
 
 import { state } from './state.js';
+// import { uploadFile } from './api.js';
 
 const uploadBtn    = document.getElementById('upload-btn');
-const fileInput    = document.getElementById('image-input');
+const fileInput    = document.getElementById('file-input');
 const previewBar   = document.getElementById('image-preview-bar');
 
-const MAX_IMAGES   = 4;
-const MAX_SIZE_MB  = 10;
-const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const MAX_ATTACHMENTS = 8;
+const MAX_SIZE_MB = 20;
+const ALLOWED_TYPES = [
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+  'application/pdf', 'text/plain', 'text/markdown', 'text/csv',
+  'application/json', 'text/x-yaml', 'text/x-python',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+];
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
-/** Enable or disable the upload button based on model vision support. */
-export function setVisionEnabled(enabled) {
+/** Enable or disable upload capabilities based on model support. */
+export function setUploadCapabilities(vision, attachments) {
   if (!uploadBtn) return;
-  uploadBtn.disabled = !enabled;
-  uploadBtn.style.opacity = enabled ? '' : '0.3';
-  uploadBtn.style.pointerEvents = enabled ? '' : 'none';
-  uploadBtn.title = enabled ? 'Attach image' : 'Current model does not support images';
+  uploadBtn.disabled = !attachments;
+  uploadBtn.style.opacity = attachments ? '' : '0.3';
+  uploadBtn.style.pointerEvents = attachments ? '' : 'none';
+  uploadBtn.title = vision ? 'Attach files' : 'Attach documents (images unsupported by current model)';
+}
+
+/** Backward compatibility alias */
+export function setVisionEnabled(enabled) {
+  setUploadCapabilities(enabled, true);
 }
 
 export function initUpload() {
@@ -28,16 +40,21 @@ export function initUpload() {
     const files = Array.from(fileInput.files);
     fileInput.value = '';   // reset so same file can be re-selected
     for (const file of files) {
-      if (state.pendingImages.length >= MAX_IMAGES) break;
+      if (state.pendingAttachments.length >= MAX_ATTACHMENTS) break;
       if (!ALLOWED_TYPES.includes(file.type)) continue;
       if (file.size > MAX_SIZE_MB * 1024 * 1024) continue;
+      // Check if image type but vision not supported
+      if (IMAGE_TYPES.includes(file.type) && !window.tqVisionEnabled) {
+        showToast('Images not supported by current model');
+        continue;
+      }
       readAndAdd(file);
     }
   });
 
-  // Listen for chat consuming the images
-  document.addEventListener('tq:images-consumed', () => {
-    state.pendingImages = [];
+  // Listen for chat consuming the attachments
+  document.addEventListener('tq:attachments-consumed', () => {
+    state.pendingAttachments = [];
     renderPreviews();
   });
 }
@@ -45,8 +62,25 @@ export function initUpload() {
 function readAndAdd(file) {
   const reader = new FileReader();
   reader.onload = () => {
-    state.pendingImages.push({ dataUrl: reader.result, file });
+    const type = IMAGE_TYPES.includes(file.type) ? 'image' : 'document';
+    const attachment = {
+      id: null,
+      type,
+      dataUrl: reader.result,
+      file,
+      mimeType: file.type,
+      name: file.name,
+      size: file.size
+    };
+    state.pendingAttachments.push(attachment);
     renderPreviews();
+    
+    // Auto-upload to server (placeholder - requires actual uploadFile implementation)
+    // uploadFile(file, window.tqSessionId).then(response => {
+    //   attachment.id = response.id;
+    // }).catch(error => {
+    //   showToast(`Upload failed: ${error.message}`);
+    // });
   };
   reader.readAsDataURL(file);
 }
@@ -54,26 +88,102 @@ function readAndAdd(file) {
 function renderPreviews() {
   if (!previewBar) return;
   previewBar.innerHTML = '';
-  if (state.pendingImages.length === 0) {
-    previewBar.classList.remove('has-images');
+  if (state.pendingAttachments.length === 0) {
+    previewBar.classList.remove('has-attachments');
     return;
   }
-  previewBar.classList.add('has-images');
+  previewBar.classList.add('has-attachments');
 
-  state.pendingImages.forEach((img, i) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'image-preview';
-    const el = document.createElement('img');
-    el.src = img.dataUrl;
-    const rm = document.createElement('button');
-    rm.className = 'remove-img';
-    rm.textContent = '×';
-    rm.addEventListener('click', () => {
-      state.pendingImages.splice(i, 1);
-      renderPreviews();
-    });
-    wrap.appendChild(el);
-    wrap.appendChild(rm);
-    previewBar.appendChild(wrap);
+  state.pendingAttachments.forEach((attachment, i) => {
+    if (attachment.type === 'image') {
+      renderImagePreview(attachment, i);
+    } else {
+      renderDocumentChip(attachment, i);
+    }
   });
+}
+
+function renderImagePreview(attachment, index) {
+  const wrap = document.createElement('div');
+  wrap.className = 'image-preview';
+  const el = document.createElement('img');
+  el.src = attachment.dataUrl;
+  const rm = document.createElement('button');
+  rm.className = 'remove-img';
+  rm.textContent = '×';
+  rm.addEventListener('click', () => {
+    state.pendingAttachments.splice(index, 1);
+    renderPreviews();
+  });
+  wrap.appendChild(el);
+  wrap.appendChild(rm);
+  previewBar.appendChild(wrap);
+}
+
+function renderDocumentChip(attachment, index) {
+  const chip = document.createElement('div');
+  chip.className = 'attachment-chip';
+  
+  const icon = document.createElement('span');
+  icon.className = 'chip-icon';
+  icon.textContent = getFileIcon(attachment.mimeType);
+  
+  const name = document.createElement('span');
+  name.className = 'chip-name';
+  name.textContent = truncateFilename(attachment.name, 20);
+  
+  const size = document.createElement('span');
+  size.className = 'chip-size';
+  size.textContent = formatFileSize(attachment.size);
+  
+  const rm = document.createElement('button');
+  rm.className = 'remove-att';
+  rm.textContent = '×';
+  rm.addEventListener('click', () => {
+    state.pendingAttachments.splice(index, 1);
+    renderPreviews();
+  });
+  
+  chip.appendChild(icon);
+  chip.appendChild(name);
+  chip.appendChild(size);
+  chip.appendChild(rm);
+  previewBar.appendChild(chip);
+}
+
+function getFileIcon(mimeType) {
+  const iconMap = {
+    'application/pdf': '📄',
+    'text/plain': '📝',
+    'text/markdown': '📝',
+    'text/csv': '📊',
+    'application/json': '📋',
+    'text/x-yaml': '⚙️',
+    'text/x-python': '🐍',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '📃'
+  };
+  return iconMap[mimeType] || '📄';
+}
+
+function truncateFilename(filename, maxLength) {
+  if (filename.length <= maxLength) return filename;
+  const extension = filename.split('.').pop();
+  const nameWithoutExt = filename.slice(0, -(extension.length + 1));
+  const truncated = nameWithoutExt.slice(0, maxLength - extension.length - 4) + '...';
+  return truncated + '.' + extension;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function showToast(message) {
+  // Simple toast implementation - can be enhanced
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#333;color:white;padding:10px;border-radius:4px;z-index:9999';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
 }

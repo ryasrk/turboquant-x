@@ -97,7 +97,7 @@ class TestEngineInit:
         eng = InferenceEngine(model_config, kv_config=None)
         assert eng.kv_config == KVCacheConfig()
         assert eng.kv_config.cache_type_k is CacheType.Q8_0
-        assert eng.kv_config.cache_type_v is CacheType.TURBO4
+        assert eng.kv_config.cache_type_v is CacheType.Q4_0
 
 
 # ======================================================================
@@ -346,5 +346,5 @@ class TestGetStats:
     def test_default_kv_values(self, engine):
         stats = engine.get_stats()
         assert stats["kv_cache_k"] == "q8_0"
-        assert stats["kv_cache_v"] == "turbo4"
+        assert stats["kv_cache_v"] == "q4_0"
         assert stats["flash_attention"] is True

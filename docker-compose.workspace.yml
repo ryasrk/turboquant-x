@@ -1,0 +1,77 @@
+# ── TurboQuant-X + n8n Workspace Portal ──────────────────────────────
+# Usage: docker compose -f docker-compose.workspace.yml up -d
+version: "3.8"
+
+services:
+  # ── TurboQuant-X (FastAPI backend + static frontend) ───────────────
+  turboquant-x:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turboquant-x
+    ports:
+      - "${TQ_PORT:-8000}:8000"
+    environment:
+      - TQ_BASE_URL=${TQ_BASE_URL:-http://localhost:8000}
+      - N8N_INTERNAL_URL=http://n8n:5678
+    volumes:
+      - ./models:/app/models:ro
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+    networks:
+      - tq-workspace
+    depends_on:
+      n8n:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── n8n Workflow Engine ────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: tq-n8n
+    environment:
+      - N8N_PATH=/workspace/n8n
+      - N8N_EDITOR_BASE_URL=${TQ_BASE_URL:-http://localhost:8000}/workspace/n8n/
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${TQ_BASE_URL:-http://localhost:8000}/workspace/n8n/
+      - N8N_PROXY_HOPS=1
+      - N8N_PUBLIC_API_DISABLED=${N8N_PUBLIC_API_DISABLED:-true}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_EDITOR_FRAME_ANCESTORS=${TQ_BASE_URL:-http://localhost:8000}
+      - N8N_RUNNERS_ENABLED=true
+      # Database (default: SQLite in volume)
+      - DB_TYPE=${N8N_DB_TYPE:-sqlite}
+      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
+      # Encryption key for credentials (CHANGE IN PRODUCTION)
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-change-me-in-production}
+    volumes:
+      - n8n-data:/home/node/.n8n
+    networks:
+      - tq-workspace
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    # n8n is NOT exposed directly — TurboQuant-X reverse-proxies to it
+    # Uncomment below for direct access during development:
+    # ports:
+    #   - "5678:5678"
+
+volumes:
+  n8n-data:
+    driver: local
+
+networks:
+  tq-workspace:
+    driver: bridge

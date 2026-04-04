@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -19,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.engine.inference import InferenceEngine
-from src.engine.kv_cache import KVCacheConfig
+from src.engine.kv_cache import KVCacheConfig, ensure_compatible_config
 from src.engine.model_config import ModelConfig
 from src.server.schemas import ErrorResponse
 
@@ -205,7 +206,7 @@ def _create_and_load_engine(app: FastAPI, mode: InferenceMode) -> None:
         return
 
     model_config: ModelConfig = app.state.model_config
-    kv_config: KVCacheConfig = app.state.kv_config
+    kv_config: KVCacheConfig = ensure_compatible_config(app.state.kv_config)
 
     if mode == InferenceMode.TURBOQUANT:
         from src.engine.turbo_engine import TurboQuantEngine
@@ -396,6 +397,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning("MCP server connection failed: %s", e)
 
+    # Create upload directory
+    os.makedirs(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'uploads'), exist_ok=True)
+
+    # Start orphan attachment cleanup background task
+    try:
+        from src.server.upload_routes import start_cleanup_task
+        start_cleanup_task()
+        logger.info("Orphan attachment cleanup task started")
+    except Exception as e:
+        logger.warning("Failed to start attachment cleanup task: %s", e)
+
     yield
 
     # Shutdown
@@ -539,6 +551,30 @@ def create_app(
     except ImportError:
         logger.warning("Auth routes module not found — running without auth")
 
+    # Upload routes (file attachments)
+    try:
+        from src.server.upload_routes import router as upload_router
+
+        app.include_router(upload_router)
+    except ImportError:
+        logger.warning("Upload routes module not found — running without file uploads")
+
+    # Workspace routes
+    try:
+        from src.server.workspace_routes import router as workspace_router
+
+        app.include_router(workspace_router)
+    except ImportError:
+        logger.warning("Workspace routes module not found")
+
+    # n8n proxy routes
+    try:
+        from src.server.n8n_proxy import router as n8n_proxy_router
+
+        app.include_router(n8n_proxy_router)
+    except ImportError:
+        logger.warning("n8n proxy routes module not found")
+
     # Serve chat UI at root
     _static_dir = Path(__file__).parent.parent / "static"
     if _static_dir.is_dir():
@@ -547,6 +583,10 @@ def create_app(
         @app.get("/", include_in_schema=False)
         async def serve_chat_ui() -> FileResponse:
             return FileResponse(str(_static_dir / "chat.html"))
+
+        @app.get("/workspaces", include_in_schema=False)
+        async def serve_workspaces() -> FileResponse:
+            return FileResponse(str(_static_dir / "workspaces.html"))
 
         @app.get("/favicon.ico", include_in_schema=False)
         async def favicon():

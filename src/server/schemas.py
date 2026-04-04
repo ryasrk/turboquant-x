@@ -5,13 +5,20 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class AttachmentRef(BaseModel):
+    """Reference to an uploaded attachment."""
+    id: str
+    type: Literal['image', 'document'] = 'document'
 
 
 class ChatMessage(BaseModel):
     """A single chat message."""
     role: Literal["system", "user", "assistant", "tool"]
     content: str | list = Field(default="", description="Text string or OpenAI multimodal content array")
+    attachments: list[AttachmentRef] = Field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
 
@@ -30,6 +37,15 @@ class ChatRequest(BaseModel):
         description="Extra template vars (e.g. {\"enable_thinking\": false}). "
                     "enable_thinking overrides the 'thinking' field.",
     )
+
+    @field_validator('messages')
+    @classmethod
+    def validate_attachments(cls, v: list[ChatMessage]) -> list[ChatMessage]:
+        """Ensure total attachments across all messages <= 20."""
+        total_attachments = sum(len(msg.attachments) for msg in v)
+        if total_attachments > 20:
+            raise ValueError(f"Total attachments ({total_attachments}) exceeds maximum of 20")
+        return v
 
     @property
     def effective_thinking(self) -> bool:
@@ -99,6 +115,7 @@ class HealthResponse(BaseModel):
     supports_thinking: bool = False
     supports_tools: bool = False
     supports_vision: bool = False
+    supports_attachments: bool = True  # Always true — documents always work
     context_max: int = 0
     context_used: int = 0
     gpu_memory: dict | None = None
@@ -126,3 +143,12 @@ class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None
     status_code: int = 500
+
+
+class AttachmentResponse(BaseModel):
+    """Response for successful file upload."""
+    id: str
+    original_name: str
+    mime_type: str
+    size_bytes: int
+    type: str  # 'image' or 'document'

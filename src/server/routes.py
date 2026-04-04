@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -13,6 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.server.app import get_engine, get_turbo_engine, get_cloud_engine, get_inference_mode, get_uptime, is_loading, InferenceMode
 from src.server.schemas import (
+    AttachmentRef,
     ChatRequest,
     ChatResponse,
     ChatChoice,
@@ -28,11 +30,75 @@ from src.server.schemas import (
 )
 from src.agent.approval import get_approval_store
 from src.utils.memory import get_gpu_memory
+from . import database
 
 logger = logging.getLogger(__name__)
 _thought_logger = logging.getLogger("agent.thoughts")
 
 router = APIRouter()
+
+# Upload directory — must match upload_routes.py
+_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'uploads')
+
+
+def _resolve_attachments(messages: list) -> list:
+    """Resolve attachment references in messages to actual content.
+
+    For each message with attachments:
+    - Image attachments: load file, base64-encode, build image_url content part
+    - Document attachments: load extracted_text, inject as context text part
+
+    Returns modified messages list (new list, does not mutate input).
+    """
+    resolved = []
+    for m in messages:
+        if not m.attachments:
+            resolved.append(m)
+            continue
+
+        # Build content parts from existing content
+        if isinstance(m.content, list):
+            parts = list(m.content)
+        elif m.content:
+            parts = [{"type": "text", "text": m.content}]
+        else:
+            parts = []
+
+        for ref in m.attachments:
+            attachment = database.get_attachment(ref.id)
+            if not attachment:
+                logger.warning("Attachment not found: %s", ref.id)
+                continue
+
+            mime_type = attachment.get("mime_type", "")
+            stored_path = attachment.get("stored_path", "")
+
+            if ref.type == "image" or mime_type.startswith("image/"):
+                full_path = os.path.join(_UPLOAD_DIR, stored_path)
+                try:
+                    with open(full_path, "rb") as f:
+                        image_data = base64.b64encode(f.read()).decode("utf-8")
+                    parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{image_data}"
+                        }
+                    })
+                except Exception as e:
+                    logger.error("Failed to load image attachment %s: %s", ref.id, e)
+            else:
+                # Document: inject extracted text as context
+                extracted_text = attachment.get("extracted_text", "")
+                if extracted_text:
+                    original_name = attachment.get("original_name", "document")
+                    parts.append({
+                        "type": "text",
+                        "text": f"[Document: {original_name}]\n{extracted_text}"
+                    })
+
+        resolved.append(m.model_copy(update={"content": parts, "attachments": []}))
+
+    return resolved
 
 
 class _ThinkStreamFilter:
@@ -204,15 +270,34 @@ async def chat_completions(request: ChatRequest):
     """
     cloud_engine = get_cloud_engine()
     mode = get_inference_mode()
+    is_cloud = mode == InferenceMode.CLOUD and cloud_engine is not None
+
+    # Resolve attachment references into content parts
+    resolved_messages = _resolve_attachments(request.messages)
+
+    # Reject image attachments in local mode (no vision encoder)
+    if not is_cloud:
+        for m in resolved_messages:
+            if isinstance(m.content, list):
+                has_images = any(
+                    isinstance(p, dict) and p.get("type") == "image_url"
+                    for p in m.content
+                )
+                if has_images:
+                    raise HTTPException(
+                        422,
+                        "Image attachments require cloud mode. "
+                        "Switch to cloud mode or remove images.",
+                    )
 
     # Cloud mode — route to cloud engine
-    if mode == InferenceMode.CLOUD and cloud_engine is not None:
+    if is_cloud:
         if not cloud_engine.is_loaded:
             raise HTTPException(
                 status_code=503,
                 detail="Cloud engine not loaded. Check provider configuration.",
             )
-        return await _cloud_chat(cloud_engine, request)
+        return await _cloud_chat(cloud_engine, request, resolved_messages)
 
     engine = get_engine()
 
@@ -224,7 +309,7 @@ async def chat_completions(request: ChatRequest):
 
     # Convert Pydantic messages to dicts for engine
     messages = []
-    for m in request.messages:
+    for m in resolved_messages:
         # Flatten multimodal content arrays to plain text for text-only models
         if isinstance(m.content, list):
             text_parts = [p.get("text", "") for p in m.content if isinstance(p, dict) and p.get("type") == "text"]
@@ -392,18 +477,26 @@ def _stream_response(
     return EventSourceResponse(event_generator())
 
 
-async def _cloud_chat(cloud_engine, request: ChatRequest):
+async def _cloud_chat(cloud_engine, request: ChatRequest, resolved_messages=None):
     """Route chat to cloud engine (non-streaming or streaming).
 
     When tools are enabled, routes through CloudAgentLoop for
     native cloud function calling.
     """
     # Convert Pydantic messages to dicts
+    msgs = resolved_messages if resolved_messages is not None else request.messages
+    cloud_supports_vision = cloud_engine.supports_vision
+
     messages = []
-    for m in request.messages:
+    for m in msgs:
         if isinstance(m.content, list):
-            text_parts = [p.get("text", "") for p in m.content if isinstance(p, dict) and p.get("type") == "text"]
-            content = " ".join(text_parts) if text_parts else ""
+            if cloud_supports_vision:
+                # Keep multimodal format for vision-capable cloud models
+                content = m.content
+            else:
+                # Flatten to text for non-vision cloud models
+                text_parts = [p.get("text", "") for p in m.content if isinstance(p, dict) and p.get("type") == "text"]
+                content = " ".join(text_parts) if text_parts else ""
         else:
             content = m.content
         msg = {"role": m.role, "content": content}
@@ -675,8 +768,10 @@ async def health_check():
 
     # Provider name for cloud mode status bar display
     cloud_provider_name = None
+    supports_vision = False
     if mode == InferenceMode.CLOUD and cloud is not None and cloud.is_loaded:
         cloud_provider_name = cloud.provider_name
+        supports_vision = cloud.supports_vision
 
     return HealthResponse(
         status=status,
@@ -687,7 +782,8 @@ async def health_check():
         loading=is_loading(),
         supports_thinking=supports_thinking,
         supports_tools=supports_tools,
-        supports_vision=False,  # GGUF models don't include vision encoder
+        supports_vision=supports_vision,
+        supports_attachments=True,
         context_max=stats.get("context_max", 0) if stats else 0,
         context_used=stats.get("context_used", 0) if stats else 0,
         gpu_memory=gpu_info,

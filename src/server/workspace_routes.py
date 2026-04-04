@@ -1,0 +1,574 @@
+"""Workspace CRUD and AI Design Lifecycle API.
+
+/v1/workspaces              GET   list workspaces
+/v1/workspaces              POST  create workspace
+/v1/workspaces/{id}         PATCH rename workspace
+/v1/workspaces/{id}         DELETE delete workspace + cascade
+/v1/workspaces/{id}/design  POST  start AI design (SSE stream)
+/v1/workspaces/{id}/approve POST  approve design → activate
+/v1/workspaces/{id}/modify  POST  modify with new prompt (SSE stream)
+/v1/workspaces/{id}/reject  POST  reject → reset to draft
+/v1/workspaces/{id}/status  GET   poll n8n workflow status
+/v1/workspaces/{id}/designs GET   list design history
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+import uuid
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
+
+from src.server.auth_routes import get_current_user
+from src.server.database import get_connection
+from src.server.n8n_auth import (
+    n8n_activate_workflow,
+    n8n_get_workflow,
+    verify_n8n_access,
+)
+from src.server.n8n_setup import ensure_n8n_ready
+from src.server.workflow_designer import (
+    generate_workflow_via_llm,
+    n8n_import_workflow,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
+
+
+# ── Schemas ──────────────────────────────────────────────────────────
+
+class WorkspaceCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+class WorkspacePatch(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+class DesignRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=10_000)
+    model: str | None = Field(None, description="Cloud model override, e.g. 'glm-4.5-flash', 'deepseek-chat'")
+
+
+# ── Design lifecycle states ──────────────────────────────────────────
+
+DESIGN_STATES = {"draft", "designing", "designed", "approved", "rejected", "active", "failed"}
+
+
+# ── DB helpers (workspace + design tables) ───────────────────────────
+
+def _init_workspace_tables() -> None:
+    """Create workspace tables if they don't exist."""
+    conn = get_connection()
+    try:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id          TEXT PRIMARY KEY,
+                user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title       TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'draft',
+                n8n_workflow_id TEXT,
+                created_at  REAL NOT NULL,
+                updated_at  REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_workspaces_user
+                ON workspaces(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS workspace_designs (
+                id              TEXT PRIMARY KEY,
+                workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                prompt          TEXT NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'designing',
+                n8n_session_id  TEXT,
+                n8n_workflow_id TEXT,
+                result_data     TEXT,
+                created_at      REAL NOT NULL,
+                updated_at      REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_designs_workspace
+                ON workspace_designs(workspace_id, created_at DESC);
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Run on import so tables exist before first request.
+_init_workspace_tables()
+
+
+# ── Workspace CRUD DB functions ──────────────────────────────────────
+
+def create_workspace(user_id: str, title: str) -> dict:
+    wid = uuid.uuid4().hex[:16]
+    now = time.time()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO workspaces (id, user_id, title, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'draft', ?, ?)",
+            (wid, user_id, title, now, now),
+        )
+        conn.commit()
+        return {"id": wid, "user_id": user_id, "title": title, "status": "draft",
+                "n8n_workflow_id": None, "created_at": now, "updated_at": now}
+    finally:
+        conn.close()
+
+
+def list_workspaces(user_id: str, limit: int = 50) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, title, status, n8n_workflow_id, created_at, updated_at "
+            "FROM workspaces WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_workspace(workspace_id: str) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, user_id, title, status, n8n_workflow_id, created_at, updated_at "
+            "FROM workspaces WHERE id = ?",
+            (workspace_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_workspace(workspace_id: str, user_id: str, **kwargs: object) -> bool:
+    allowed = {"title", "status", "n8n_workflow_id"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+    if not fields:
+        return False
+    fields["updated_at"] = time.time()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [workspace_id, user_id]
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            f"UPDATE workspaces SET {set_clause} WHERE id = ? AND user_id = ?",
+            values,
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_workspace(workspace_id: str, user_id: str) -> bool:
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "DELETE FROM workspaces WHERE id = ? AND user_id = ?",
+            (workspace_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ── Design record DB functions ───────────────────────────────────────
+
+def create_workspace_design(workspace_id: str, prompt: str, n8n_session_id: str | None = None) -> dict:
+    did = uuid.uuid4().hex[:16]
+    now = time.time()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO workspace_designs "
+            "(id, workspace_id, prompt, status, n8n_session_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'designing', ?, ?, ?)",
+            (did, workspace_id, prompt, n8n_session_id, now, now),
+        )
+        conn.commit()
+        return {"id": did, "workspace_id": workspace_id, "prompt": prompt,
+                "status": "designing", "n8n_session_id": n8n_session_id,
+                "n8n_workflow_id": None, "result_data": None,
+                "created_at": now, "updated_at": now}
+    finally:
+        conn.close()
+
+
+def list_workspace_designs(workspace_id: str, limit: int = 50) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, prompt, status, n8n_session_id, n8n_workflow_id, result_data, "
+            "created_at, updated_at "
+            "FROM workspace_designs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_workspace_design(design_id: str, **kwargs: object) -> bool:
+    allowed = {"status", "n8n_session_id", "n8n_workflow_id", "result_data"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed}
+    if not fields:
+        return False
+    fields["updated_at"] = time.time()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [design_id]
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            f"UPDATE workspace_designs SET {set_clause} WHERE id = ?",
+            values,
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def _get_latest_design(workspace_id: str) -> dict | None:
+    """Return the most recent design for a workspace, or None."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, prompt, status, n8n_session_id, n8n_workflow_id, result_data, "
+            "created_at, updated_at "
+            "FROM workspace_designs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ── Auth + ownership helper ──────────────────────────────────────────
+
+def _get_user_workspace(workspace_id: str, user: dict) -> dict:
+    """Fetch workspace and verify ownership. Raises 404/403."""
+    ws = get_workspace(workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not your workspace")
+    return ws
+
+
+# ── Routes ───────────────────────────────────────────────────────────
+
+@router.get("")
+async def list_user_workspaces(user: dict = Depends(get_current_user)):
+    """List all workspaces for the authenticated user."""
+    return list_workspaces(user["user_id"])
+
+
+@router.post("", status_code=201)
+async def create_user_workspace(body: WorkspaceCreate, user: dict = Depends(get_current_user)):
+    """Create a new workspace."""
+    ws = create_workspace(user["user_id"], body.title)
+    return ws
+
+
+@router.patch("/{workspace_id}")
+async def rename_workspace(workspace_id: str, body: WorkspacePatch, user: dict = Depends(get_current_user)):
+    """Rename a workspace."""
+    _get_user_workspace(workspace_id, user)
+    if not update_workspace(workspace_id, user["user_id"], title=body.title):
+        raise HTTPException(status_code=500, detail="Failed to update workspace")
+    return {"ok": True}
+
+
+@router.delete("/{workspace_id}", status_code=204)
+async def delete_user_workspace(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Delete a workspace and all its designs (cascade)."""
+    _get_user_workspace(workspace_id, user)
+    if not delete_workspace(workspace_id, user["user_id"]):
+        raise HTTPException(status_code=500, detail="Failed to delete workspace")
+    return None
+
+
+@router.post("/{workspace_id}/design")
+async def start_design(workspace_id: str, body: DesignRequest, user: dict = Depends(get_current_user)):
+    """Start an AI design session — returns an SSE stream of build events.
+
+    Uses the local/cloud LLM to generate an n8n workflow JSON directly,
+    then optionally imports it into n8n if available.
+
+    State transitions: draft|designed|rejected|approved → designing → designed|failed
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    if ws["status"] not in ("draft", "designed", "rejected", "approved"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot start design from state '{ws['status']}'. Must be draft, designed, rejected, or approved.",
+        )
+
+    return EventSourceResponse(_design_event_stream(workspace_id, user, body.prompt, body.model))
+
+
+async def _design_event_stream(workspace_id: str, user: dict, prompt: str, model: str | None = None):
+    """Async generator that drives the AI design lifecycle via LLM.
+
+    The LLM generates a complete n8n workflow JSON. If n8n is reachable,
+    the workflow is imported automatically.
+
+    Yields SSE events: thinking → building → workflow_json → complete | error
+    """
+    design: dict | None = None
+    try:
+        # 1. Record design + set workspace to "designing"
+        design = create_workspace_design(workspace_id, prompt)
+        update_workspace(workspace_id, user["user_id"], status="designing")
+
+        # 2. Stream LLM generation events
+        workflow_json: dict | None = None
+        async for event in generate_workflow_via_llm(prompt, model=model):
+            event_type = event.get("event", "message")
+
+            if event_type == "workflow_json":
+                workflow_json = event.get("workflow")
+            
+            yield {"event": event_type, "data": json.dumps(event)}
+
+        if not workflow_json:
+            update_workspace_design(design["id"], status="failed", result_data="LLM did not produce valid workflow JSON")
+            update_workspace(workspace_id, user["user_id"], status="failed")
+            yield {"event": "error", "data": json.dumps({"message": "LLM failed to generate a valid workflow"})}
+            return
+
+        # 3. Store the workflow JSON in the design record
+        update_workspace_design(
+            design["id"],
+            status="designed",
+            result_data=json.dumps(workflow_json),
+        )
+
+        # 4. Try to import into n8n if available (auto-provisioned auth)
+        workflow_id: str | None = None
+        n8n_ready = await ensure_n8n_ready()
+
+        if n8n_ready:
+            try:
+                n8n_base = os.environ.get("N8N_BACKEND_URL", "http://localhost:5678")
+                n8n_key = os.environ.get("N8N_API_KEY", "")
+                yield {"event": "importing", "data": json.dumps({"message": "Importing workflow into n8n..."})}
+                import_result = await n8n_import_workflow(workflow_json, n8n_base, n8n_key)
+                workflow_id = import_result.get("id")
+                if workflow_id:
+                    update_workspace_design(design["id"], n8n_workflow_id=workflow_id)
+                    update_workspace(workspace_id, user["user_id"], status="designed", n8n_workflow_id=workflow_id)
+                    yield {"event": "imported", "data": json.dumps({
+                        "message": "Workflow imported into n8n",
+                        "workflow_id": workflow_id,
+                    })}
+            except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
+                logger.warning("Could not import workflow into n8n: %s", exc)
+                yield {"event": "import_skipped", "data": json.dumps({
+                    "message": "n8n not reachable — workflow saved locally, import when n8n is available",
+                })}
+        else:
+            update_workspace(workspace_id, user["user_id"], status="designed")
+            yield {"event": "import_skipped", "data": json.dumps({
+                "message": "n8n not running — workflow saved locally",
+            })}
+
+        # 5. Complete
+        yield {"event": "complete", "data": json.dumps({
+            "design_id": design["id"],
+            "workflow_id": workflow_id,
+            "status": "designed",
+        })}
+
+    except Exception:
+        logger.exception("Unexpected error during AI design for workspace %s", workspace_id)
+        if design:
+            update_workspace_design(design["id"], status="failed")
+        update_workspace(workspace_id, user["user_id"], status="failed")
+        yield {"event": "error", "data": json.dumps({"message": "Internal error during design"})}
+
+
+@router.post("/{workspace_id}/approve")
+async def approve_design(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Approve the latest design and optionally activate the n8n workflow.
+
+    If n8n is configured and a workflow ID exists, activates the workflow.
+    Otherwise, simply marks the design as approved.
+
+    State transition: designed → approved (→ active if n8n available)
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    if ws["status"] != "designed":
+        raise HTTPException(status_code=409, detail=f"Cannot approve from state '{ws['status']}'. Must be 'designed'.")
+
+    design = _get_latest_design(workspace_id)
+    workflow_id = ws.get("n8n_workflow_id") or (design and design.get("n8n_workflow_id"))
+
+    update_workspace(workspace_id, user["user_id"], status="approved")
+    if design:
+        update_workspace_design(design["id"], status="approved")
+
+    # If n8n is available and we have a workflow ID, try to activate it
+    if workflow_id and await verify_n8n_access(user):
+        try:
+            result = await n8n_activate_workflow(workflow_id)
+            update_workspace(workspace_id, user["user_id"], status="active")
+            if design:
+                update_workspace_design(design["id"], status="active")
+            return {"ok": True, "status": "active", "workflow_id": workflow_id, "n8n_result": result}
+        except (httpx.HTTPStatusError, httpx.ConnectError) as exc:
+            logger.warning("Could not activate workflow in n8n: %s", exc)
+            # Still approved, just not activated in n8n
+            return {
+                "ok": True,
+                "status": "approved",
+                "workflow_id": workflow_id,
+                "message": "Approved but n8n activation failed — can retry later",
+            }
+
+    # No n8n or no workflow_id — just approve
+    return {
+        "ok": True,
+        "status": "approved",
+        "design_id": design["id"] if design else None,
+        "message": "Design approved" + (" — import to n8n when available" if not workflow_id else ""),
+    }
+
+
+@router.post("/{workspace_id}/modify")
+async def modify_design(workspace_id: str, body: DesignRequest, user: dict = Depends(get_current_user)):
+    """Modify the current design with a new prompt — returns SSE stream.
+
+    State transitions: designed|active|failed → designing → designed|failed
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    if ws["status"] not in ("designed", "active", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot modify from state '{ws['status']}'. Must be designed, active, or failed.",
+        )
+
+    return EventSourceResponse(_design_event_stream(workspace_id, user, body.prompt, body.model))
+
+
+@router.post("/{workspace_id}/reject")
+async def reject_design(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Reject the current design, resetting workspace to draft.
+
+    State transition: designed → rejected
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    if ws["status"] != "designed":
+        raise HTTPException(status_code=409, detail=f"Cannot reject from state '{ws['status']}'. Must be 'designed'.")
+
+    design = _get_latest_design(workspace_id)
+    if design:
+        update_workspace_design(design["id"], status="rejected")
+
+    update_workspace(workspace_id, user["user_id"], status="rejected")
+    return {"ok": True, "status": "rejected"}
+
+
+@router.get("/{workspace_id}/status")
+async def get_workspace_status(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Poll the current workspace + n8n workflow status."""
+    ws = _get_user_workspace(workspace_id, user)
+
+    result: dict = {
+        "workspace_id": ws["id"],
+        "status": ws["status"],
+        "n8n_workflow_id": ws.get("n8n_workflow_id"),
+    }
+
+    # If there's an active workflow, fetch live status from n8n
+    if ws.get("n8n_workflow_id") and await verify_n8n_access(user):
+        try:
+            wf = await n8n_get_workflow(ws["n8n_workflow_id"])
+            result["n8n_workflow_active"] = wf.get("active", False)
+            result["n8n_workflow_name"] = wf.get("name")
+        except httpx.HTTPStatusError:
+            result["n8n_workflow_active"] = None
+            result["n8n_error"] = "Could not fetch workflow status"
+        except httpx.ConnectError:
+            result["n8n_workflow_active"] = None
+            result["n8n_error"] = "n8n service unavailable"
+
+    return result
+
+
+@router.get("/{workspace_id}/designs")
+async def list_designs(workspace_id: str, user: dict = Depends(get_current_user)):
+    """List all design history records for a workspace."""
+    _get_user_workspace(workspace_id, user)
+    return list_workspace_designs(workspace_id)
+
+
+# ── n8n management endpoints ────────────────────────────────────────
+
+@router.get("/{workspace_id}/executions")
+async def get_executions(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Get execution history for a workspace's n8n workflow."""
+    ws = _get_user_workspace(workspace_id, user)
+    n8n_wf_id = ws.get("n8n_workflow_id")
+    if not n8n_wf_id:
+        return {"executions": [], "message": "No n8n workflow linked"}
+
+    from src.server.n8n_manager import get_executions as _get_execs
+    execs = await _get_execs(workflow_id=n8n_wf_id, limit=20)
+    return {"executions": execs}
+
+
+@router.get("/{workspace_id}/executions/{execution_id}")
+async def get_execution_detail_route(
+    workspace_id: str, execution_id: str, user: dict = Depends(get_current_user),
+):
+    """Get detailed execution data including node outputs and errors."""
+    _get_user_workspace(workspace_id, user)
+    from src.server.n8n_manager import get_execution_summary
+    summary = await get_execution_summary(execution_id)
+    return {"summary": summary}
+
+
+class NodeInstallRequest(BaseModel):
+    package_name: str = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/{workspace_id}/nodes/install")
+async def install_node(
+    workspace_id: str, req: NodeInstallRequest, user: dict = Depends(get_current_user),
+):
+    """Install a community node package in n8n."""
+    _get_user_workspace(workspace_id, user)
+    from src.server.n8n_manager import install_community_node
+    result = await install_community_node(req.package_name)
+    return {"installed": True, "package": req.package_name, "detail": result}
+
+
+@router.get("/{workspace_id}/nodes")
+async def list_available_nodes(
+    workspace_id: str, user: dict = Depends(get_current_user),
+):
+    """List available node types in n8n (cached)."""
+    _get_user_workspace(workspace_id, user)
+    from src.server.n8n_manager import get_available_nodes
+    nodes = await get_available_nodes()
+    # Return condensed list (name + displayName only)
+    return {
+        "total": len(nodes),
+        "nodes": [{"name": n.get("name", ""), "displayName": n.get("displayName", "")} for n in nodes[:500]],
+    }

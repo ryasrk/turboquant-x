@@ -26,7 +26,7 @@ export const state = {
   contextUsed: 0,       // populated from /health
   thinking: true,
   agent: false,
-  pendingImages: [],   // { dataUrl, file } for image upload
+  pendingAttachments: [], // { id: string|null, type: 'image'|'document', dataUrl: string, file: File, mimeType: string, name: string, size: number }
 };
 
 export function saveSettings() {

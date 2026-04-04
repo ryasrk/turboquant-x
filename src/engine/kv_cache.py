@@ -56,7 +56,7 @@ class KVCacheConfig:
     """
 
     cache_type_k: CacheType = CacheType.Q8_0
-    cache_type_v: CacheType = CacheType.TURBO4
+    cache_type_v: CacheType = CacheType.Q4_0
     flash_attention: bool = True
 
     def __post_init__(self) -> None:
@@ -73,7 +73,11 @@ def get_turboquant_config() -> KVCacheConfig:
 
     Default: K=q8_0, V=turbo4, flash_attention=True
     """
-    return KVCacheConfig()
+    return KVCacheConfig(
+        cache_type_k=CacheType.Q8_0,
+        cache_type_v=CacheType.TURBO4,
+        flash_attention=True,
+    )
 
 
 def get_baseline_config() -> KVCacheConfig:
@@ -121,6 +125,48 @@ def is_turbo_fork_available() -> bool:
         return hasattr(llama_cpp, "GGML_TYPE_TURBO4")
     except ImportError:
         return False
+
+
+def ensure_compatible_config(config: KVCacheConfig) -> KVCacheConfig:
+    """Return a config with turbo types downgraded if the fork is missing.
+
+    When the TurboQuant llama.cpp fork is installed, returns *config* unchanged.
+    Otherwise, any turbo cache types (turbo4/turbo3/turbo2) are replaced with
+    q4_0 and a warning is logged.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    if is_turbo_fork_available():
+        return config
+
+    new_k = config.cache_type_k
+    new_v = config.cache_type_v
+    downgraded = False
+
+    if new_k in _TURBO_TYPES:
+        _log.warning(
+            "KV cache K type '%s' requires TurboQuant fork; falling back to q4_0",
+            new_k.value,
+        )
+        new_k = CacheType.Q4_0
+        downgraded = True
+
+    if new_v in _TURBO_TYPES:
+        _log.warning(
+            "KV cache V type '%s' requires TurboQuant fork; falling back to q4_0",
+            new_v.value,
+        )
+        new_v = CacheType.Q4_0
+        downgraded = True
+
+    if downgraded:
+        return KVCacheConfig(
+            cache_type_k=new_k,
+            cache_type_v=new_v,
+            flash_attention=config.flash_attention,
+        )
+    return config
 
 
 # Provisional GGML type IDs for TurboQuant cache types.

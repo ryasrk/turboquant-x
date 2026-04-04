@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TurboQuant-X ∞ Workspaces</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" />
+  <link rel="stylesheet" href="/static/css/theme.css?v=26" />
+  <link rel="stylesheet" href="/static/css/layout.css?v=26" />
+  <link rel="stylesheet" href="/static/css/components.css?v=26" />
+  <link rel="stylesheet" href="/static/css/workspaces.css?v=2" />
+</head>
+<body>
+
+<!-- Skip Navigation Link for Accessibility -->
+<a href="#main-content" class="skip-nav">Skip to main content</a>
+
+<!-- ── Header ──────────────────────────────────────────────────────── -->
+<header role="banner">
+  <div class="logo">
+    <div class="logo-mark" aria-hidden="true">⬡</div>
+    <div>
+      <div class="logo-text">TurboQuant-X</div>
+      <div class="logo-sub">workspace portal</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="ws-header-title">◈ Workspaces</span>
+    <button id="theme-toggle" class="icon-btn theme-toggle-btn" title="Toggle light/dark theme" aria-label="Toggle theme">
+      <span class="theme-icon-dark">🌙</span>
+      <span class="theme-icon-light">☀️</span>
+    </button>
+    <a href="/static/chat.html" class="icon-btn back-link" aria-label="Back to chat">← Chat</a>
+    <a href="/workspace/n8n/" target="_blank" class="icon-btn n8n-link" aria-label="Open n8n Editor" title="Open n8n Editor">⚡ n8n</a>
+  </div>
+</header>
+
+<!-- ── Workspace Layout ─────────────────────────────────────────────── -->
+<div id="ws-layout">
+  <!-- Sidebar -->
+  <aside id="ws-sidebar" role="complementary" aria-label="Workspace list">
+    <div class="sidebar-header">
+      <span>◈ Workspaces</span>
+      <button id="sidebar-collapse-btn" class="icon-btn mobile-only" title="Close sidebar" aria-label="Close sidebar">✕</button>
+    </div>
+    <button id="ws-new-btn" class="ws-action-btn" aria-label="Create new workspace">+ New Workspace</button>
+    <div id="ws-list" role="list" aria-live="polite"></div>
+    <div class="sidebar-footer">
+      <span id="ws-user-display"></span>
+      <button id="ws-logout-btn" class="text-btn" aria-label="Logout">Logout</button>
+    </div>
+  </aside>
+
+  <!-- Mobile sidebar toggle -->
+  <button id="ws-sidebar-toggle" class="icon-btn mobile-only" title="Toggle workspace sidebar" aria-label="Toggle workspace sidebar" aria-expanded="false">☰</button>
+
+  <!-- Main content -->
+  <main id="main-content">
+    <!-- Empty state -->
+    <div id="ws-empty" class="ws-empty-state">
+      <div class="big" aria-hidden="true">◈</div>
+      <div class="big-text">Workspace Portal</div>
+      <p>Select or create a workspace to begin</p>
+    </div>
+
+    <!-- Workspace detail (hidden by default) -->
+    <div id="ws-detail" class="ws-detail hidden">
+      <div class="ws-detail-header">
+        <h2 id="ws-detail-title"></h2>
+        <div class="ws-detail-meta">
+          <span id="ws-detail-status" class="ws-status-badge"></span>
+          <span id="ws-detail-updated"></span>
+        </div>
+      </div>
+
+      <!-- Design Panel -->
+      <section id="ws-design-panel" class="ws-panel" aria-label="Workflow design">
+        <h3 class="ws-panel-title">◈ Design Workflow</h3>
+
+        <!-- Prompt Input -->
+        <div id="ws-prompt-area">
+          <label for="ws-prompt-input" class="sr-only">Describe your workflow</label>
+          <textarea
+            id="ws-prompt-input"
+            placeholder="Describe the workflow you want to build…"
+            rows="3"
+            aria-label="Workflow design prompt"
+            aria-describedby="ws-prompt-hint"
+          ></textarea>
+          <div class="ws-design-controls">
+            <select id="ws-model-select" class="ws-model-select" aria-label="LLM model for design">
+              <option value="">Default Model</option>
+            </select>
+            <button id="ws-design-btn" class="ws-primary-btn" aria-label="Start design">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 8h8M8 4v8"/></svg>
+              Design
+            </button>
+          </div>
+          <span id="ws-prompt-hint" class="ws-prompt-hint">Press Ctrl+Enter to submit</span>
+        </div>
+
+        <!-- Design Progress (SSE streaming) -->
+        <div id="ws-design-progress" class="hidden" aria-live="polite" role="status">
+          <div class="ws-progress-indicator">
+            <span class="ws-spinner" aria-hidden="true"></span>
+            <span id="ws-progress-label">Initializing…</span>
+          </div>
+          <div id="ws-progress-log" class="ws-progress-log" role="log"></div>
+        </div>
+
+        <!-- Action Buttons (post-design) -->
+        <div id="ws-actions" class="ws-actions hidden">
+          <button id="ws-approve-btn" class="ws-approve-btn" aria-label="Approve design">✓ Approve</button>
+          <button id="ws-modify-btn" class="ws-modify-btn" aria-label="Modify design">✎ Modify</button>
+          <button id="ws-reject-btn" class="ws-reject-btn" aria-label="Reject design">✗ Reject</button>
+        </div>
+      </section>
+
+      <!-- n8n Iframe -->
+      <section id="ws-n8n-section" class="ws-panel hidden" aria-label="n8n workflow editor">
+        <h3 class="ws-panel-title">◈ Workflow Editor</h3>
+        <div class="ws-iframe-wrap">
+          <div id="ws-iframe-loading" class="ws-iframe-loading">
+            <span class="ws-spinner" aria-hidden="true"></span>
+            Loading workflow editor…
+          </div>
+          <iframe
+            id="ws-n8n-iframe"
+            title="n8n Workflow Editor"
+            allow="clipboard-read; clipboard-write"
+          ></iframe>
+        </div>
+      </section>
+    </div>
+
+    <!-- Design History (collapsible) -->
+    <section id="ws-history-section" class="ws-panel ws-history hidden" aria-label="Design history">
+      <button id="ws-history-toggle" class="ws-history-toggle" aria-expanded="false" aria-controls="ws-history-list">
+        ◈ Design History
+        <svg class="ws-chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
+      </button>
+      <div id="ws-history-list" class="ws-history-list collapsed" role="list"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ── Rename Dialog ────────────────────────────────────────────────── -->
+<div id="ws-rename-overlay" class="ws-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ws-rename-title">
+  <div class="ws-dialog">
+    <h3 id="ws-rename-title" class="ws-dialog-title">Rename Workspace</h3>
+    <label for="ws-rename-input" class="sr-only">New workspace name</label>
+    <input type="text" id="ws-rename-input" class="ws-dialog-input" placeholder="Workspace name" maxlength="64" autocomplete="off" />
+    <div class="ws-dialog-actions">
+      <button id="ws-rename-cancel" class="ws-secondary-btn">Cancel</button>
+      <button id="ws-rename-confirm" class="ws-primary-btn">Rename</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Delete Confirmation Dialog ───────────────────────────────────── -->
+<div id="ws-delete-overlay" class="ws-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ws-delete-title" aria-describedby="ws-delete-desc">
+  <div class="ws-dialog">
+    <h3 id="ws-delete-title" class="ws-dialog-title">Delete Workspace</h3>
+    <p id="ws-delete-desc" class="ws-dialog-text">This action cannot be undone. All designs and workflows in this workspace will be permanently deleted.</p>
+    <div class="ws-dialog-actions">
+      <button id="ws-delete-cancel" class="ws-secondary-btn">Cancel</button>
+      <button id="ws-delete-confirm" class="ws-danger-btn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modify Design Dialog ─────────────────────────────────────────── -->
+<div id="ws-modify-overlay" class="ws-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ws-modify-title">
+  <div class="ws-dialog ws-dialog-wide">
+    <h3 id="ws-modify-title" class="ws-dialog-title">Modify Design</h3>
+    <p class="ws-dialog-text">Describe the changes you want to make to the current workflow design.</p>
+    <label for="ws-modify-input" class="sr-only">Modification instructions</label>
+    <textarea id="ws-modify-input" class="ws-dialog-textarea" placeholder="e.g. Add error handling, change the schedule to weekly…" rows="4"></textarea>
+    <div class="ws-dialog-actions">
+      <button id="ws-modify-cancel" class="ws-secondary-btn">Cancel</button>
+      <button id="ws-modify-confirm" class="ws-primary-btn">Modify</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/js/workspaces.js?v=1"></script>
+</body>
+</html>

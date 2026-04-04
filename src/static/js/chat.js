@@ -25,51 +25,78 @@ import {
 
 const inputEl = document.getElementById('user-input');
 
-/** Build the messages array for the API, including images if present. */
-function buildUserContent(text, images) {
-  if (!images || images.length === 0) return text;
-  // OpenAI multimodal format
+/** Build the messages array for the API, including attachments if present. */
+function buildUserContent(text, attachments) {
+  if (!attachments || attachments.length === 0) return text;
   const parts = [{ type: 'text', text }];
-  for (const img of images) {
-    parts.push({
-      type: 'image_url',
-      image_url: { url: img.dataUrl },
-    });
+  for (const att of attachments) {
+    if (att.type === 'image') {
+      parts.push({
+        type: 'image_url',
+        image_url: { url: att.dataUrl },
+      });
+    } else {
+      // Document: include as text reference with server ID
+      parts.push({
+        type: 'text',
+        text: `\n[Attached: ${att.name} (${att.mimeType})]`,
+      });
+    }
   }
   return parts;
 }
 
 export async function sendMessage() {
   const text = inputEl.value.trim();
-  if (!text && state.pendingImages.length === 0) return;
+  if (!text && state.pendingAttachments.length === 0) return;
 
   inputEl.value = '';
   inputEl.style.height = 'auto';
 
-  // Capture and clear pending images
-  const images = [...state.pendingImages];
-  state.pendingImages = [];
+  // Capture and clear pending attachments
+  const attachments = [...state.pendingAttachments];
+  state.pendingAttachments.length = 0;
   // Dispatch event so upload module clears previews
-  document.dispatchEvent(new CustomEvent('tq:images-consumed'));
+  document.dispatchEvent(new CustomEvent('tq:attachments-consumed'));
 
-  const userContent = buildUserContent(text, images);
+  const userContent = buildUserContent(text, attachments);
   state.history.push({ role: 'user', content: userContent });
+
+  // Include attachment metadata for session persistence
+  const attachmentIds = attachments.filter(a => a.id).map(a => a.id);
 
   // Persist user message
   const textContent = typeof userContent === 'string' ? userContent : text;
   if (window._tqSaveMessage) window._tqSaveMessage('user', textContent);
 
-  // Render user bubble (with optional image thumbnails)
-  const { wrapper: userWrapper } = appendMessage('user', text || '[image]');
-  if (images.length > 0) {
-    const imgBar = document.createElement('div');
-    imgBar.className = 'msg-images';
-    for (const img of images) {
-      const el = document.createElement('img');
-      el.src = img.dataUrl;
-      imgBar.appendChild(el);
+  // Render user bubble (with optional attachment thumbnails)
+  const { wrapper: userWrapper } = appendMessage('user', text || '[attachment]');
+  if (attachments.length > 0) {
+    // Render images
+    const images = attachments.filter(a => a.type === 'image');
+    if (images.length > 0) {
+      const imgBar = document.createElement('div');
+      imgBar.className = 'msg-images';
+      for (const img of images) {
+        const el = document.createElement('img');
+        el.src = img.dataUrl;
+        imgBar.appendChild(el);
+      }
+      userWrapper.querySelector('.msg-bubble').prepend(imgBar);
     }
-    userWrapper.querySelector('.msg-bubble').prepend(imgBar);
+    
+    // Render documents
+    if (attachments.some(a => a.type === 'document')) {
+      const attBar = document.createElement('div');
+      attBar.className = 'msg-attachments';
+      for (const att of attachments.filter(a => a.type === 'document')) {
+        const chip = document.createElement('div');
+        chip.className = 'attachment-chip';
+        chip.innerHTML = `<span class="chip-icon">${getDocIcon(att.mimeType)}</span><span class="chip-name">${escapeHtml(att.name)}</span>`;
+        attBar.appendChild(chip);
+      }
+      userWrapper.querySelector('.msg-bubble').prepend(attBar);
+    }
   }
 
   setStreaming(true);
@@ -286,6 +313,26 @@ export async function sendMessage() {
   } finally {
     setStreaming(false);
   }
+}
+
+function getDocIcon(mimeType) {
+  const icons = {
+    'application/pdf': '📄',
+    'text/plain': '📝',
+    'text/markdown': '📝',
+    'text/csv': '📊',
+    'application/json': '📋',
+    'text/x-yaml': '⚙️',
+    'text/x-python': '🐍',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '📃',
+  };
+  return icons[mimeType] || '📎';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 export function clearSession() {

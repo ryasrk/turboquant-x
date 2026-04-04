@@ -53,7 +53,7 @@ class TestKVCacheConfig:
     def test_default_config(self) -> None:
         cfg = KVCacheConfig()
         assert cfg.cache_type_k == CacheType.Q8_0
-        assert cfg.cache_type_v == CacheType.TURBO4
+        assert cfg.cache_type_v == CacheType.Q4_0
         assert cfg.flash_attention is True
 
     def test_frozen_immutable(self) -> None:

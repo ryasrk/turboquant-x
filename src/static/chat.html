@@ -105,6 +105,16 @@
       <span class="theme-icon-light">☀️</span>
     </button>
 
+    <!-- Workspace Button -->
+    <a href="/workspaces" id="workspace-btn" class="header-btn" title="Workspaces">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" rx="1"/>
+        <rect x="14" y="3" width="7" height="7" rx="1"/>
+        <rect x="3" y="14" width="7" height="7" rx="1"/>
+        <rect x="14" y="14" width="7" height="7" rx="1"/>
+      </svg>
+    </a>
+
     <!-- Advanced Settings Button -->
     <button class="settings-btn" id="settings-btn" aria-label="Open settings">
       <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
@@ -144,7 +154,7 @@
   <div id="input-bar">
     <div id="input-box">
       <div id="image-preview-bar" aria-live="polite"></div>
-      <input type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden aria-label="Upload images" />
+      <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.json,.csv,.yaml,.yml,.py,.docx" multiple hidden aria-label="Upload files" />
       <textarea
         id="user-input"
         placeholder="Send a message…"
@@ -154,7 +164,7 @@
       ></textarea>
       <div id="input-toolbar">
         <div id="input-tools-left">
-          <button id="upload-btn" title="Attach file" type="button" aria-label="Attach file">
+          <button id="upload-btn" title="Attach files" type="button" aria-label="Attach files">
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M6 1v10M1 6h10"/></svg>
           </button>
           <button id="agent-btn" title="Toggle agent mode" type="button" aria-pressed="false">🤖 Agent</button>
