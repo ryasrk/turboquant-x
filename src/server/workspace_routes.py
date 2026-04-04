@@ -721,42 +721,56 @@ async def redeploy_workflow(workspace_id: str, user: dict = Depends(get_current_
     }
 
     if existing_wf_id:
-        # Update existing workflow in-place
-        resp = await n8n_api_call("PUT", f"/rest/workflows/{existing_wf_id}", json_data=payload)
-        resp.raise_for_status()
-        result = resp.json()
-        wf = result.get("data", result) if isinstance(result, dict) else result
-        node_count = len(wf.get("nodes", []))
+        # Update existing workflow in-place (fall through to create if 404)
+        try:
+            resp = await n8n_api_call("PUT", f"/rest/workflows/{existing_wf_id}", json_data=payload)
+            resp.raise_for_status()
+            result = resp.json()
+            wf = result.get("data", result) if isinstance(result, dict) else result
+            node_count = len(wf.get("nodes", []))
 
-        # Check credentials for informational warning
-        cred_check = await _check_missing_credentials(workflow_json)
+            # Check credentials for informational warning
+            cred_check = await _check_missing_credentials(workflow_json)
 
-        resp_data: dict = {
-            "ok": True,
-            "action": "updated",
-            "workflow_id": existing_wf_id,
-            "node_count": node_count,
-            "message": f"Re-deployed {node_count} nodes to workflow {existing_wf_id}",
-        }
-        if not cred_check["ok"]:
-            missing_types = list({m["cred_type"] for m in cred_check["missing"]})
-            resp_data["missing_credentials"] = cred_check["missing"]
-            resp_data["message"] += f" — ⚠ missing credentials: {', '.join(missing_types)}"
-        return resp_data
-    else:
-        # Create new workflow
-        from src.server.workflow_designer import n8n_import_workflow
-        result = await n8n_import_workflow(workflow_json)
-        new_id = result.get("id")
-        if new_id:
-            update_workspace(workspace_id, user["user_id"], n8n_workflow_id=str(new_id))
-        return {
-            "ok": True,
-            "action": "created",
-            "workflow_id": new_id,
-            "node_count": len(result.get("nodes", [])),
-            "message": f"Created new workflow {new_id}",
-        }
+            resp_data: dict = {
+                "ok": True,
+                "action": "updated",
+                "workflow_id": existing_wf_id,
+                "node_count": node_count,
+                "message": f"Re-deployed {node_count} nodes to workflow {existing_wf_id}",
+            }
+            if not cred_check["ok"]:
+                missing_types = list({m["cred_type"] for m in cred_check["missing"]})
+                resp_data["missing_credentials"] = cred_check["missing"]
+                resp_data["message"] += f" — ⚠ missing credentials: {', '.join(missing_types)}"
+            return resp_data
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.warning("Workflow %s not found in n8n (stale ID), creating new", existing_wf_id)
+                # Fall through to create a new workflow
+            else:
+                raise
+
+    # Create new workflow (either no existing ID or stale 404)
+    from src.server.workflow_designer import n8n_import_workflow
+    result = await n8n_import_workflow(workflow_json)
+    new_id = result.get("id")
+    if new_id:
+        update_workspace(workspace_id, user["user_id"], n8n_workflow_id=str(new_id))
+
+    cred_check = await _check_missing_credentials(workflow_json)
+    resp_data = {
+        "ok": True,
+        "action": "created",
+        "workflow_id": new_id,
+        "node_count": len(result.get("nodes", [])),
+        "message": f"Created new workflow {new_id}",
+    }
+    if not cred_check["ok"]:
+        missing_types = list({m["cred_type"] for m in cred_check["missing"]})
+        resp_data["missing_credentials"] = cred_check["missing"]
+        resp_data["message"] += f" — ⚠ missing credentials: {', '.join(missing_types)}"
+    return resp_data
 
 
 # ── Credential check & create endpoints ─────────────────────────────
@@ -913,9 +927,14 @@ async def get_workspace_status(workspace_id: str, user: dict = Depends(get_curre
             wf = await n8n_get_workflow(ws["n8n_workflow_id"])
             result["n8n_workflow_active"] = wf.get("active", False)
             result["n8n_workflow_name"] = wf.get("name")
-        except httpx.HTTPStatusError:
-            result["n8n_workflow_active"] = None
-            result["n8n_error"] = "Could not fetch workflow status"
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                result["n8n_workflow_active"] = None
+                result["n8n_workflow_stale"] = True
+                result["n8n_error"] = "Workflow not found in n8n — use Redeploy to recreate"
+            else:
+                result["n8n_workflow_active"] = None
+                result["n8n_error"] = "Could not fetch workflow status"
         except httpx.ConnectError:
             result["n8n_workflow_active"] = None
             result["n8n_error"] = "n8n service unavailable"
