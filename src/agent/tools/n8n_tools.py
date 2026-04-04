@@ -415,7 +415,14 @@ class N8nCreateCredentialTool(Tool):
             result = resp.json()
             cred = result.get("data", result) if isinstance(result, dict) else result
             cid = cred.get("id", "?")
-            return f"Created credential '{name}' (type: {cred_type}, id: {cid}). You can now link it to workflow nodes."
+            return (
+                f"Created credential '{name}' (type: {cred_type}, id: {cid}).\n\n"
+                f"NEXT STEP: To link this credential to a workflow node, call n8n_update_workflow "
+                f"and update the node's 'credentials' field to include:\n"
+                f'  "{cred_type}": {{"id": "{cid}", "name": "{name}"}}\n\n'
+                f"Example: get the workflow with n8n_get_workflow, modify the relevant node's "
+                f"credentials object, then call n8n_update_workflow with the updated JSON."
+            )
         except Exception as e:
             return f"Failed to create credential: {e}"
 
@@ -1002,18 +1009,32 @@ class N8nActivateWorkflowTool(Tool):
         from src.server.n8n_setup import n8n_api_call
 
         try:
-            # Fetch current workflow
-            resp = await n8n_api_call("GET", f"/rest/workflows/{workflow_id}")
+            if active:
+                # Use the dedicated activate endpoint
+                resp = await n8n_api_call("POST", f"/rest/workflows/{workflow_id}/activate")
+            else:
+                resp = await n8n_api_call("POST", f"/rest/workflows/{workflow_id}/deactivate")
+
+            if resp.status_code == 400:
+                # Activation failed — likely missing credentials
+                error_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                error_msg = error_data.get("message", resp.text[:200])
+                return (
+                    f"Failed to {'activate' if active else 'deactivate'} workflow: {error_msg}\n\n"
+                    "HINT: This usually means the workflow has nodes with missing or invalid credentials. "
+                    "Steps to fix:\n"
+                    "1. Call n8n_get_workflow to inspect node credential references\n"
+                    "2. Call n8n_list_credentials to see what's available\n"
+                    "3. Create missing credentials with n8n_create_credential (capture the returned ID)\n"
+                    "4. Update the workflow nodes to reference the correct credential IDs using n8n_update_workflow\n"
+                    "5. Then retry n8n_activate_workflow"
+                )
+
             resp.raise_for_status()
+            state = "activated" if active else "deactivated"
+
             raw = resp.json()
             wf = raw.get("data", raw) if isinstance(raw, dict) else raw
-
-            # Update active state
-            wf["active"] = active
-            update_resp = await n8n_api_call("PUT", f"/rest/workflows/{workflow_id}", json_data=wf)
-            update_resp.raise_for_status()
-
-            state = "activated" if active else "deactivated"
             return f"Workflow '{wf.get('name', workflow_id)}' {state}."
         except Exception as e:
             return f"Failed to {'activate' if active else 'deactivate'} workflow: {e}"

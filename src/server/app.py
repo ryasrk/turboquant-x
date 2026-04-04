@@ -42,6 +42,7 @@ _engine: InferenceEngine | None = None
 _turbo_engine: Any = None  # TurboQuantEngine | ZeroQuantEngine | None
 _cloud_engine: Any = None  # CloudEngine | None
 _cloud_config_cache: Any = None  # CloudConfig — always stored, even in local mode
+_cloud_yaml_config_raw: dict = {}  # Raw cloud YAML section for provider switching
 _inference_mode: InferenceMode = InferenceMode.STANDARD
 _start_time: float = 0.0
 _switch_lock = threading.Lock()  # prevents concurrent mode/model switches
@@ -532,7 +533,8 @@ def create_app(
 
     # Cache cloud config at module level so workspace chat can create
     # a temporary cloud engine even when server runs in local mode
-    global _cloud_config_cache
+    global _cloud_config_cache, _cloud_yaml_config_raw
+    _cloud_yaml_config_raw = cloud_yaml_config or {}
     if cloud_config is not None:
         _cloud_config_cache = cloud_config
     elif cloud_yaml_config:

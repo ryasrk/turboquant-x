@@ -32,17 +32,11 @@ async def get_available_nodes(force_refresh: bool = False) -> list[dict[str, Any
     if not force_refresh and _node_cache and (time.time() - _cache_ts) < _CACHE_TTL:
         return _node_cache
 
-    base_url = os.getenv("N8N_BACKEND_URL", "http://127.0.0.1:5678").rstrip("/")
-
     try:
-        from src.server.n8n_setup import get_session_cookies
-        cookie = get_session_cookies() or ""
-        headers = {"Cookie": cookie} if cookie else {}
-
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
-            resp = await client.get(f"{base_url}/types/nodes.json", headers=headers)
-            resp.raise_for_status()
-            nodes = resp.json()
+        from src.server.n8n_setup import n8n_api_call
+        resp = await n8n_api_call("GET", "/types/nodes.json")
+        resp.raise_for_status()
+        nodes = resp.json()
 
         _node_cache = nodes
         _node_names_cache = {n.get("name", "") for n in nodes if n.get("name")}

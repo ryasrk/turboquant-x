@@ -177,7 +177,13 @@ async def proxy_to_n8n(request: Request, path: str) -> StreamingResponse:
 
 @router.websocket("/workspace/n8n/{path:path}")
 async def ws_proxy_to_n8n(ws: WebSocket, path: str):
-    """Proxy WebSocket connections to n8n (used for push notifications)."""
+    """Proxy WebSocket connections to n8n (used for push notifications).
+
+    Cookie resolution order:
+    1. Browser's ``n8n-auth`` cookie from the WS upgrade request (set by /workspace/n8n-login)
+    2. Server-side session cookie from auto-provisioning
+    3. Fresh login attempt via ensure_n8n_ready()
+    """
     await ws.accept()
 
     # Build n8n WebSocket URL
@@ -186,57 +192,107 @@ async def ws_proxy_to_n8n(ws: WebSocket, path: str):
     if ws.scope.get("query_string"):
         target = f"{target}?{ws.scope['query_string'].decode()}"
 
-    # Build cookie header for n8n auth
+    # ── Resolve n8n auth cookie ─────────────────────────────────────
     cookie_str = ""
-    if not N8N_API_KEY:
+
+    # 1. Try browser's cookie from the WS upgrade request headers
+    browser_cookies = ws.headers.get("cookie", "")
+    if browser_cookies:
+        # Extract n8n-auth cookie from the browser cookie string
+        for part in browser_cookies.split(";"):
+            part = part.strip()
+            if part.startswith("n8n-auth="):
+                cookie_str = part
+                logger.debug("WS proxy: using browser n8n-auth cookie")
+                break
+
+    # 2. Fall back to server-side session cookie
+    if not cookie_str and not N8N_API_KEY:
         from src.server.n8n_setup import get_session_cookies
         cookie_str = get_session_cookies() or ""
+        if cookie_str:
+            logger.debug("WS proxy: using server-side session cookie")
 
-    import websockets
-    extra_headers = {}
+    # 3. Last resort — try to login fresh
+    if not cookie_str and not N8N_API_KEY:
+        try:
+            from src.server.n8n_setup import ensure_n8n_ready, get_session_cookies
+            await ensure_n8n_ready()
+            cookie_str = get_session_cookies() or ""
+            if cookie_str:
+                logger.debug("WS proxy: obtained fresh session cookie via ensure_n8n_ready")
+        except Exception:
+            logger.debug("WS proxy: ensure_n8n_ready failed, proceeding without cookie")
+
+    from websockets.asyncio.client import connect as ws_connect
+    extra_headers: dict[str, str] = {}
     if cookie_str:
         extra_headers["Cookie"] = cookie_str
-    n8n_headers = get_n8n_headers()
-    extra_headers.update(n8n_headers)
+    if N8N_API_KEY:
+        extra_headers["X-N8N-API-KEY"] = N8N_API_KEY
+    # Don't forward Content-Type/Accept for WebSocket — they're irrelevant
+    # and some WS servers reject unexpected headers
+
+    logger.info(
+        "WS proxy: connecting to %s (auth: %s)",
+        target,
+        "cookie" if "Cookie" in extra_headers else ("api-key" if "X-N8N-API-KEY" in extra_headers else "NONE"),
+    )
 
     try:
-        async with websockets.connect(
+        async with ws_connect(
             target,
             additional_headers=extra_headers,
             ping_interval=20,
             ping_timeout=30,
             close_timeout=5,
         ) as n8n_ws:
+            logger.info("WS proxy: connected to n8n backend for %s", path)
+
             async def client_to_n8n():
+                """Forward messages from browser → n8n."""
                 try:
                     while True:
                         data = await ws.receive_text()
                         await n8n_ws.send(data)
                 except WebSocketDisconnect:
-                    pass
+                    logger.debug("WS proxy: browser disconnected")
+                except Exception as e:
+                    logger.debug("WS proxy: client→n8n error: %s: %s", type(e).__name__, e)
 
             async def n8n_to_client():
+                """Forward messages from n8n → browser."""
                 try:
                     async for msg in n8n_ws:
                         if ws.client_state == WebSocketState.CONNECTED:
                             if isinstance(msg, str):
                                 await ws.send_text(msg)
-                            else:
+                            elif isinstance(msg, bytes):
                                 await ws.send_bytes(msg)
-                except Exception:
-                    pass
+                    # If we get here, n8n closed the connection
+                    logger.debug("WS proxy: n8n closed the WebSocket (iterator ended)")
+                except Exception as e:
+                    logger.debug("WS proxy: n8n→client error: %s: %s", type(e).__name__, e)
 
-            # Run both directions concurrently
+            t1 = asyncio.create_task(client_to_n8n(), name="client→n8n")
+            t2 = asyncio.create_task(n8n_to_client(), name="n8n→client")
+
             done, pending = await asyncio.wait(
-                [asyncio.create_task(client_to_n8n()),
-                 asyncio.create_task(n8n_to_client())],
+                [t1, t2],
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            for task in done:
+                exc = task.exception()
+                logger.info(
+                    "WS proxy: [%s] ended%s",
+                    task.get_name(),
+                    f" with error: {exc}" if exc else " cleanly",
+                )
             for task in pending:
                 task.cancel()
 
     except Exception as exc:
-        logger.warning("WebSocket proxy error: %s", exc)
+        logger.warning("WS proxy error for %s: %s: %s", path, type(exc).__name__, exc)
     finally:
         if ws.client_state == WebSocketState.CONNECTED:
             try:

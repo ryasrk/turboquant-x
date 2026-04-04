@@ -85,45 +85,58 @@ async function populateModelSelector() {
   const select = $('#ws-model-select');
   if (!select) return;
 
+  // Clear existing options except the default
+  while (select.options.length > 1) select.remove(1);
+
   try {
-    const data = await apiFetch('/v1/cloud-providers');
-    const providers = data?.providers ?? [];
-    const active = providers.find((p) => p.active);
+    const data = await apiFetch('/v1/workspaces/models');
+    const groups = data?.groups ?? [];
 
-    for (const p of providers) {
-      if (!p.configured) continue;
-      const opt = document.createElement('option');
-      opt.value = '';  // Will be populated with specific models
-      opt.textContent = `${p.display_name}${p.active ? ' (active)' : ''}`;
-      opt.disabled = true;
-      select.appendChild(opt);
+    for (const g of groups) {
+      // Group header (disabled)
+      const header = document.createElement('option');
+      header.disabled = true;
+      header.textContent = `── ${g.display_name} ──`;
+      select.appendChild(header);
 
-      // Fetch models for this provider
-      try {
-        const modelData = await apiFetch(`/v1/cloud-providers/${encodeURIComponent(p.name)}/models`);
-        const models = modelData?.models ?? [];
+      const models = g.models ?? [];
+      if (models.length === 0) {
+        // Provider with no specific model listed — add a generic option
+        const opt = document.createElement('option');
+        opt.value = JSON.stringify({ provider: g.provider });
+        opt.textContent = `  ${g.display_name} (default)`;
+        select.appendChild(opt);
+      } else {
         for (const m of models) {
-          const mOpt = document.createElement('option');
-          const modelId = typeof m === 'string' ? m : m.id || m.name || String(m);
-          mOpt.value = modelId;
-          mOpt.textContent = `  ${modelId}`;
-          select.appendChild(mOpt);
+          const opt = document.createElement('option');
+          opt.value = JSON.stringify({ provider: g.provider, model: m.id });
+          opt.textContent = `  ${m.label || m.name || m.id}`;
+          select.appendChild(opt);
         }
-      } catch {
-        // Provider may not support model listing
       }
     }
 
-    // If no models were added, add a note
-    if (select.options.length <= 1) {
+    if (groups.length === 0) {
       const opt = document.createElement('option');
       opt.value = '';
-      opt.textContent = 'No cloud providers configured';
+      opt.textContent = 'No models available';
       opt.disabled = true;
       select.appendChild(opt);
     }
   } catch (err) {
-    console.warn('Could not load cloud providers:', err);
+    console.warn('Could not load workspace models:', err);
+  }
+}
+
+/** Parse the model selector value into {provider, model} */
+function getSelectedModel() {
+  const val = $('#ws-model-select')?.value;
+  if (!val) return { provider: null, model: null };
+  try {
+    return JSON.parse(val);
+  } catch {
+    // Legacy: plain model string
+    return { provider: null, model: val };
   }
 }
 
@@ -138,6 +151,10 @@ async function startDesign(workspaceId, prompt, model = null) {
   try {
     const body = { prompt };
     if (model) body.model = model;
+    // Parse model selector for provider info
+    const sel = getSelectedModel();
+    if (sel.provider) body.provider = sel.provider;
+    if (sel.model) body.model = sel.model;
 
     const res = await fetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/design`, {
       method: 'POST',
@@ -232,8 +249,7 @@ async function approveDesign(workspaceId) {
 }
 
 async function modifyDesign(workspaceId, prompt) {
-  const model = $('#ws-model-select')?.value || null;
-  await startDesign(workspaceId, prompt, model);
+  await startDesign(workspaceId, prompt);
 }
 
 async function rejectDesign(workspaceId) {
@@ -1091,8 +1107,7 @@ export function initWorkspaces() {
   $('#ws-design-btn')?.addEventListener('click', () => {
     const prompt = $('#ws-prompt-input')?.value?.trim();
     if (!prompt || !activeWsId) return;
-    const model = $('#ws-model-select')?.value || null;
-    startDesign(activeWsId, prompt, model);
+    startDesign(activeWsId, prompt);
   });
 
   // Approve / Modify / Reject
@@ -1287,7 +1302,7 @@ async function sendChatMessage() {
   appendChatBubble('user', escapeChat(msg));
 
   const modelSelect = $('#ws-model-select');
-  const model = modelSelect?.value || null;
+  const sel = getSelectedModel();
 
   chatStreaming = true;
   const sendBtn = $('#ws-chat-send');
@@ -1298,13 +1313,17 @@ async function sendChatMessage() {
   let assistantBubble = null;
 
   try {
+    const chatBody = { message: msg, history: chatHistory.slice(-20) };
+    if (sel.provider) chatBody.provider = sel.provider;
+    if (sel.model) chatBody.model = sel.model;
+
     const resp = await fetch(`/v1/workspaces/${activeWsId}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...authHeaders(),
       },
-      body: JSON.stringify({ message: msg, history: chatHistory.slice(-20), model }),
+      body: JSON.stringify(chatBody),
     });
 
     if (!resp.ok) {

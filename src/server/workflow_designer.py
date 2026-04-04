@@ -360,6 +360,7 @@ async def generate_workflow_via_llm(
     prompt: str,
     *,
     model: str | None = None,
+    provider: str | None = None,
     use_cloud: bool = True,
 ) -> AsyncIterator[dict[str, Any]]:
     """Generate an n8n workflow JSON from a natural language prompt.
@@ -367,6 +368,7 @@ async def generate_workflow_via_llm(
     Args:
         prompt: Natural language description of the desired workflow.
         model: Optional cloud model override (e.g. 'deepseek-chat', 'gpt-4o').
+        provider: Optional cloud provider override (e.g. 'nvidia', 'zhipu'). Use 'local' for local model.
         use_cloud: Try cloud engine first if available.
 
     Yields SSE-compatible dicts with event types:
@@ -377,7 +379,6 @@ async def generate_workflow_via_llm(
 
     Uses TurboQuant-X's own chat completions endpoint internally.
     """
-    from src.server.app import get_engine, get_or_create_cloud_engine
 
     yield {"event": "thinking", "message": "Analyzing your automation request..."}
 
@@ -426,62 +427,80 @@ async def generate_workflow_via_llm(
         {"role": "user", "content": prompt},
     ]
 
-    model_label = model or "default"
+    model_label = model or provider or "default"
     yield {"event": "building", "message": f"Generating n8n workflow design (model: {model_label})..."}
 
     try:
         import asyncio
+        from src.server.workspace_routes import _create_engine_for_provider
 
-        # Try cloud engine first (active or temporary), fall back to local
-        cloud_engine, is_temp_engine = get_or_create_cloud_engine()
-        local_engine = None
+        engine_to_use, dispose_after = _create_engine_for_provider(provider, model)
+
+        if engine_to_use is None:
+            yield {"event": "error", "message": "No inference engine available. Configure a cloud provider or start with a local model."}
+            return
+
+        # Detect context window to avoid exceeding it
+        ctx_size = 0
         try:
-            local_engine = get_engine()
-        except RuntimeError:
+            if hasattr(engine_to_use, '_config') and hasattr(engine_to_use._config, 'provider'):
+                # Cloud engine — assume large context
+                ctx_size = 128_000
+            elif hasattr(engine_to_use, 'model_config'):
+                ctx_size = getattr(engine_to_use.model_config, 'n_ctx', 0)
+            if not ctx_size or ctx_size < 0:
+                ctx_size = 8192  # conservative default
+        except Exception:
+            ctx_size = 8192
+
+        # Rough token estimate: ~4 chars per token
+        est_tokens = len(system_content) // 4 + len(prompt) // 4 + 4096  # +4096 for response
+        if est_tokens > ctx_size * 0.85:
+            # Trim: drop templates first, then truncate node list
+            yield {"event": "thinking", "message": "Optimizing prompt for model context window..."}
+            system_content = SYSTEM_PROMPT
+            if node_list_str:
+                # Only include first portion of node list
+                max_node_chars = max(2000, (ctx_size * 4) - len(SYSTEM_PROMPT) - len(prompt) - 16000)
+                if len(node_list_str) > max_node_chars:
+                    node_list_str = node_list_str[:int(max_node_chars)] + "\n... (truncated)"
+                system_content += f"\n\n## {node_list_str}"
+            # Skip template context when space is limited
+            messages = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt},
+            ]
+
+        # Ensure sufficient timeout for workflow generation
+        try:
+            from dataclasses import replace as dc_replace
+            if hasattr(engine_to_use, '_config'):
+                original_timeout = engine_to_use._config.timeout
+                engine_to_use._config = dc_replace(engine_to_use._config, timeout=max(original_timeout, 300.0))
+        except Exception:
             pass
 
         response_text = ""
-
-        if cloud_engine and cloud_engine.is_loaded:
-            # If a model override is requested, create a dedicated temporary engine
-            engine_to_use = cloud_engine
-            dispose_after = is_temp_engine
-            if model and model != cloud_engine.model_name:
-                try:
-                    from dataclasses import replace as dc_replace
-                    from src.engine.cloud_engine import CloudEngine
-                    override_cfg = dc_replace(cloud_engine._config, model=model)
-                    engine_to_use = CloudEngine(override_cfg)
-                    engine_to_use.load_model()
-                    dispose_after = True
-                except Exception:
-                    logger.debug("Model override to %s failed, using default", model)
-
-            try:
-                msg, _stats = await asyncio.to_thread(
-                    engine_to_use.chat, messages, max_tokens=4096, temperature=0.3
-                )
-                response_text = msg.get("content", "")
-            finally:
-                if dispose_after:
-                    try:
-                        engine_to_use.unload()
-                    except Exception:
-                        pass
-        elif local_engine and local_engine.is_loaded:
+        try:
             result = await asyncio.to_thread(
-                local_engine.chat, messages, max_tokens=4096, temperature=0.3
+                engine_to_use.chat, messages, max_tokens=4096, temperature=0.3
             )
             if isinstance(result, tuple):
                 msg, _stats = result
                 response_text = msg.get("content", "") if isinstance(msg, dict) else str(msg)
             elif isinstance(result, dict):
-                response_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                content = result.get("content", "")
+                if not content:
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                response_text = content
             else:
                 response_text = str(result)
-        else:
-            yield {"event": "error", "message": "No inference engine available. Start in cloud or local mode first."}
-            return
+        finally:
+            if dispose_after:
+                try:
+                    engine_to_use.unload()
+                except Exception:
+                    pass
 
         if not response_text:
             yield {"event": "error", "message": "LLM returned empty response"}

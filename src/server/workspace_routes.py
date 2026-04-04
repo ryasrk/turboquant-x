@@ -142,6 +142,7 @@ class WorkspacePatch(BaseModel):
 class DesignRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10_000)
     model: str | None = Field(None, description="Cloud model override, e.g. 'glm-4.5-flash', 'deepseek-chat'")
+    provider: str | None = Field(None, description="Cloud provider override, e.g. 'nvidia', 'zhipu', 'openai'. Use 'local' for local model.")
 
 
 class WorkspaceChatRequest(BaseModel):
@@ -149,11 +150,105 @@ class WorkspaceChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10_000)
     history: list[dict] = Field(default_factory=list, description="Previous messages [{role, content}]")
     model: str | None = Field(None, description="Cloud model override")
+    provider: str | None = Field(None, description="Cloud provider override, or 'local' for local model.")
 
 
 class WorkflowJsonUpdate(BaseModel):
     """Update the raw workflow JSON stored in the latest design."""
     workflow_json: dict = Field(..., description="Complete workflow JSON object")
+
+
+# ── Engine creation helper ───────────────────────────────────────────
+
+def _create_engine_for_provider(
+    provider: str | None,
+    model: str | None,
+) -> tuple[Any, bool]:
+    """Get or create an engine for the given provider/model.
+
+    Returns (engine, needs_dispose) where engine is a CloudEngine or local
+    InferenceEngine.  Returns (None, False) if unavailable.
+    """
+    from src.server.app import get_engine, get_or_create_cloud_engine
+
+    # "local" → use the local inference engine
+    if provider == "local":
+        try:
+            local = get_engine()
+            if local.is_loaded:
+                return local, False
+        except RuntimeError:
+            pass
+        return None, False
+
+    # No provider specified → use default cloud (same as before)
+    if not provider:
+        cloud, is_temp = get_or_create_cloud_engine()
+        if cloud and cloud.is_loaded:
+            # Model override within the same provider
+            if model and model != cloud.model_name:
+                try:
+                    from dataclasses import replace as dc_replace
+                    from src.engine.cloud_engine import CloudEngine
+                    cfg = dc_replace(cloud._config, model=model, timeout=300.0)
+                    e = CloudEngine(cfg)
+                    e.load_model()
+                    return e, True
+                except Exception:
+                    pass
+            return cloud, is_temp
+        # Fallback to local
+        try:
+            local = get_engine()
+            if local.is_loaded:
+                return local, False
+        except RuntimeError:
+            pass
+        return None, False
+
+    # Specific cloud provider requested → build a temporary engine
+    import os
+    from src.engine.cloud.provider import CloudConfig
+    from src.engine.cloud.registry import build_cloud_configs
+    from src.engine.cloud_engine import CloudEngine
+
+    # Try to get config from cached YAML
+    from src.server.app import _cloud_yaml_config_raw
+    existing_cloud, _ = get_or_create_cloud_engine()
+
+    cloud_section = _cloud_yaml_config_raw or {}
+
+    configs = build_cloud_configs({"cloud": cloud_section}) if cloud_section else {}
+
+    cfg: CloudConfig | None = configs.get(provider)
+    if cfg is None:
+        # Try env var
+        env_key = f"TURBOQUANT_CLOUD_{provider.upper()}_API_KEY"
+        api_key = os.environ.get(env_key, "")
+        if not api_key:
+            return None, False
+        from src.engine.cloud.openai_compat import _DEFAULT_BASE_URLS, _DEFAULT_MODELS
+        cfg = CloudConfig(
+            provider=provider,
+            api_key=api_key,
+            model=model or _DEFAULT_MODELS.get(provider, ""),
+            timeout=300.0,
+        )
+    else:
+        if model:
+            from dataclasses import replace as dc_replace
+            cfg = dc_replace(cfg, model=model, timeout=300.0)
+        else:
+            from dataclasses import replace as dc_replace
+            cfg = dc_replace(cfg, timeout=300.0)
+
+    try:
+        engine = CloudEngine(cfg)
+        engine.load_model()
+        return engine, True
+    except Exception as exc:
+        logger.warning("Failed to create engine for provider %s: %s", provider, exc)
+        return None, False
 
 
 # ── Design lifecycle states ──────────────────────────────────────────
@@ -366,6 +461,71 @@ def _get_user_workspace(workspace_id: str, user: dict) -> dict:
 
 # ── Routes ───────────────────────────────────────────────────────────
 
+@router.get("/models")
+async def list_workspace_models_endpoint():
+    """List all available models for workspace design & chat.
+
+    Returns local model (if loaded) plus all configured cloud providers
+    with their models.
+    """
+    import os
+    from src.server.app import (
+        get_engine, get_cloud_engine, get_inference_mode,
+        _cloud_yaml_config_raw, InferenceMode,
+    )
+    from src.engine.cloud.registry import SUPPORTED_PROVIDERS, build_cloud_configs
+
+    groups: list[dict] = []
+
+    # 1. Local model
+    try:
+        local = get_engine()
+        if local.is_loaded:
+            mode = get_inference_mode()
+            model_name = local.model_config.model_name
+            groups.append({
+                "provider": "local",
+                "display_name": f"Local ({mode.value})",
+                "models": [{"id": "local", "name": model_name, "label": model_name}],
+            })
+    except RuntimeError:
+        pass
+
+    # 2. Cloud providers from config
+    cloud_section = _cloud_yaml_config_raw or {}
+    configs = build_cloud_configs({"cloud": cloud_section}) if cloud_section else {}
+
+    # Also check env vars for providers not in YAML
+    for name, display in SUPPORTED_PROVIDERS.items():
+        env_key = f"TURBOQUANT_CLOUD_{name.upper()}_API_KEY"
+        has_key = name in configs or bool(os.environ.get(env_key, ""))
+        if not has_key:
+            continue
+
+        # Get configured model from YAML
+        provider_cfg = cloud_section.get("providers", {}).get(name, {})
+        default_model = provider_cfg.get("model", "")
+
+        active_cloud = get_cloud_engine()
+        is_active = active_cloud and active_cloud.provider_name == name
+
+        models_list = []
+        if default_model:
+            models_list.append({
+                "id": default_model,
+                "name": default_model,
+                "label": f"{default_model}{' (active)' if is_active else ''}",
+            })
+
+        groups.append({
+            "provider": name,
+            "display_name": f"{display}{' ✓' if is_active else ''}",
+            "models": models_list,
+        })
+
+    return {"groups": groups}
+
+
 @router.get("")
 async def list_user_workspaces(user: dict = Depends(get_current_user)):
     """List all workspaces for the authenticated user."""
@@ -408,16 +568,16 @@ async def start_design(workspace_id: str, body: DesignRequest, user: dict = Depe
     """
     ws = _get_user_workspace(workspace_id, user)
 
-    if ws["status"] not in ("draft", "designed", "rejected", "approved", "failed"):
+    if ws["status"] not in ("draft", "designed", "rejected", "approved", "failed", "designing"):
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot start design from state '{ws['status']}'. Must be draft, designed, rejected, approved, or failed.",
+            detail=f"Cannot start design from state '{ws['status']}'. Must be draft, designed, rejected, approved, failed, or designing.",
         )
 
-    return EventSourceResponse(_design_event_stream(workspace_id, user, body.prompt, body.model))
+    return EventSourceResponse(_design_event_stream(workspace_id, user, body.prompt, body.model, body.provider))
 
 
-async def _design_event_stream(workspace_id: str, user: dict, prompt: str, model: str | None = None):
+async def _design_event_stream(workspace_id: str, user: dict, prompt: str, model: str | None = None, provider: str | None = None):
     """Async generator that drives the AI design lifecycle via LLM.
 
     The LLM generates a complete n8n workflow JSON. If n8n is reachable,
@@ -433,7 +593,7 @@ async def _design_event_stream(workspace_id: str, user: dict, prompt: str, model
 
         # 2. Stream LLM generation events
         workflow_json: dict | None = None
-        async for event in generate_workflow_via_llm(prompt, model=model):
+        async for event in generate_workflow_via_llm(prompt, model=model, provider=provider):
             event_type = event.get("event", "message")
 
             if event_type == "workflow_json":
@@ -1130,10 +1290,10 @@ async def workspace_agent_chat(
             messages.append({"role": role, "content": m.get("content", "")})
     messages.append({"role": "user", "content": body.message})
 
-    return EventSourceResponse(_workspace_chat_stream(messages, body.model))
+    return EventSourceResponse(_workspace_chat_stream(messages, body.model, body.provider))
 
 
-async def _workspace_chat_stream(messages: list[dict], model: str | None = None):
+async def _workspace_chat_stream(messages: list[dict], model: str | None = None, provider: str | None = None):
     """SSE generator for workspace agent chat using only n8n tools.
 
     If the server is running in local mode (STANDARD/TURBOQUANT/etc.),
@@ -1141,7 +1301,7 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None)
     config — so workspace chat works regardless of inference mode.
     """
     from src.agent.cloud_loop import CloudAgentLoop
-    from src.server.app import get_agent_registry, get_or_create_cloud_engine
+    from src.server.app import get_agent_registry
 
     registry = get_agent_registry()
     if registry is None:
@@ -1157,34 +1317,33 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None)
         yield {"data": "[DONE]"}
         return
 
-    cloud_engine, is_temporary = get_or_create_cloud_engine()
+    # For chat (agent with tools), we need a cloud engine that supports tool calling.
+    # Local engine doesn't support the tools/tool_choice kwargs.
+    # If provider is explicitly "local", warn the user.
+    if provider == "local":
+        yield {"data": json.dumps({
+            "type": "error",
+            "message": "Local model does not support agent tool calling. Select a cloud provider for workspace chat.",
+        })}
+        yield {"data": "[DONE]"}
+        return
+
+    cloud_engine, is_temporary = _create_engine_for_provider(provider, model)
     if cloud_engine is None:
         yield {"data": json.dumps({
             "type": "error",
             "message": (
-                "No cloud engine available. "
+                "No inference engine available. "
                 "Configure a cloud provider in config/cloud.yaml or set "
-                "TURBOQUANT_CLOUD_<PROVIDER>_API_KEY environment variable."
+                "TURBOQUANT_CLOUD_<PROVIDER>_API_KEY environment variable, "
+                "or start the server with a local model."
             ),
         })}
         yield {"data": "[DONE]"}
         return
 
-    # If a model override was requested, create a dedicated temporary engine
-    # with that model (avoids mutating the shared global engine).
     engine_to_use = cloud_engine
     dispose_engine = is_temporary
-    if model and model != cloud_engine.model_name:
-        try:
-            from dataclasses import replace as dc_replace
-            from src.engine.cloud_engine import CloudEngine
-            override_cfg = dc_replace(cloud_engine._config, model=model)
-            engine_to_use = CloudEngine(override_cfg)
-            engine_to_use.load_model()
-            dispose_engine = True
-        except Exception:
-            logger.debug("Model override to %s failed, using default", model)
-            # Fall back to the original engine
 
     try:
         loop = CloudAgentLoop(n8n_registry)
@@ -1194,7 +1353,6 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None)
 
         yield {"data": "[DONE]"}
     finally:
-        # Clean up temporary engine (whether from model override or fallback creation)
         if dispose_engine:
             try:
                 engine_to_use.unload()
