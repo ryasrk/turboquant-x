@@ -1179,74 +1179,100 @@ async def list_available_nodes(
 
 # ── Workspace Agent Chat ─────────────────────────────────────────────
 
-def _load_agent_skills() -> str:
-    """Load agent skill files from data/skills/ and return as a combined string."""
+# Keyword → skill filename mapping for context-aware skill injection
+_SKILL_KEYWORD_MAP: dict[str, list[str]] = {
+    "build": ["build-workflow-from-template"],
+    "create": ["build-workflow-from-template"],
+    "template": ["build-workflow-from-template"],
+    "deploy": ["build-workflow-from-template"],
+    "error": ["diagnose-fix-workflow"],
+    "fail": ["diagnose-fix-workflow"],
+    "fix": ["diagnose-fix-workflow"],
+    "diagnose": ["diagnose-fix-workflow"],
+    "debug": ["diagnose-fix-workflow"],
+    "broken": ["diagnose-fix-workflow"],
+    "install": ["install-discover-nodes"],
+    "node": ["install-discover-nodes"],
+    "community": ["install-discover-nodes"],
+    "package": ["install-discover-nodes"],
+    "credential": ["manage-credentials"],
+    "api key": ["manage-credentials"],
+    "token": ["manage-credentials"],
+    "secret": ["manage-credentials"],
+    "auth": ["manage-credentials"],
+    "activate": ["manage-workflows"],
+    "deactivate": ["manage-workflows"],
+    "delete": ["manage-workflows"],
+    "list workflow": ["manage-workflows"],
+    "optimize": ["optimize-workflow"],
+    "improve": ["optimize-workflow"],
+    "review": ["optimize-workflow"],
+    "slow": ["optimize-workflow"],
+}
+
+
+def _load_agent_skills_map() -> dict[str, str]:
+    """Load agent skill files into a dict keyed by stem name."""
     skills_dir = Path(__file__).resolve().parents[2] / "data" / "skills"
     if not skills_dir.is_dir():
-        return ""
-    parts = []
+        return {}
+    result = {}
     for md_file in sorted(skills_dir.glob("*.md")):
         try:
-            content = md_file.read_text(encoding="utf-8")
-            parts.append(content.strip())
+            result[md_file.stem] = md_file.read_text(encoding="utf-8").strip()
         except OSError:
             continue
-    if not parts:
+    return result
+
+
+_AGENT_SKILLS_MAP_CACHE: dict[str, str] | None = None
+
+
+def _get_agent_skills_map() -> dict[str, str]:
+    global _AGENT_SKILLS_MAP_CACHE
+    if _AGENT_SKILLS_MAP_CACHE is None:
+        _AGENT_SKILLS_MAP_CACHE = _load_agent_skills_map()
+    return _AGENT_SKILLS_MAP_CACHE
+
+
+def _select_relevant_skills(user_message: str, max_skills: int = 2) -> str:
+    """Select only the skills relevant to the user's message."""
+    skills_map = _get_agent_skills_map()
+    if not skills_map:
         return ""
+
+    msg_lower = user_message.lower()
+    matched: set[str] = set()
+
+    for keyword, skill_names in _SKILL_KEYWORD_MAP.items():
+        if keyword in msg_lower:
+            matched.update(skill_names)
+
+    # If nothing matched, skip skills entirely (system prompt covers basics)
+    if not matched:
+        return ""
+
+    # Cap to max_skills to avoid context overflow
+    selected = list(matched)[:max_skills]
+    parts = [skills_map[s] for s in selected if s in skills_map]
     return "\n\n---\n\n".join(parts)
 
 
-_AGENT_SKILLS_CACHE: str | None = None
-
-
-def _get_agent_skills() -> str:
-    global _AGENT_SKILLS_CACHE
-    if _AGENT_SKILLS_CACHE is None:
-        _AGENT_SKILLS_CACHE = _load_agent_skills()
-    return _AGENT_SKILLS_CACHE
-
-
 _N8N_SYSTEM_PROMPT = (
-    "You are a proactive workspace assistant specialised in n8n workflow automation. "
-    "You have tools to inspect, diagnose, update, and manage n8n workflows, "
-    "executions, credentials, and community nodes.\n\n"
-    "You also have access to a library of ~290 community templates and the official "
-    "n8n.io template gallery. When the user asks to build or improve a workflow:\n"
-    "1. Search local templates first (n8n_search_templates) for a close match.\n"
-    "2. If no good local match, search official templates (n8n_search_official).\n"
-    "3. Get the full JSON (n8n_get_template_detail or n8n_fetch_official_template).\n"
-    "4. Deploy directly: pass the JSON output as workflow_json to n8n_create_workflow.\n"
-    "   - The template tools output raw JSON that pipes directly into create/update tools.\n"
-    "   - Override the name with the name parameter if needed.\n"
-    "5. Install any missing node types with n8n_install_node.\n\n"
-    "TOOL CHAINING:\n"
-    "- Template → Deploy: n8n_get_template_detail → n8n_create_workflow(workflow_json=output)\n"
-    "- Get → Update: n8n_get_workflow → modify → n8n_update_workflow(workflow_json=modified)\n"
-    "- Both n8n_create_workflow and n8n_update_workflow accept workflow_json (full JSON string) "
-    "or individual name/nodes/connections params.\n\n"
-    "CREDENTIAL SETUP (CRITICAL — do this BEFORE activation):\n"
-    "When deploying or activating a workflow:\n"
-    "1. Inspect the workflow nodes for credential references (look at 'credentials' field)\n"
-    "2. Call n8n_list_credentials to check what's already configured\n"
-    "3. For EACH missing credential:\n"
-    "   a. Tell the user which service needs a credential (e.g. 'Telegram Bot Token')\n"
-    "   b. Ask for the secret value (API key, token, etc.)\n"
-    "   c. Call n8n_create_credential with the correct type, name, and data\n"
-    "4. After creating credentials, update the workflow nodes to link the credential IDs\n"
-    "5. ONLY THEN attempt to activate the workflow\n"
-    "Common credential types: telegramApi (accessToken), openAiApi (apiKey), "
-    "slackApi (accessToken), httpHeaderAuth (name, value), githubApi (accessToken)\n\n"
-    "CRITICAL RULES:\n"
-    "1. ALWAYS use your tools FIRST before asking the user for information. "
-    "If you have a workflow ID, call n8n_workflow_status immediately.\n"
-    "2. When asked about errors, call n8n_list_executions (filter status='error') "
-    "then n8n_diagnose_error on the failed execution. DO NOT ask for execution IDs.\n"
-    "3. When the user says 'fix', 'help', or 'error' — start by gathering data with tools.\n"
-    "4. NEVER respond with 'I need more information' if you have tools that can look it up.\n"
-    "5. After tool results, synthesize a clear diagnosis and actionable fix.\n"
-    "6. When building workflows, always search for existing templates first before designing from scratch.\n"
-    "7. ALWAYS check credentials before trying to activate a workflow.\n\n"
-    "Keep answers concise and actionable. Show what you found, what went wrong, and how to fix it."
+    "You are a proactive n8n workspace assistant with tools for workflows, "
+    "executions, credentials, nodes, and templates.\n\n"
+    "WORKFLOW: search templates first (n8n_search_templates → n8n_search_official), "
+    "get JSON (n8n_get_template_detail/n8n_fetch_official_template), "
+    "deploy via n8n_create_workflow(workflow_json=output).\n\n"
+    "CREDENTIALS: Before activation — inspect nodes for credential refs, "
+    "n8n_list_credentials to check existing, create missing ones, "
+    "link IDs to nodes via n8n_update_workflow, THEN activate.\n"
+    "Types: telegramApi(accessToken), openAiApi(apiKey), slackApi(accessToken), "
+    "httpHeaderAuth(name,value), githubApi(accessToken).\n\n"
+    "RULES: 1) Use tools FIRST — never ask for info tools can look up. "
+    "2) Errors → n8n_list_executions(status='error') → n8n_diagnose_error. "
+    "3) Check credentials before activating. "
+    "4) Be concise — show findings, diagnosis, and fix."
 )
 
 
@@ -1271,22 +1297,28 @@ async def workspace_agent_chat(
     context_note += f"\n- Status: {ws['status']}"
     if wf_id:
         context_note += f"\n- n8n Workflow ID: {wf_id}"
-        context_note += "\n\nYou HAVE the workflow ID. Use n8n_workflow_status and n8n_list_executions immediately — do NOT ask the user for it."
+        context_note += "\nYou HAVE the workflow ID — use tools directly, do NOT ask the user for it."
     else:
         context_note += "\n- No n8n workflow linked yet."
 
     system_msg = _N8N_SYSTEM_PROMPT + context_note
 
-    # Inject agent skills
-    skills_text = _get_agent_skills()
+    # Inject ONLY relevant skills based on user message (saves context)
+    skills_text = _select_relevant_skills(body.message)
     if skills_text:
-        system_msg += "\n\n## Your Skills Reference\n\n" + skills_text
+        system_msg += "\n\n## Relevant Skills\n\n" + skills_text
 
-    # Build message history
+    # Dynamic history cap — fewer messages = more room for tool results
+    history_cap = 10
     messages: list[dict] = [{"role": "system", "content": system_msg}]
-    for m in body.history[-20:]:  # cap history
+    for m in body.history[-history_cap:]:
         role = m.get("role", "user")
         if role in ("user", "assistant"):
+            # Trim long assistant messages in history to save context
+            content = m.get("content", "")
+            if role == "assistant" and len(content) > 500:
+                content = content[:500] + "..."
+            messages.append({"role": role, "content": content})
             messages.append({"role": role, "content": m.get("content", "")})
     messages.append({"role": "user", "content": body.message})
 
@@ -1346,7 +1378,8 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None,
     dispose_engine = is_temporary
 
     try:
-        loop = CloudAgentLoop(n8n_registry)
+        # Use a compact tool result limit to avoid context overflow
+        loop = CloudAgentLoop(n8n_registry, max_tool_result_chars=4000)
 
         async for event in loop.run(engine_to_use, messages, max_tokens=4096):
             yield {"data": json.dumps(event)}

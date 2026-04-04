@@ -7,6 +7,10 @@ from typing import Any
 
 from src.agent.base import Tool
 
+# ── Template JSON cache for context-efficient piping ────────────────
+# Template tools store full JSON here; create_workflow looks it up by ref key.
+_template_json_cache: dict[str, str] = {}
+
 
 class N8nWorkflowStatusTool(Tool):
     """Check the live status of an n8n workflow."""
@@ -47,17 +51,17 @@ class N8nWorkflowStatusTool(Tool):
             data = wf.get("data", wf)
 
             nodes = data.get("nodes", [])
-            node_summary = ", ".join(n.get("name", n.get("type", "?")) for n in nodes[:10])
+            node_types = [n.get("type", "?").split(".")[-1] for n in nodes[:10]]
             if len(nodes) > 10:
-                node_summary += f" ... (+{len(nodes) - 10} more)"
+                node_types.append(f"+{len(nodes) - 10}more")
 
+            # TOON format
             lines = [
-                f"Workflow: {data.get('name', 'Untitled')}",
-                f"ID: {workflow_id}",
-                f"Active: {data.get('active', False)}",
-                f"Nodes ({len(nodes)}): {node_summary}",
-                f"Created: {data.get('createdAt', 'unknown')}",
-                f"Updated: {data.get('updatedAt', 'unknown')}",
+                f"# workflow {workflow_id}",
+                f"name: {data.get('name', 'Untitled')}",
+                f"active: {data.get('active', False)}",
+                f"nodes: {len(nodes)} [{','.join(node_types)}]",
+                f"updated: {data.get('updatedAt', '?')}",
             ]
             return "\n".join(lines)
         except Exception as e:
@@ -116,15 +120,16 @@ class N8nListExecutionsTool(Tool):
             if not execs:
                 return "No executions found."
 
-            lines = [f"Found {len(execs)} execution(s):\n"]
+            # TOON tabular format
+            lines = [f"executions[{len(execs)}]{{id,status,started,stopped,mode}}:"]
             for ex in execs:
                 eid = ex.get("id", "?")
                 finished = ex.get("finished", None)
-                status_str = "✓ success" if finished else "✗ error" if finished is False else "⋯ running"
+                status_str = "success" if finished else "error" if finished is False else "running"
                 started = ex.get("startedAt", "?")
-                stopped = ex.get("stoppedAt", "")
-                mode = ex.get("mode", "")
-                lines.append(f"  [{eid}] {status_str} | started: {started} | stopped: {stopped} | mode: {mode}")
+                stopped = ex.get("stoppedAt", "-")
+                mode = ex.get("mode", "-")
+                lines.append(f"  {eid},{status_str},{started},{stopped},{mode}")
 
             return "\n".join(lines)
         except Exception as e:
@@ -339,15 +344,16 @@ class N8nListCredentialsTool(Tool):
                 creds = creds.get("data", [])
 
             if not creds:
-                return "No credentials configured in n8n. Use n8n_create_credential to add one."
+                return "No credentials configured. Use n8n_create_credential to add one."
 
-            lines = [f"Found {len(creds)} credential(s):\n"]
+            # TOON tabular format
+            lines = [f"credentials[{len(creds)}]{{id,name,type,created}}:"]
             for c in creds:
                 cid = c.get("id", "?")
                 name = c.get("name", "Untitled")
                 ctype = c.get("type", "unknown")
-                created = c.get("createdAt", "")
-                lines.append(f"  [{cid}] {name} (type: {ctype}) created: {created}")
+                created = c.get("createdAt", "-")
+                lines.append(f"  {cid},{name},{ctype},{created}")
 
             return "\n".join(lines)
         except Exception as e:
@@ -818,8 +824,43 @@ class N8nGetWorkflowFullTool(Tool):
             raw = resp.json()
             wf = raw.get("data", raw) if isinstance(raw, dict) else raw
 
-            # Return the full workflow JSON (compact but complete)
-            return json.dumps(wf, indent=2, default=str, ensure_ascii=False)
+            # Return TOON-formatted compact summary for token efficiency
+            nodes = wf.get("nodes", [])
+            lines = [
+                f"# workflow {workflow_id}",
+                f"name: {wf.get('name', 'Untitled')}",
+                f"active: {wf.get('active', False)}",
+            ]
+
+            # Nodes in TOON tabular format
+            lines.append(f"\nnodes[{len(nodes)}]{{name,type,cred_ids,params}}:")
+            for n in nodes:
+                ntype = n.get("type", "?")
+                nname = n.get("name", ntype)
+                creds = n.get("credentials", {})
+                params = n.get("parameters", {})
+                cred_str = ";".join(f"{k}={v.get('id','?')}" for k, v in creds.items() if isinstance(v, dict)) or "-"
+                key_params = {k: v for k, v in params.items() if v and k not in ("options", "additionalFields")}
+                p_str = json.dumps(key_params, default=str, ensure_ascii=False) if key_params else "-"
+                if len(p_str) > 150:
+                    p_str = p_str[:150] + "..."
+                lines.append(f"  {nname},{ntype},{cred_str},{p_str}")
+
+            # Connections in TOON format
+            conn_pairs = []
+            for src_node, targets in wf.get("connections", {}).items():
+                if isinstance(targets, dict):
+                    for _key, target_list in targets.items():
+                        if isinstance(target_list, list):
+                            for group in target_list:
+                                if isinstance(group, list):
+                                    for t in group:
+                                        conn_pairs.append(f"  {src_node},{t.get('node', '?')}")
+            if conn_pairs:
+                lines.append(f"\nconnections[{len(conn_pairs)}]{{src,dest}}:")
+                lines.extend(conn_pairs)
+
+            return "\n".join(lines)
         except Exception as e:
             return f"Error fetching workflow {workflow_id}: {e}"
 
@@ -834,9 +875,10 @@ class N8nCreateWorkflowTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Create a new workflow in n8n. You can either pass a complete workflow_json "
-            "string (from template tools or n8n_get_workflow) OR provide name, nodes, and "
-            "connections separately. workflow_json takes priority if provided."
+            "Create a new workflow in n8n. You can pass:\n"
+            "- workflow_json='template:ID' or 'official:ID' (cached from template tools)\n"
+            "- workflow_json='{...}' (raw JSON string)\n"
+            "- OR name + nodes + connections separately."
         )
 
     @property
@@ -847,9 +889,8 @@ class N8nCreateWorkflowTool(Tool):
                 "workflow_json": {
                     "type": "string",
                     "description": (
-                        "Complete workflow JSON as a string. Can be the raw JSON output "
-                        "from n8n_get_template_detail, n8n_fetch_official_template, or "
-                        "n8n_get_workflow. Name/nodes/connections are extracted automatically."
+                        "Workflow JSON — either a cache reference like 'template:42' or "
+                        "'official:123' (from template tools), or a raw JSON string."
                     ),
                 },
                 "name": {
@@ -896,8 +937,14 @@ class N8nCreateWorkflowTool(Tool):
 
         # Parse workflow_json if provided
         if "workflow_json" in kwargs and kwargs["workflow_json"]:
+            raw_json = kwargs["workflow_json"].strip()
+
+            # Check if it's a template cache reference (e.g. "template:42" or "official:123")
+            if raw_json in _template_json_cache:
+                raw_json = _template_json_cache.pop(raw_json)  # consume from cache
+
             try:
-                wf = self._parse_workflow_json(kwargs["workflow_json"])
+                wf = self._parse_workflow_json(raw_json)
             except (json.JSONDecodeError, ValueError) as e:
                 return f"Failed to parse workflow_json: {e}"
             name = kwargs.get("name") or wf.get("name", "Untitled Workflow")
@@ -1325,13 +1372,13 @@ class N8nGetNodeTypesTool(Tool):
             if not nodes:
                 return f"No node types found{f' matching \"{search}\"' if search else ''}."
 
-            lines = [f"Found {len(nodes)} node type(s){f' matching \"{search}\"' if search else ''}:\n"]
-            for n in nodes[:100]:
-                name = n.get("name", "?")
-                display = n.get("displayName", "")
-                lines.append(f"  {name} — {display}")
-            if len(nodes) > 100:
-                lines.append(f"  ... and {len(nodes) - 100} more")
+            # TOON tabular format
+            show = nodes[:50]
+            lines = [f"node_types[{len(nodes)}]{{name,display}}:"]
+            for n in show:
+                lines.append(f"  {n.get('name', '?')},{n.get('displayName', '')}")
+            if len(nodes) > 50:
+                lines.append(f"  # ...{len(nodes) - 50} more — use search param to filter")
 
             return "\n".join(lines)
         except Exception as e:
@@ -1394,19 +1441,13 @@ class N8nSearchTemplatesTool(Tool):
                 + f".\nAvailable categories: {', '.join(cats)}"
             )
 
-        lines = [f"Found {len(results)} template(s) matching '{query}':\n"]
+        # TOON tabular format
+        lines = [f"templates[{len(results)}]{{id,name,category,nodes,types}}:"]
         for t in results:
-            types_short = ", ".join(
-                nt.split(".")[-1] for nt in t["node_types"][:6]
-            )
-            lines.append(
-                f"  [ID {t['id']}] {t['name']}\n"
-                f"    Category: {t['category']} | Nodes: {t['node_count']} | Types: {types_short}"
-            )
+            types_short = ",".join(nt.split(".")[-1] for nt in t["node_types"][:5])
+            lines.append(f"  {t['id']},{t['name']},{t['category']},{t['node_count']},{types_short}")
 
-        lines.append(
-            "\nUse n8n_get_template_detail with a template ID to get the full workflow JSON."
-        )
+        lines.append("\n# use n8n_get_template_detail(template_id) to deploy")
         return "\n".join(lines)
 
 
@@ -1420,9 +1461,9 @@ class N8nGetTemplateDetailTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Get the full n8n workflow JSON for a template by its numeric ID "
-            "(from n8n_search_templates results). The returned JSON string can be "
-            "passed directly to n8n_create_workflow's workflow_json parameter."
+            "Get an n8n workflow template by its numeric ID. Returns a compact summary "
+            "and caches the full JSON. To deploy, call n8n_create_workflow with "
+            "workflow_json='template:ID' (e.g. workflow_json='template:42')."
         )
 
     @property
@@ -1447,8 +1488,27 @@ class N8nGetTemplateDetailTool(Tool):
             return f"Template with ID {tid} not found."
 
         workflow = strip_credentials(result["workflow"])
-        # Return raw JSON — directly usable as workflow_json in n8n_create_workflow
-        return json.dumps(workflow, indent=2)
+        # Cache full JSON for later use by n8n_create_workflow
+        cache_key = f"template:{tid}"
+        _template_json_cache[cache_key] = json.dumps(workflow)
+
+        # Return compact summary instead of full JSON
+        nodes = workflow.get("nodes", [])
+        name = workflow.get("name", "Untitled")
+        node_types = [n.get("type", "?").split(".")[-1] for n in nodes]
+        creds_needed = set()
+        for n in nodes:
+            for ct in (n.get("credentials") or {}):
+                creds_needed.add(ct)
+
+        lines = [
+            f"Template {tid}: {name}",
+            f"Nodes ({len(nodes)}): {', '.join(node_types[:15])}{'...' if len(nodes) > 15 else ''}",
+        ]
+        if creds_needed:
+            lines.append(f"Credentials needed: {', '.join(creds_needed)}")
+        lines.append(f"\nTo deploy: n8n_create_workflow(workflow_json='{cache_key}')")
+        return "\n".join(lines)
 
 
 class N8nSearchOfficialTemplatesTool(Tool):
@@ -1493,18 +1553,13 @@ class N8nSearchOfficialTemplatesTool(Tool):
         if not results:
             return f"No official templates found for '{query}'."
 
-        lines = [f"Found {len(results)} official template(s) for '{query}':\n"]
+        # TOON tabular format
+        lines = [f"official_templates[{len(results)}]{{id,name,nodes,by}}:"]
         for t in results:
-            nodes_short = ", ".join(t["nodes"][:5])
-            lines.append(
-                f"  [Official ID {t['id']}] {t['name']}\n"
-                f"    {t['description'][:150]}\n"
-                f"    Nodes: {nodes_short} | By: {t['user']}"
-            )
+            nodes_short = ",".join(t["nodes"][:4])
+            lines.append(f"  {t['id']},{t['name']},{nodes_short},{t['user']}")
 
-        lines.append(
-            "\nUse n8n_fetch_official_template with an Official ID to get the full workflow JSON."
-        )
+        lines.append("\n# use n8n_fetch_official_template(template_id) to deploy")
         return "\n".join(lines)
 
 
@@ -1518,9 +1573,9 @@ class N8nFetchOfficialTemplateTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Fetch the complete workflow JSON of an official n8n.io template "
-            "by its numeric ID. The returned JSON string can be passed directly "
-            "to n8n_create_workflow's workflow_json parameter."
+            "Fetch an official n8n.io template by its numeric ID. Returns a compact "
+            "summary and caches the full JSON. To deploy, call n8n_create_workflow "
+            "with workflow_json='official:ID' (e.g. workflow_json='official:123')."
         )
 
     @property
@@ -1545,5 +1600,24 @@ class N8nFetchOfficialTemplateTool(Tool):
             return f"Failed to fetch official template {tid}. It may not exist or the API is unreachable."
 
         workflow = strip_credentials(workflow)
-        # Return raw JSON — directly usable as workflow_json in n8n_create_workflow
-        return json.dumps(workflow, indent=2)
+        # Cache full JSON for later use by n8n_create_workflow
+        cache_key = f"official:{tid}"
+        _template_json_cache[cache_key] = json.dumps(workflow)
+
+        # Return compact summary
+        nodes = workflow.get("nodes", [])
+        name = workflow.get("name", "Untitled")
+        node_types = [n.get("type", "?").split(".")[-1] for n in nodes]
+        creds_needed = set()
+        for n in nodes:
+            for ct in (n.get("credentials") or {}):
+                creds_needed.add(ct)
+
+        lines = [
+            f"Official Template {tid}: {name}",
+            f"Nodes ({len(nodes)}): {', '.join(node_types[:15])}{'...' if len(nodes) > 15 else ''}",
+        ]
+        if creds_needed:
+            lines.append(f"Credentials needed: {', '.join(creds_needed)}")
+        lines.append(f"\nTo deploy: n8n_create_workflow(workflow_json='{cache_key}')")
+        return "\n".join(lines)
