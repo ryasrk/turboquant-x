@@ -285,10 +285,6 @@ async function redeployWorkflow(workspaceId) {
   }
 }
 
-    if (btn) { btn.disabled = false; btn.textContent = '⟳ Redeploy'; }
-  }
-}
-
 // ── Credential setup ───────────────────────────────────────────────────
 
 /** Known credential field schemas */
