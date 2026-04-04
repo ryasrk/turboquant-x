@@ -1319,7 +1319,6 @@ async def workspace_agent_chat(
             if role == "assistant" and len(content) > 500:
                 content = content[:500] + "..."
             messages.append({"role": role, "content": content})
-            messages.append({"role": role, "content": m.get("content", "")})
     messages.append({"role": "user", "content": body.message})
 
     return EventSourceResponse(_workspace_chat_stream(messages, body.model, body.provider))
@@ -1350,14 +1349,30 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None,
         return
 
     # For chat (agent with tools), we need a cloud engine that supports tool calling.
-    # Local engine doesn't support the tools/tool_choice kwargs.
-    # If provider is explicitly "local", warn the user.
+    # Local engine uses text-based <tool_call> parsing via AgentLoop.
     if provider == "local":
-        yield {"data": json.dumps({
-            "type": "error",
-            "message": "Local model does not support agent tool calling. Select a cloud provider for workspace chat.",
-        })}
-        yield {"data": "[DONE]"}
+        from src.agent.loop import AgentLoop
+        from src.server.app import get_engine
+
+        try:
+            local_engine = get_engine()
+        except RuntimeError:
+            yield {"data": json.dumps({
+                "type": "error",
+                "message": "No local model loaded. Load a model first or select a cloud provider.",
+            })}
+            yield {"data": "[DONE]"}
+            return
+
+        try:
+            loop = AgentLoop(n8n_registry, max_tool_result_chars=4000)
+            async for event in loop.run(local_engine, messages, max_tokens=2048):
+                yield {"data": json.dumps(event)}
+            yield {"data": "[DONE]"}
+        except Exception as exc:
+            logger.exception("Local agent chat error")
+            yield {"data": json.dumps({"type": "error", "message": str(exc)})}
+            yield {"data": "[DONE]"}
         return
 
     cloud_engine, is_temporary = _create_engine_for_provider(provider, model)

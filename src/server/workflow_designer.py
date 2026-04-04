@@ -187,77 +187,139 @@ _EXAMPLE_CHAT_AI_AGENT = {
     "pinData": {},
 }
 
+# Example 4: Cron/Schedule → Telegram reminder (common use case)
+_EXAMPLE_CRON_TELEGRAM_REMINDER = {
+    "name": "Daily Telegram Reminder",
+    "nodes": [
+        {
+            "parameters": {},
+            "id": str(uuid.uuid4()),
+            "name": "Every day at 7pm",
+            "type": "n8n-nodes-base.cron",
+            "typeVersion": 1,
+            "position": [250, 300],
+        },
+        {
+            "parameters": {
+                "chatId": "1086032366",
+                "text": "Reminder: Drink coffee ☕",
+                "additionalFields": {},
+            },
+            "id": str(uuid.uuid4()),
+            "name": "Telegram",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1.2,
+            "position": [500, 300],
+            "credentials": {
+                "telegramApi": {"id": "1", "name": "Telegram Bot Token"},
+            },
+        },
+    ],
+    "connections": {
+        "Every day at 7pm": {
+            "main": [[{"node": "Telegram", "type": "main", "index": 0}]],
+        },
+    },
+    "pinData": {},
+}
+
 # ── System prompt ────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are an expert n8n workflow designer. Given a user's natural language description, you generate a complete, valid n8n workflow JSON object.
+# Generate TOON examples from the JSON examples
+def _build_system_prompt() -> str:
+    from src.server.workflow_toon import workflow_to_toon
 
-## n8n Workflow JSON Format
+    toon_examples = {
+        "Webhook → Slack": (
+            "When I receive a webhook, send the message to Slack #general",
+            workflow_to_toon(_EXAMPLE_WEBHOOK_TO_SLACK),
+        ),
+        "Scheduled API + email": (
+            "Every hour, check an API status endpoint and email me if it's not OK",
+            workflow_to_toon(_EXAMPLE_SCHEDULE_HTTP_EMAIL),
+        ),
+        "AI Chat Agent": (
+            "Create a chat agent with OpenAI and conversation memory",
+            workflow_to_toon(_EXAMPLE_CHAT_AI_AGENT),
+        ),
+        "Telegram reminder": (
+            "Create a bot telegram to reminder me everyday at 7pm to drink coffee",
+            workflow_to_toon(_EXAMPLE_CRON_TELEGRAM_REMINDER),
+        ),
+    }
 
-A workflow JSON has these top-level keys:
-- "name": (string) Human-readable workflow name
-- "nodes": (array) List of node objects
-- "connections": (object) Maps source node names to their output connections
-- "pinData": (object) Usually empty {}
+    prompt = """You are an expert n8n workflow designer. Generate workflows in compact TOON format (not JSON).
 
-### Node object structure:
-```json
-{
-  "parameters": { ... },
-  "id": "uuid-v4",
-  "name": "Unique Node Name",
-  "type": "n8n-nodes-base.nodetype",
-  "typeVersion": 1,
-  "position": [x, y],
-  "credentials": { "credName": { "id": "1", "name": "Credential Name" } }
-}
+## TOON Workflow Format
+
+```
+name: Workflow Name
+
+nodes[COUNT]{name,type,ver}:
+  Node Name,n8n-nodes-base.nodeType,1.2
+  Other Node,n8n-nodes-base.otherType,2
+
+params:
+  Node Name:
+    paramKey: paramValue
+    complexParam: {"key":"value"}
+
+creds:
+  Node Name:
+    credType: 1
+
+connections[COUNT]{src,dest}:
+  Source Node,Target Node
+  AI Model,Agent Node:ai_languageModel
 ```
 
-### Connection object structure:
-```json
-{
-  "Source Node Name": {
-    "main": [
-      [{ "node": "Target Node Name", "type": "main", "index": 0 }]
-    ]
-  }
-}
-```
-- "main" outputs are arrays of arrays (one per output port)
-- AI sub-nodes use connection types: "ai_languageModel", "ai_memory", "ai_tool", "ai_outputParser"
+## TOON Rules:
+- nodes section: comma-separated rows (name,type,version)
+- params section: indented key:value under node name
+- creds section: credentialType: realCredentialID under node name (use IDs from "Your n8n Credentials" list)
+- connections: src,dest for main type; src,dest:connectionType for AI sub-nodes
+- Use n8n expressions: {{ $json.fieldName }}
 
-### Common node types:
-- Triggers: n8n-nodes-base.webhook, n8n-nodes-base.scheduleTrigger, n8n-nodes-base.manualWorkflowTrigger, @n8n/n8n-nodes-langchain.chatTrigger
-- Logic: n8n-nodes-base.if, n8n-nodes-base.switch, n8n-nodes-base.merge, n8n-nodes-base.splitInBatches
-- Data: n8n-nodes-base.httpRequest, n8n-nodes-base.set, n8n-nodes-base.code, n8n-nodes-base.filter
-- Services: n8n-nodes-base.slack, n8n-nodes-base.gmail, n8n-nodes-base.postgres, n8n-nodes-base.googleSheets
-- AI: @n8n/n8n-nodes-langchain.agent, @n8n/n8n-nodes-langchain.lmChatOpenAi, @n8n/n8n-nodes-langchain.memoryBufferWindow
+## Common Node Types & Required Params
 
-IMPORTANT: Only use node types that are ACTUALLY INSTALLED. If provided, consult the "Available Nodes" section below.
+TRIGGERS: n8n-nodes-base.cron (daily/weekly), scheduleTrigger (interval: rule.interval), webhook (httpMethod,path), manualWorkflowTrigger, @n8n/n8n-nodes-langchain.chatTrigger
 
-### Rules:
-1. Every workflow MUST have exactly one trigger node as the first node
-2. Each node MUST have a unique "name" and a valid UUID "id"
-3. Credentials objects should use placeholder IDs ("1", "2", etc.) — the user will configure real credentials later
-4. Position nodes left-to-right with ~250px horizontal spacing
-5. Use n8n expression syntax: {{ $json.fieldName }} for referencing data
-6. Return ONLY the JSON object — no markdown, no explanation
-7. NEVER use node types that are not in the available list
+MESSAGING:
+- telegram: chatId (REQUIRED), text (REQUIRED). Creds: telegramApi
+- slack: resource,channel,text. Creds: slackApi
+- sendEmail: fromEmail,toEmail,subject,text. Creds: smtp
+
+LOGIC: if (conditions), switch, merge, code (jsCode)
+DATA: httpRequest (url,method), set (assignments), filter
+AI: agent (promptType,text,options.systemMessage), lmChatOpenAi (creds:openAiApi), memoryBufferWindow
+
+## RULES:
+1. Every workflow MUST have one trigger node
+2. Use REAL credential IDs from the "Your n8n Credentials" list. If no credentials are available, use descriptive placeholder like "TELEGRAM_BOT_CRED"
+3. ALWAYS fill required params (chatId, text, url, etc.)
+4. Return ONLY TOON — no markdown fences, no explanation
+5. CREDENTIALS ARE CRITICAL — every node that talks to external services (Telegram, Slack, Gmail, HTTP with auth, OpenAI, etc.) MUST have a creds entry. Never omit credentials.
+6. Match credential types exactly: telegramApi for Telegram, slackApi for Slack, openAiApi for OpenAI, httpHeaderAuth for authenticated HTTP
 
 ## Examples
+"""
 
-### Example 1: Webhook → Slack notification
-User: "When I receive a webhook, send the message to Slack #general channel"
-""" + json.dumps(_EXAMPLE_WEBHOOK_TO_SLACK, indent=2) + """
+    for title, (user_msg, toon_text) in toon_examples.items():
+        prompt += f"\n### {title}\nUser: \"{user_msg}\"\n{toon_text}\n"
 
-### Example 2: Scheduled API check with email alert
-User: "Every hour, check an API status endpoint and email me if it's not OK"
-""" + json.dumps(_EXAMPLE_SCHEDULE_HTTP_EMAIL, indent=2) + """
+    prompt += "\nNow generate a TOON workflow for the user's request. Return ONLY TOON."
+    return prompt
 
-### Example 3: AI Chat Agent with memory
-User: "Create a chat agent with OpenAI and conversation memory"
-""" + json.dumps(_EXAMPLE_CHAT_AI_AGENT, indent=2) + """
 
-Now generate a workflow for the user's request. Return ONLY valid JSON."""
+# Lazy-initialize to avoid import cycle
+_SYSTEM_PROMPT_CACHE: str | None = None
+
+
+def _get_system_prompt() -> str:
+    global _SYSTEM_PROMPT_CACHE
+    if _SYSTEM_PROMPT_CACHE is None:
+        _SYSTEM_PROMPT_CACHE = _build_system_prompt()
+    return _SYSTEM_PROMPT_CACHE
 
 
 # ── Workflow validation ──────────────────────────────────────────────
@@ -462,20 +524,41 @@ async def generate_workflow_via_llm(
 
     filtered_nodes = [n for n in all_nodes if is_relevant(n.get("name", ""))]
 
-    # Build compact node list string
+    # Build compact TOON-style node list with type info
     if filtered_nodes:
         node_names = sorted(set(n.get("name", "") for n in filtered_nodes))
-        node_list_str = "Available n8n node types (relevant to your request, use ONLY these):\n"
-        node_list_str += "\n".join(f"  - {n}" for n in node_names[:50])
+        node_list_str = "Available n8n nodes (ONLY use these):\n"
+        node_list_str += "nodes[{}]{{type}}:\n".format(len(node_names[:50]))
+        node_list_str += "\n".join(f"  {n}" for n in node_names[:50])
         if len(node_names) > 50:
-            node_list_str += f"\n  ... and {len(node_names) - 50} more"
+            node_list_str += f"\n  # +{len(node_names) - 50} more"
     elif all_nodes:
-        # Fallback: just list first 40 common nodes
-        node_list_str = "Available n8n node types (common ones):\n"
         common = sorted(set(n.get("name", "") for n in all_nodes))[:40]
-        node_list_str += "\n".join(f"  - {n}" for n in common)
+        node_list_str = "Available n8n nodes (common):\n"
+        node_list_str += "nodes[{}]{{type}}:\n".format(len(common))
+        node_list_str += "\n".join(f"  {n}" for n in common)
     else:
         node_list_str = ""
+
+    # ── Fetch real credentials from n8n ─────────────────────────
+    creds_context = ""
+    try:
+        from src.server.n8n_setup import n8n_api_call
+        resp = await n8n_api_call("GET", "/rest/credentials")
+        resp.raise_for_status()
+        data = resp.json()
+        creds = data.get("data", data) if isinstance(data, dict) else data
+        if isinstance(creds, dict):
+            creds = creds.get("data", [])
+        if creds:
+            lines = ["\n\n## Your n8n Credentials (use these REAL IDs)"]
+            lines.append(f"credentials[{len(creds)}]{{id,name,type}}:")
+            for c in creds:
+                lines.append(f"  {c.get('id', '?')},{c.get('name', '?')},{c.get('type', '?')}")
+            lines.append("\nIMPORTANT: Use the REAL credential IDs above in the creds section. Match credential type to the node that needs it.")
+            creds_context = "\n".join(lines)
+    except Exception:
+        logger.debug("Could not fetch n8n credentials for designer context")
 
     # ── Search for relevant templates (compact) ─────────────────
     template_context = ""
@@ -489,22 +572,30 @@ async def generate_workflow_via_llm(
                 tpl = get_template_by_id(m["id"])
                 if tpl and tpl.get("workflow"):
                     cleaned = strip_credentials(tpl["workflow"])
-                    ref_parts.append(
-                        f"### Community template: {m['name']} (category: {m['category']})\n"
-                        f"```json\n{json.dumps(cleaned, indent=2)}\n```"
-                    )
+                    try:
+                        from src.server.workflow_toon import workflow_to_toon
+                        ref_parts.append(
+                            f"### Template: {m['name']}\n{workflow_to_toon(cleaned)}"
+                        )
+                    except Exception:
+                        ref_parts.append(
+                            f"### Template: {m['name']}\n"
+                            f"```json\n{json.dumps(cleaned, separators=(',', ':'))}\n```"
+                        )
             if ref_parts:
                 template_context = (
-                    "\n\n## Reference Templates (adapt these to match the user's request)\n\n"
+                    "\n\n## Reference Templates (adapt to match user request)\n\n"
                     + "\n\n".join(ref_parts)
                 )
     except Exception:
         logger.debug("Template search for designer context failed")
 
-    # Build system prompt with filtered node list and template context
-    system_content = SYSTEM_PROMPT
+    # Build system prompt with filtered node list, credentials, and template context
+    system_content = _get_system_prompt()
     if node_list_str:
         system_content += f"\n\n## {node_list_str}"
+    if creds_context:
+        system_content += creds_context
     if template_context:
         system_content += template_context
 
@@ -545,10 +636,10 @@ async def generate_workflow_via_llm(
         if est_tokens > ctx_size * 0.85:
             # Trim: drop templates first, then truncate node list
             yield {"event": "thinking", "message": "Optimizing prompt for model context window..."}
-            system_content = SYSTEM_PROMPT
+            system_content = _get_system_prompt()
             if node_list_str:
                 # Only include first portion of node list
-                max_node_chars = max(2000, (ctx_size * 4) - len(SYSTEM_PROMPT) - len(prompt) - 16000)
+                max_node_chars = max(2000, (ctx_size * 4) - len(_get_system_prompt()) - len(prompt) - 16000)
                 if len(node_list_str) > max_node_chars:
                     node_list_str = node_list_str[:int(max_node_chars)] + "\n... (truncated)"
                 system_content += f"\n\n## {node_list_str}"
@@ -593,13 +684,25 @@ async def generate_workflow_via_llm(
             yield {"event": "error", "message": "LLM returned empty response"}
             return
 
-        yield {"event": "building", "message": "Parsing workflow JSON..."}
+        yield {"event": "building", "message": "Parsing workflow response..."}
 
-        # Extract and validate JSON
-        workflow = extract_json_from_llm_response(response_text)
+        # Try TOON parsing first, then fall back to JSON
+        workflow = None
+        try:
+            from src.server.workflow_toon import extract_toon_from_response, toon_to_workflow
+            toon_text = extract_toon_from_response(response_text)
+            if toon_text:
+                workflow = toon_to_workflow(toon_text)
+                logger.info("Parsed TOON response → %d nodes", len(workflow.get("nodes", [])))
+        except Exception as exc:
+            logger.debug("TOON parsing failed, falling back to JSON: %s", exc)
+
         if workflow is None:
-            logger.error("Failed to extract JSON from LLM response: %s", response_text[:500])
-            yield {"event": "error", "message": "LLM did not return valid JSON. Try rephrasing your request."}
+            workflow = extract_json_from_llm_response(response_text)
+
+        if workflow is None:
+            logger.error("Failed to extract workflow from LLM response: %s", response_text[:500])
+            yield {"event": "error", "message": "LLM did not return valid workflow. Try rephrasing your request."}
             return
 
         # Ensure pinData exists
