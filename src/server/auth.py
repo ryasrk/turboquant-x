@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 
 import bcrypt
 import jwt
 
+logger = logging.getLogger(__name__)
+
 # Secret for JWT — generate a random one if not set
 JWT_SECRET = os.environ.get("TQ_JWT_SECRET", "tq-dev-secret-change-in-production")
+if JWT_SECRET == "tq-dev-secret-change-in-production":
+    logger.warning(
+        "Using default JWT secret — set TQ_JWT_SECRET env var for production!"
+    )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_SECONDS = 60 * 60 * 24 * 7  # 7 days
 

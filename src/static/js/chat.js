@@ -120,6 +120,11 @@ export async function sendMessage() {
             const card = createToolCallCard(parsed.name, parsed.arguments || {});
             card.dataset.toolId = parsed.id;
             activeToolCards[parsed.id] = card;
+            // Hide document-generation tool call cards unless debug is on
+            const _DOC_TOOLS_CALL = ['generate_word', 'generate_pdf', 'generate_csv'];
+            if (_DOC_TOOLS_CALL.includes(parsed.name) && !state.settings.debug) {
+              card.style.display = 'none';
+            }
             asstWrapper.appendChild(card);
             getChatEl().scrollTop = getChatEl().scrollHeight;
           } else if (parsed.type === 'tool_approval_request') {
@@ -141,6 +146,11 @@ export async function sendMessage() {
             const callCard = activeToolCards[parsed.id];
             if (callCard) markToolCompleted(callCard);
             const resultCard = createToolResultCard(parsed.name, parsed.content || '');
+            // Hide document-generation result cards unless debug is on
+            const _DOC_TOOLS = ['generate_word', 'generate_pdf', 'generate_csv'];
+            if (_DOC_TOOLS.includes(parsed.name) && !state.settings.debug) {
+              resultCard.style.display = 'none';
+            }
             asstWrapper.appendChild(resultCard);
             getChatEl().scrollTop = getChatEl().scrollHeight;
           } else if (parsed.type === 'content') {

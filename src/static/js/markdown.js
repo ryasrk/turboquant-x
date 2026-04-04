@@ -76,8 +76,8 @@ function renderInline(line) {
   line = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   // Italic: *text*
   line = line.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
-  // Links: [text](url)
-  line = line.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+  // Links: [text](url) — supports absolute and relative URLs
+  line = line.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/)[^)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   // Bare URLs: https://...
   line = line.replace(/(?<!")(?<!=)(https?:\/\/[^\s<"]+)/g,

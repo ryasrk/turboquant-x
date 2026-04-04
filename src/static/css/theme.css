@@ -18,6 +18,7 @@
   --code-bg:   #030a14;
   --radius:    4px;
   --font-mono: 'Courier New', Courier, monospace;
+  --font-chat: 'DM Sans', system-ui, -apple-system, sans-serif;
 }
 
 /* ── Light theme — warm neutral, easy on the eyes ──────────────────── */
@@ -218,7 +219,7 @@ body {
     radial-gradient(ellipse at 80% 20%, rgba(0,180,255,0.08) 0%, transparent 50%),
     var(--bg);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-family: var(--font-chat);
   font-size: 13px;
   height: 100dvh;
   display: flex;

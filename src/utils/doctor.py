@@ -502,7 +502,10 @@ def _fix_gitignore() -> None:
 # ── .env parser ──────────────────────────────────────────────────────
 
 def _parse_env_file(path: Path) -> dict[str, str]:
-    """Parse a .env file into a dict. Ignores comments and blank lines."""
+    """Parse a .env file into a dict. Ignores comments and blank lines.
+
+    Handles both plain ``KEY=value`` and bash-style ``export KEY=value``.
+    """
     result: dict[str, str] = {}
     if not path.exists():
         return result
@@ -510,6 +513,9 @@ def _parse_env_file(path: Path) -> dict[str, str]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+        # Strip optional 'export ' prefix (bash-compatible .env files)
+        if line.startswith("export "):
+            line = line[7:]
         if "=" not in line:
             continue
         key, _, value = line.partition("=")

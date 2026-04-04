@@ -171,13 +171,20 @@ async function setInferenceType(type) {
   try {
     if (type === 'cloud') {
       let provider = state.settings.cloudProvider || (providerSelect ? providerSelect.value : '');
-      // Auto-detect configured provider if none saved
-      if (!provider) {
-        try {
-          const data = await fetchCloudProviders();
-          const configured = data.providers?.find(p => p.configured);
-          if (configured) provider = configured.name;
-        } catch (_) {}
+      // Always verify provider has an API key before switching
+      let providerData = null;
+      try {
+        providerData = await fetchCloudProviders();
+      } catch (_) {}
+
+      // If saved provider is not configured, auto-detect a configured one
+      if (provider && providerData) {
+        const p = (providerData.providers || []).find(x => x.name === provider);
+        if (!p?.configured) provider = ''; // Reset — no key for this provider
+      }
+      if (!provider && providerData) {
+        const configured = (providerData.providers || []).find(p => p.configured);
+        if (configured) provider = configured.name;
       }
       if (!provider) {
         showToast('No cloud provider configured. Set an API key first.', 'error');

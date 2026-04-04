@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> None:
     server_cfg = config.get("server", {})
     host = server_cfg.get("host", "0.0.0.0")
     port = server_cfg.get("port", 8000)
-    cors_origins = server_cfg.get("cors_origins", ["http://localhost:3000"])
+    cors_origins = server_cfg.get("cors_origins", ["http://localhost:3000", "http://localhost:8000"])
 
     logger.info("Starting TurboQuant-X Server")
     logger.info("Model: %s (%s)", model_config.model_name, model_config.model_path)

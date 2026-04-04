@@ -126,10 +126,18 @@ function escapeHtml(str) {
 
 /** Escape HTML then convert bare URLs to clickable links. */
 function linkifyText(str) {
-  return escapeHtml(str).replace(
-    /(https?:\/\/[^\s<"']+)/g,
+  let out = escapeHtml(str);
+  // Markdown links: [text](url) — supports both absolute and relative URLs
+  out = out.replace(
+    /\[([^\]]+)\]\(((?:https?:\/\/|\/)[^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+  // Bare URLs not already inside an <a> tag
+  out = out.replace(
+    /(?<!href="|">)(https?:\/\/[^\s<"']+)/g,
     '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
   );
+  return out;
 }
 
 export function isAgentEnabled() {

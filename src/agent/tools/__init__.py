@@ -18,6 +18,7 @@ from src.agent.tools.diff_tool import DiffFilesTool
 from src.agent.tools.encode_tool import EncodeDecodeTool
 from src.agent.tools.terminal_tool import TerminalTool
 from src.agent.tools.mcp_bridge_tool import McpBridgeTool
+from src.agent.tools.document_tools import GenerateWordTool, GeneratePdfTool, GenerateCsvTool
 
 __all__ = [
     # File System
@@ -44,4 +45,6 @@ __all__ = [
     "TerminalTool",
     # MCP Bridge
     "McpBridgeTool",
+    # Document Generation
+    "GenerateWordTool", "GeneratePdfTool", "GenerateCsvTool",
 ]

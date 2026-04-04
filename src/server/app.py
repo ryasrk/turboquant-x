@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import threading
 import uuid
@@ -101,6 +102,7 @@ def init_agent_registry() -> None:
         SqlQueryTool,
         DiffFilesTool, EncodeDecodeTool,
         TerminalTool,
+        GenerateWordTool, GeneratePdfTool, GenerateCsvTool,
     )
 
     _agent_registry = ToolRegistry()
@@ -147,6 +149,11 @@ def init_agent_registry() -> None:
 
     # Terminal (requires user approval)
     _agent_registry.register(TerminalTool())
+
+    # Document Generation (Word, PDF, CSV)
+    _agent_registry.register(GenerateWordTool())
+    _agent_registry.register(GeneratePdfTool())
+    _agent_registry.register(GenerateCsvTool())
 
     # Web (optional deps)
     try:
@@ -447,7 +454,20 @@ def create_app(
     app.state._cloud_yaml_config = cloud_yaml_config or {}
 
     # CORS middleware
-    origins = cors_origins or ["http://localhost:3000", "http://localhost:8000"]
+    origins = list(cors_origins or ["http://localhost:3000", "http://localhost:8000"])
+    # Auto-add origins from environment (comma-separated)
+    extra_origins = os.environ.get("TURBOQUANT_CORS_ORIGINS", "")
+    if extra_origins:
+        for origin in extra_origins.split(","):
+            origin = origin.strip()
+            if origin and origin not in origins:
+                origins.append(origin)
+    # Auto-add ngrok domain from env if configured
+    ngrok_domain = os.environ.get("NGROK_DOMAIN", "")
+    if ngrok_domain:
+        ngrok_origin = f"https://{ngrok_domain}"
+        if ngrok_origin not in origins:
+            origins.append(ngrok_origin)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -455,6 +475,13 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Reverse proxy support — trust X-Forwarded-* headers from proxies
+    try:
+        from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+    except ImportError:
+        pass  # uvicorn not installed (testing)
 
     # Request ID + timing middleware
     @app.middleware("http")

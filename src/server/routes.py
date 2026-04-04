@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from src.server.app import get_engine, get_turbo_engine, get_cloud_engine, get_inference_mode, get_uptime, is_loading, InferenceMode
@@ -997,3 +998,71 @@ async def list_provider_models(provider_name: str, request: Request):
     except Exception as e:
         logger.warning("Failed to list models for %s: %s", provider_name, e)
         return {"provider": provider_name, "models": [], "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Document download endpoint
+# ---------------------------------------------------------------------------
+
+_ALLOWED_EXTENSIONS = {".docx", ".pdf", ".csv"}
+
+_MEDIA_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pdf": "application/pdf",
+    ".csv": "text/csv",
+}
+
+
+@router.get("/v1/documents/download/{filename}")
+async def download_document(filename: str):
+    """Serve a generated document for download.
+
+    Only files inside the generated-docs directory with allowed
+    extensions (.docx, .pdf, .csv) can be downloaded.
+    """
+    from src.agent.tools.document_tools import _OUTPUT_DIR
+
+    # Sanitise: reject path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    file_path = (_OUTPUT_DIR / filename).resolve()
+
+    # Ensure the resolved path is still inside _OUTPUT_DIR
+    if not str(file_path).startswith(str(_OUTPUT_DIR.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=_MEDIA_TYPES.get(ext, "application/octet-stream"),
+        filename=filename,
+    )
+
+
+@router.get("/v1/documents/list")
+async def list_documents():
+    """List all generated documents available for download."""
+    from src.agent.tools.document_tools import _OUTPUT_DIR
+
+    if not _OUTPUT_DIR.exists():
+        return {"documents": []}
+
+    docs = []
+    for f in sorted(_OUTPUT_DIR.iterdir()):
+        ext = f.suffix.lower()
+        if ext in _ALLOWED_EXTENSIONS and f.is_file():
+            docs.append({
+                "filename": f.name,
+                "type": ext.lstrip("."),
+                "size_bytes": f.stat().st_size,
+                "download_url": f"/v1/documents/download/{f.name}",
+            })
+
+    return {"documents": docs}

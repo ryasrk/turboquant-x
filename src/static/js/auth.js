@@ -10,7 +10,19 @@ let _user  = (() => {
 
 export function getToken()    { return _token; }
 export function getUser()     { return _user; }
-export function isLoggedIn()  { return !!_token && !!_user; }
+export function isLoggedIn()  { return !!_token && !!_user && !_isTokenExpired(); }
+
+/** Check if stored JWT has expired (client-side, no server call). */
+function _isTokenExpired() {
+  if (!_token) return true;
+  try {
+    const payload = JSON.parse(atob(_token.split('.')[1]));
+    // Expired if exp is in the past (with 30s buffer)
+    return payload.exp && payload.exp < (Date.now() / 1000) - 30;
+  } catch {
+    return true; // Malformed token
+  }
+}
 
 function _save(token, user) {
   _token = token;
