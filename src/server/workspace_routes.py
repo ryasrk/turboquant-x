@@ -44,6 +44,91 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 
 
+# ── Credential helpers ───────────────────────────────────────────────
+
+def _extract_required_credentials(workflow_json: dict) -> list[dict]:
+    """Extract credential types required by workflow nodes.
+
+    Returns a list of dicts: [{node_name, node_type, cred_type, cred_name}]
+    """
+    required: list[dict] = []
+    for node in workflow_json.get("nodes", []):
+        creds = node.get("credentials")
+        if not creds:
+            continue
+        node_name = node.get("name", "Unknown")
+        node_type = node.get("type", "unknown")
+        for cred_name, cred_ref in creds.items():
+            cred_type = cred_name  # n8n uses the credential key as the type
+            cred_id = None
+            if isinstance(cred_ref, dict):
+                cred_id = cred_ref.get("id")
+            required.append({
+                "node_name": node_name,
+                "node_type": node_type,
+                "cred_type": cred_type,
+                "cred_display_name": cred_name,
+                "linked_id": cred_id,
+            })
+    return required
+
+
+async def _check_missing_credentials(workflow_json: dict) -> dict:
+    """Check which credentials a workflow needs vs. what n8n has.
+
+    Returns:
+        {
+            "required": [...],    # All credential refs from nodes
+            "available": [...],   # Existing credentials in n8n
+            "missing": [...],     # Required but not linked / not existing
+            "ok": bool,           # True if all credentials are satisfied
+        }
+    """
+    required = _extract_required_credentials(workflow_json)
+    if not required:
+        return {"required": [], "available": [], "missing": [], "ok": True}
+
+    from src.server.n8n_setup import n8n_api_call
+
+    available: list[dict] = []
+    try:
+        resp = await n8n_api_call("GET", "/rest/credentials")
+        resp.raise_for_status()
+        data = resp.json()
+        creds = data.get("data", data) if isinstance(data, dict) else data
+        if isinstance(creds, dict):
+            creds = creds.get("data", [])
+        available = [
+            {"id": c.get("id"), "name": c.get("name"), "type": c.get("type")}
+            for c in (creds or [])
+        ]
+    except Exception as exc:
+        logger.warning("Could not list n8n credentials: %s", exc)
+
+    # Build lookup: cred_type → list of cred IDs
+    available_by_type: dict[str, list[str]] = {}
+    for c in available:
+        ctype = c.get("type", "")
+        available_by_type.setdefault(ctype, []).append(c["id"])
+
+    missing: list[dict] = []
+    for req in required:
+        ctype = req["cred_type"]
+        has_linked = req.get("linked_id") and any(
+            c["id"] == req["linked_id"] for c in available
+        )
+        has_type = ctype in available_by_type
+        if not has_linked and not has_type:
+            missing.append(req)
+
+    return {
+        "required": required,
+        "available": available,
+        "missing": missing,
+        "ok": len(missing) == 0,
+    }
+
+
 # ── Schemas ──────────────────────────────────────────────────────────
 
 class WorkspaceCreate(BaseModel):
@@ -437,6 +522,28 @@ async def approve_design(workspace_id: str, user: dict = Depends(get_current_use
 
     # If n8n is available and we have a workflow ID, try to activate it
     if workflow_id and await verify_n8n_access(user):
+        # Pre-activation credential check
+        cred_check: dict = {"ok": True, "missing": []}
+        if design and design.get("result_data"):
+            try:
+                wf_json = json.loads(design["result_data"])
+                cred_check = await _check_missing_credentials(wf_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if not cred_check["ok"]:
+            missing_types = list({m["cred_type"] for m in cred_check["missing"]})
+            return {
+                "ok": True,
+                "status": "approved",
+                "workflow_id": workflow_id,
+                "missing_credentials": cred_check["missing"],
+                "message": (
+                    f"Approved but cannot activate — missing credentials: {', '.join(missing_types)}. "
+                    "Create the required credentials first, then retry activation."
+                ),
+            }
+
         try:
             result = await n8n_activate_workflow(workflow_id)
             update_workspace(workspace_id, user["user_id"], status="active")
@@ -620,13 +727,22 @@ async def redeploy_workflow(workspace_id: str, user: dict = Depends(get_current_
         result = resp.json()
         wf = result.get("data", result) if isinstance(result, dict) else result
         node_count = len(wf.get("nodes", []))
-        return {
+
+        # Check credentials for informational warning
+        cred_check = await _check_missing_credentials(workflow_json)
+
+        resp_data: dict = {
             "ok": True,
             "action": "updated",
             "workflow_id": existing_wf_id,
             "node_count": node_count,
             "message": f"Re-deployed {node_count} nodes to workflow {existing_wf_id}",
         }
+        if not cred_check["ok"]:
+            missing_types = list({m["cred_type"] for m in cred_check["missing"]})
+            resp_data["missing_credentials"] = cred_check["missing"]
+            resp_data["message"] += f" — ⚠ missing credentials: {', '.join(missing_types)}"
+        return resp_data
     else:
         # Create new workflow
         from src.server.workflow_designer import n8n_import_workflow
@@ -641,6 +757,143 @@ async def redeploy_workflow(workspace_id: str, user: dict = Depends(get_current_
             "node_count": len(result.get("nodes", [])),
             "message": f"Created new workflow {new_id}",
         }
+
+
+# ── Credential check & create endpoints ─────────────────────────────
+
+@router.get("/{workspace_id}/credentials/check")
+async def check_credentials(workspace_id: str, user: dict = Depends(get_current_user)):
+    """Check which credentials a workspace workflow needs and which are missing.
+
+    Returns required, available, and missing credentials so the UI can prompt the user.
+    """
+    ws = _get_user_workspace(workspace_id, user)
+    design = _get_latest_design(workspace_id)
+    if not design or not design.get("result_data"):
+        return {"ok": True, "required": [], "available": [], "missing": [], "message": "No design data"}
+
+    try:
+        workflow_json = json.loads(design["result_data"])
+    except (json.JSONDecodeError, TypeError):
+        return {"ok": True, "required": [], "available": [], "missing": [], "message": "Invalid design JSON"}
+
+    if not await ensure_n8n_ready():
+        raise HTTPException(status_code=503, detail="n8n is not available")
+
+    result = await _check_missing_credentials(workflow_json)
+    return result
+
+
+class CredentialCreateRequest(BaseModel):
+    """Create a credential in n8n for a workspace workflow."""
+    cred_type: str = Field(..., description="Credential type (e.g. 'telegramApi', 'openAiApi')")
+    name: str = Field(..., min_length=1, max_length=200, description="Display name")
+    data: dict = Field(..., description="Credential data key-value pairs")
+
+
+@router.post("/{workspace_id}/credentials/create")
+async def create_workspace_credential(
+    workspace_id: str,
+    req: CredentialCreateRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Create a credential in n8n and optionally relink it to the workspace workflow nodes.
+
+    After creation, the credential ID is available for linking to workflow nodes.
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    if not await ensure_n8n_ready():
+        raise HTTPException(status_code=503, detail="n8n is not available")
+
+    from src.server.n8n_setup import n8n_api_call
+
+    try:
+        resp = await n8n_api_call(
+            "POST",
+            "/rest/credentials",
+            json_data={"type": req.cred_type, "name": req.name, "data": req.data},
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        cred = result.get("data", result) if isinstance(result, dict) else result
+        cred_id = cred.get("id", "?")
+
+        # Try to auto-link the credential to workflow nodes that need it
+        linked_nodes = await _autolink_credential(ws, workspace_id, user, req.cred_type, str(cred_id))
+
+        return {
+            "ok": True,
+            "credential_id": cred_id,
+            "name": req.name,
+            "type": req.cred_type,
+            "linked_nodes": linked_nodes,
+        }
+    except httpx.HTTPStatusError as exc:
+        detail = f"n8n rejected credential creation: {exc.response.status_code}"
+        try:
+            detail = exc.response.json().get("message", detail)
+        except Exception:
+            pass
+        raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+
+
+async def _autolink_credential(
+    ws: dict,
+    workspace_id: str,
+    user: dict,
+    cred_type: str,
+    cred_id: str,
+) -> list[str]:
+    """Auto-link a newly created credential to matching workflow nodes.
+
+    Updates both the design record and the live n8n workflow (if it exists).
+    Returns a list of node names that were linked.
+    """
+    design = _get_latest_design(workspace_id)
+    if not design or not design.get("result_data"):
+        return []
+
+    try:
+        wf = json.loads(design["result_data"])
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    linked: list[str] = []
+    for node in wf.get("nodes", []):
+        creds = node.get("credentials")
+        if not creds:
+            continue
+        if cred_type in creds:
+            # Update the credential reference with the new ID
+            if isinstance(creds[cred_type], dict):
+                creds[cred_type]["id"] = cred_id
+            else:
+                creds[cred_type] = {"id": cred_id, "name": cred_type}
+            linked.append(node.get("name", "Unknown"))
+
+    if linked:
+        # Save updated design
+        update_workspace_design(design["id"], result_data=json.dumps(wf))
+
+        # Push to live n8n workflow if it exists
+        n8n_wf_id = ws.get("n8n_workflow_id")
+        if n8n_wf_id:
+            from src.server.n8n_setup import n8n_api_call
+            payload = {
+                "name": wf.get("name", ws.get("title", "Untitled")),
+                "nodes": wf["nodes"],
+                "connections": wf.get("connections", {}),
+                "active": False,
+                "settings": wf.get("settings", {"executionOrder": "v1"}),
+            }
+            try:
+                await n8n_api_call("PUT", f"/rest/workflows/{n8n_wf_id}", json_data=payload)
+                logger.info("Auto-linked credential %s to %d nodes in workflow %s", cred_id, len(linked), n8n_wf_id)
+            except Exception as exc:
+                logger.warning("Could not push credential update to n8n: %s", exc)
+
+    return linked
 
 
 @router.get("/{workspace_id}/status")
@@ -792,6 +1045,18 @@ _N8N_SYSTEM_PROMPT = (
     "- Get → Update: n8n_get_workflow → modify → n8n_update_workflow(workflow_json=modified)\n"
     "- Both n8n_create_workflow and n8n_update_workflow accept workflow_json (full JSON string) "
     "or individual name/nodes/connections params.\n\n"
+    "CREDENTIAL SETUP (CRITICAL — do this BEFORE activation):\n"
+    "When deploying or activating a workflow:\n"
+    "1. Inspect the workflow nodes for credential references (look at 'credentials' field)\n"
+    "2. Call n8n_list_credentials to check what's already configured\n"
+    "3. For EACH missing credential:\n"
+    "   a. Tell the user which service needs a credential (e.g. 'Telegram Bot Token')\n"
+    "   b. Ask for the secret value (API key, token, etc.)\n"
+    "   c. Call n8n_create_credential with the correct type, name, and data\n"
+    "4. After creating credentials, update the workflow nodes to link the credential IDs\n"
+    "5. ONLY THEN attempt to activate the workflow\n"
+    "Common credential types: telegramApi (accessToken), openAiApi (apiKey), "
+    "slackApi (accessToken), httpHeaderAuth (name, value), githubApi (accessToken)\n\n"
     "CRITICAL RULES:\n"
     "1. ALWAYS use your tools FIRST before asking the user for information. "
     "If you have a workflow ID, call n8n_workflow_status immediately.\n"
@@ -800,7 +1065,8 @@ _N8N_SYSTEM_PROMPT = (
     "3. When the user says 'fix', 'help', or 'error' — start by gathering data with tools.\n"
     "4. NEVER respond with 'I need more information' if you have tools that can look it up.\n"
     "5. After tool results, synthesize a clear diagnosis and actionable fix.\n"
-    "6. When building workflows, always search for existing templates first before designing from scratch.\n\n"
+    "6. When building workflows, always search for existing templates first before designing from scratch.\n"
+    "7. ALWAYS check credentials before trying to activate a workflow.\n\n"
     "Keep answers concise and actionable. Show what you found, what went wrong, and how to fix it."
 )
 

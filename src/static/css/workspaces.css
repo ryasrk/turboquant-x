@@ -1456,3 +1456,148 @@ body {
   opacity: 0.7;
   cursor: default;
 }
+
+/* ── Credential Panel ──────────────────────────────────────────────── */
+
+.ws-cred-check-btn {
+  background: var(--accent-secondary, #8b5cf6);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ws-cred-check-btn:hover { background: #7c3aed; }
+
+.ws-cred-panel {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--surface-secondary, #1e1e2e);
+  border: 1px solid var(--border-primary, #333);
+  border-radius: 8px;
+}
+.ws-cred-title {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+.ws-cred-status {
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+.ws-cred-ok { color: #22c55e; }
+.ws-cred-warn { color: #f59e0b; }
+.ws-cred-err { color: #ef4444; }
+
+.ws-cred-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+}
+.ws-cred-table th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-primary, #444);
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+}
+.ws-cred-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-primary, #333);
+}
+.ws-cred-table code {
+  font-size: 0.8rem;
+  background: rgba(255,255,255,0.07);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.ws-cred-missing-row {
+  background: rgba(245, 158, 11, 0.08);
+}
+.ws-cred-ok-row {}
+
+.ws-cred-add-btn {
+  background: var(--accent-primary, #3b82f6);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ws-cred-add-btn:hover { background: #2563eb; }
+
+.ws-cred-form {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--surface-tertiary, #262636);
+  border: 1px solid var(--border-primary, #444);
+  border-radius: 6px;
+}
+.ws-cred-form-title {
+  font-size: 0.95rem;
+  margin: 0 0 10px;
+}
+.ws-cred-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #aaa);
+}
+.ws-cred-input {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-primary, #444);
+  border-radius: 4px;
+  background: var(--surface-primary, #181828);
+  color: var(--text-primary, #e0e0e0);
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+.ws-cred-input:focus {
+  border-color: var(--accent-primary, #3b82f6);
+  outline: none;
+}
+.ws-cred-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ws-cred-save-btn {
+  background: #22c55e;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 16px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ws-cred-save-btn:hover { background: #16a34a; }
+.ws-cred-save-btn:disabled { opacity: 0.6; cursor: default; }
+
+.ws-cred-cancel-btn {
+  background: transparent;
+  color: var(--text-secondary, #aaa);
+  border: 1px solid var(--border-primary, #444);
+  border-radius: 5px;
+  padding: 6px 16px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.ws-cred-cancel-btn:hover { color: #fff; border-color: #666; }
+
+.ws-cred-form-status {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+.ws-cred-empty {
+  color: var(--text-secondary, #888);
+  font-size: 0.85rem;
+  font-style: italic;
+}

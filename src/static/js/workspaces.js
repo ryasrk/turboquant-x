@@ -213,7 +213,14 @@ function handleDesignEvent(workspaceId, evt) {
 
 async function approveDesign(workspaceId) {
   try {
-    await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/approve`, { method: 'POST' });
+    const result = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/approve`, { method: 'POST' });
+    // Check for missing credentials response
+    if (result?.missing_credentials?.length > 0) {
+      const types = [...new Set(result.missing_credentials.map(m => m.cred_type))];
+      alert(`Approved, but cannot activate yet.\n\nMissing credentials: ${types.join(', ')}\n\nUse the 🔑 Credentials button to set them up, then re-deploy.`);
+      // Auto-open credential panel
+      checkCredentials(workspaceId);
+    }
   } catch (err) {
     if (err.message?.includes('409') || err.message?.includes('Cannot approve')) {
       console.warn('Workspace already approved');
@@ -262,12 +269,200 @@ async function redeployWorkflow(workspaceId) {
   if (btn) { btn.disabled = true; btn.textContent = '⟳ Deploying…'; }
   try {
     const result = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/redeploy`, { method: 'POST' });
-    alert(`${result.message || 'Redeployed successfully'} (${result.node_count} nodes)`);
+    let msg = `${result.message || 'Redeployed successfully'} (${result.node_count} nodes)`;
+    if (result.missing_credentials?.length > 0) {
+      const types = [...new Set(result.missing_credentials.map(m => m.cred_type))];
+      msg += `\n\n⚠ Missing credentials: ${types.join(', ')}\nUse the 🔑 Credentials button to set them up.`;
+      // Auto-open credential panel
+      setTimeout(() => checkCredentials(workspaceId), 300);
+    }
+    alert(msg);
     await refreshActiveWorkspace(workspaceId);
   } catch (err) {
     alert(`Redeploy failed: ${err.message}`);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '⟳ Redeploy'; }
+  }
+}
+
+    if (btn) { btn.disabled = false; btn.textContent = '⟳ Redeploy'; }
+  }
+}
+
+// ── Credential setup ───────────────────────────────────────────────────
+
+/** Known credential field schemas */
+const CREDENTIAL_FIELDS = {
+  telegramApi:     [{ key: 'accessToken', label: 'Bot Token',       type: 'password', placeholder: '123456:ABC-DEF1234ghIkl-zyx57W2v' }],
+  openAiApi:       [{ key: 'apiKey',      label: 'API Key',         type: 'password', placeholder: 'sk-...' }],
+  slackApi:        [{ key: 'accessToken', label: 'Bot Token',       type: 'password', placeholder: 'xoxb-...' }],
+  httpHeaderAuth:  [{ key: 'name',  label: 'Header Name',  type: 'text',     placeholder: 'Authorization' },
+                    { key: 'value', label: 'Header Value', type: 'password', placeholder: 'Bearer ...' }],
+  httpBasicAuth:   [{ key: 'user',     label: 'Username', type: 'text' },
+                    { key: 'password', label: 'Password', type: 'password' }],
+  githubApi:       [{ key: 'accessToken', label: 'Personal Access Token', type: 'password', placeholder: 'ghp_...' }],
+  notionApi:       [{ key: 'apiKey',      label: 'Integration Token',     type: 'password', placeholder: 'secret_...' }],
+  discordApi:      [{ key: 'botToken',    label: 'Bot Token',             type: 'password', placeholder: '' }],
+  postgresApi:     [{ key: 'host', label: 'Host', type: 'text', placeholder: 'localhost' },
+                    { key: 'database', label: 'Database', type: 'text' },
+                    { key: 'user', label: 'User', type: 'text' },
+                    { key: 'password', label: 'Password', type: 'password' },
+                    { key: 'port', label: 'Port', type: 'number', placeholder: '5432' }],
+  gmailOAuth2:     [{ key: 'clientId', label: 'Client ID', type: 'text' },
+                    { key: 'clientSecret', label: 'Client Secret', type: 'password' },
+                    { key: 'refreshToken', label: 'Refresh Token', type: 'password' }],
+  smtp:            [{ key: 'host', label: 'Host', type: 'text', placeholder: 'smtp.gmail.com' },
+                    { key: 'port', label: 'Port', type: 'number', placeholder: '587' },
+                    { key: 'user', label: 'User', type: 'text' },
+                    { key: 'password', label: 'Password', type: 'password' }],
+};
+
+async function checkCredentials(workspaceId) {
+  const panel = $('#ws-cred-panel');
+  const status = $('#ws-cred-status');
+  const list = $('#ws-cred-list');
+  if (!panel || !status || !list) return;
+
+  panel.classList.remove('hidden');
+  status.textContent = 'Checking credentials…';
+  list.innerHTML = '';
+  $('#ws-cred-form')?.classList.add('hidden');
+
+  try {
+    const result = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/credentials/check`);
+
+    if (result.ok && result.missing?.length === 0) {
+      status.innerHTML = '<span class="ws-cred-ok">✓ All credentials configured</span>';
+      renderCredentialList(result.required, result.available, []);
+      return;
+    }
+
+    if (result.missing?.length > 0) {
+      status.innerHTML = `<span class="ws-cred-warn">⚠ ${result.missing.length} missing credential(s) — workflow cannot activate until these are created</span>`;
+      renderCredentialList(result.required, result.available, result.missing);
+    } else {
+      status.innerHTML = '<span class="ws-cred-ok">✓ No credentials required</span>';
+    }
+  } catch (err) {
+    status.innerHTML = `<span class="ws-cred-err">Error: ${err.message}</span>`;
+  }
+}
+
+function renderCredentialList(required, available, missing) {
+  const list = $('#ws-cred-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (!required?.length) {
+    list.innerHTML = '<p class="ws-cred-empty">No credentials required by this workflow.</p>';
+    return;
+  }
+
+  // Deduplicate missing by cred_type
+  const missingTypes = new Set(missing.map(m => m.cred_type));
+
+  const table = document.createElement('table');
+  table.className = 'ws-cred-table';
+  table.innerHTML = `
+    <thead><tr><th>Node</th><th>Credential Type</th><th>Status</th><th>Action</th></tr></thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector('tbody');
+
+  for (const req of required) {
+    const isMissing = missingTypes.has(req.cred_type);
+    const tr = document.createElement('tr');
+    tr.className = isMissing ? 'ws-cred-missing-row' : 'ws-cred-ok-row';
+    tr.innerHTML = `
+      <td>${escapeHtml(req.node_name)}</td>
+      <td><code>${escapeHtml(req.cred_type)}</code></td>
+      <td>${isMissing ? '<span class="ws-cred-warn">⚠ Missing</span>' : '<span class="ws-cred-ok">✓ OK</span>'}</td>
+      <td>${isMissing ? `<button class="ws-cred-add-btn" data-type="${escapeHtml(req.cred_type)}" data-node="${escapeHtml(req.node_name)}">+ Add</button>` : '—'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  list.appendChild(table);
+
+  // Wire add buttons
+  list.querySelectorAll('.ws-cred-add-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      showCredentialForm(btn.dataset.type, btn.dataset.node);
+    });
+  });
+}
+
+function showCredentialForm(credType, nodeName) {
+  const form = $('#ws-cred-form');
+  const title = $('#ws-cred-form-title');
+  const typeInput = $('#ws-cred-type');
+  const nameInput = $('#ws-cred-name');
+  const fieldsDiv = $('#ws-cred-fields');
+  const formStatus = $('#ws-cred-form-status');
+  if (!form || !fieldsDiv) return;
+
+  form.classList.remove('hidden');
+  if (title) title.textContent = `Add ${credType} for ${nodeName}`;
+  if (typeInput) typeInput.value = credType;
+  if (nameInput) nameInput.value = `${nodeName} - ${credType}`;
+  if (formStatus) formStatus.textContent = '';
+  fieldsDiv.innerHTML = '';
+
+  const fields = CREDENTIAL_FIELDS[credType] || [{ key: 'apiKey', label: 'API Key / Token', type: 'password' }];
+
+  for (const field of fields) {
+    const label = document.createElement('label');
+    label.className = 'ws-cred-label';
+    label.innerHTML = `${escapeHtml(field.label)}
+      <input type="${field.type || 'text'}" class="ws-cred-input ws-cred-field" data-key="${field.key}"
+             placeholder="${field.placeholder || ''}" autocomplete="off" />`;
+    fieldsDiv.appendChild(label);
+  }
+
+  // Scroll form into view
+  form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function saveCredential() {
+  const credType = $('#ws-cred-type')?.value;
+  const credName = $('#ws-cred-name')?.value?.trim();
+  const formStatus = $('#ws-cred-form-status');
+  if (!credType || !credName || !activeWsId) return;
+
+  // Collect field values
+  const data = {};
+  document.querySelectorAll('.ws-cred-field').forEach(input => {
+    const key = input.dataset.key;
+    const val = input.value.trim();
+    if (key && val) data[key] = val;
+  });
+
+  if (Object.keys(data).length === 0) {
+    if (formStatus) formStatus.innerHTML = '<span class="ws-cred-err">Please fill in at least one field</span>';
+    return;
+  }
+
+  const saveBtn = $('#ws-cred-save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Creating…'; }
+
+  try {
+    const result = await apiFetch(`/v1/workspaces/${encodeURIComponent(activeWsId)}/credentials/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cred_type: credType, name: credName, data }),
+    });
+
+    if (formStatus) {
+      const linked = result.linked_nodes?.length ? ` (auto-linked to: ${result.linked_nodes.join(', ')})` : '';
+      formStatus.innerHTML = `<span class="ws-cred-ok">✓ Created credential ${escapeHtml(result.credential_id)}${linked}</span>`;
+    }
+
+    // Re-check credentials to update the table
+    setTimeout(() => checkCredentials(activeWsId), 500);
+  } catch (err) {
+    if (formStatus) formStatus.innerHTML = `<span class="ws-cred-err">Failed: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Create Credential'; }
   }
 }
 
@@ -597,6 +792,16 @@ function showActions(state = 'designed') {
     }
   }
 
+  // Show credential button when workspace has a design
+  const credBtn = $('#ws-cred-check-btn');
+  if (credBtn) {
+    if (ws && ['designed', 'approved', 'active'].includes(ws.status)) {
+      credBtn.classList.remove('hidden');
+    } else {
+      credBtn.classList.add('hidden');
+    }
+  }
+
   if (state === 'approved' || state === 'active') {
     // Already approved/active: only modify and remove are available
     approveBtn?.setAttribute('disabled', '');
@@ -915,6 +1120,15 @@ export function initWorkspaces() {
 
   $('#ws-redeploy-btn')?.addEventListener('click', () => {
     if (activeWsId) redeployWorkflow(activeWsId);
+  });
+
+  // Credential buttons
+  $('#ws-cred-check-btn')?.addEventListener('click', () => {
+    if (activeWsId) checkCredentials(activeWsId);
+  });
+  $('#ws-cred-save-btn')?.addEventListener('click', () => saveCredential());
+  $('#ws-cred-cancel-btn')?.addEventListener('click', () => {
+    $('#ws-cred-form')?.classList.add('hidden');
   });
 
   // Design history toggle

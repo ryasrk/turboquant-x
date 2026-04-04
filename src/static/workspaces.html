@@ -117,6 +117,27 @@
           <button id="ws-reject-btn" class="ws-reject-btn" aria-label="Reject design">✗ Reject</button>
           <button id="ws-remove-workflow-btn" class="ws-remove-btn hidden" aria-label="Remove workflow and reset to draft">🗑 Reset / Remove</button>
           <button id="ws-redeploy-btn" class="ws-redeploy-btn hidden" aria-label="Re-deploy workflow to n8n">⟳ Redeploy</button>
+          <button id="ws-cred-check-btn" class="ws-cred-check-btn hidden" aria-label="Check credentials">🔑 Credentials</button>
+        </div>
+
+        <!-- Credential Setup Panel -->
+        <div id="ws-cred-panel" class="ws-cred-panel hidden" role="region" aria-label="Credential setup">
+          <h4 class="ws-cred-title">🔑 Credential Setup</h4>
+          <div id="ws-cred-status" class="ws-cred-status"></div>
+          <div id="ws-cred-list" class="ws-cred-list"></div>
+          <div id="ws-cred-form" class="ws-cred-form hidden">
+            <h5 id="ws-cred-form-title" class="ws-cred-form-title">Add Credential</h5>
+            <input id="ws-cred-type" type="hidden" />
+            <label class="ws-cred-label">Display Name
+              <input id="ws-cred-name" type="text" class="ws-cred-input" placeholder="e.g. My Telegram Bot" />
+            </label>
+            <div id="ws-cred-fields" class="ws-cred-fields"></div>
+            <div class="ws-cred-form-actions">
+              <button id="ws-cred-save-btn" class="ws-cred-save-btn">💾 Create Credential</button>
+              <button id="ws-cred-cancel-btn" class="ws-cred-cancel-btn">Cancel</button>
+            </div>
+            <div id="ws-cred-form-status" class="ws-cred-form-status"></div>
+          </div>
         </div>
       </section>
 
