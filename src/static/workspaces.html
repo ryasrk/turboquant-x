@@ -120,7 +120,9 @@
 
       <!-- n8n Iframe -->
       <section id="ws-n8n-section" class="ws-panel hidden" aria-label="n8n workflow editor">
-        <h3 class="ws-panel-title">◈ Workflow Editor</h3>
+        <h3 class="ws-panel-title">◈ Workflow Editor
+          <a id="ws-n8n-open" href="#" target="_blank" class="ws-panel-link" aria-label="Open workflow in n8n editor">↗ Open in n8n</a>
+        </h3>
         <div class="ws-iframe-wrap">
           <div id="ws-iframe-loading" class="ws-iframe-loading">
             <span class="ws-spinner" aria-hidden="true"></span>
@@ -131,6 +133,17 @@
             title="n8n Workflow Editor"
             allow="clipboard-read; clipboard-write"
           ></iframe>
+        </div>
+      </section>
+
+      <!-- Execution History Panel -->
+      <section id="ws-exec-section" class="ws-panel hidden" aria-label="Execution history">
+        <h3 class="ws-panel-title">◈ Executions
+          <button id="ws-exec-refresh" class="ws-icon-action" title="Refresh executions" aria-label="Refresh executions">↻</button>
+        </h3>
+        <div id="ws-exec-list" class="ws-exec-list" role="list" aria-live="polite"></div>
+        <div id="ws-exec-empty" class="ws-exec-empty hidden">
+          <span>No executions yet — run your workflow to see results here</span>
         </div>
       </section>
     </div>

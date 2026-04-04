@@ -271,7 +271,7 @@ def _get_user_workspace(workspace_id: str, user: dict) -> dict:
 @router.get("")
 async def list_user_workspaces(user: dict = Depends(get_current_user)):
     """List all workspaces for the authenticated user."""
-    return list_workspaces(user["user_id"])
+    return {"workspaces": list_workspaces(user["user_id"])}
 
 
 @router.post("", status_code=201)
@@ -515,7 +515,7 @@ async def get_workspace_status(workspace_id: str, user: dict = Depends(get_curre
 async def list_designs(workspace_id: str, user: dict = Depends(get_current_user)):
     """List all design history records for a workspace."""
     _get_user_workspace(workspace_id, user)
-    return list_workspace_designs(workspace_id)
+    return {"designs": list_workspace_designs(workspace_id)}
 
 
 # ── n8n management endpoints ────────────────────────────────────────

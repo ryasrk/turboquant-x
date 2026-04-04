@@ -335,6 +335,13 @@ function selectWorkspace(ws) {
   // Load design history
   fetchDesignHistory(ws.id).then(renderDesignHistory).catch(() => {});
 
+  // Load execution history if workflow linked
+  if (ws.n8n_workflow_id) {
+    loadExecutions(ws.id);
+  } else {
+    $('#ws-exec-section')?.classList.add('hidden');
+  }
+
   // Close mobile sidebar
   $('#ws-sidebar')?.classList.remove('open');
   $('#ws-sidebar-toggle')?.setAttribute('aria-expanded', 'false');
@@ -342,26 +349,36 @@ function selectWorkspace(ws) {
 
 function renderDesignPanel(ws) {
   const status = ws.status || 'draft';
+  const wfId = ws.n8n_workflow_id || ws.workflow_id;
 
   // Reset all sub-panels
   hideDesignProgress();
   hideActions();
   hideN8nIframe();
 
+  // Update "Open in n8n" link
+  const openLink = $('#ws-n8n-open');
+  if (openLink && wfId) {
+    openLink.href = `/workspace/n8n-login?next=/workspace/n8n/workflow/${encodeURIComponent(wfId)}`;
+    openLink.classList.remove('hidden');
+  } else if (openLink) {
+    openLink.classList.add('hidden');
+  }
+
   if (status === 'building') {
     showDesignProgress();
     appendProgressLog('info', 'Design is currently in progress…');
   } else if (status === 'designed') {
     showActions('designed');
-    if (ws.workflow_id) loadN8nIframe(ws.workflow_id);
+    if (wfId) loadN8nIframe(wfId);
   } else if (status === 'ready' || status === 'approved') {
     showActions('approved');
     // Show prompt input so user can re-design
     $('#ws-prompt-area')?.classList.remove('hidden');
-    if (ws.workflow_id) loadN8nIframe(ws.workflow_id);
+    if (wfId) loadN8nIframe(wfId);
   } else if (status === 'active') {
     showActions('active');
-    if (ws.workflow_id) loadN8nIframe(ws.workflow_id);
+    if (wfId) loadN8nIframe(wfId);
   }
   // draft / failed: show prompt input (default state)
 }
@@ -502,6 +519,89 @@ function hideN8nIframe() {
   const iframe = $('#ws-n8n-iframe');
   if (section) section.classList.add('hidden');
   if (iframe) iframe.src = 'about:blank';
+}
+
+// ── UI: Execution history ──────────────────────────────────────────────
+
+async function loadExecutions(workspaceId) {
+  const section = $('#ws-exec-section');
+  const list = $('#ws-exec-list');
+  const empty = $('#ws-exec-empty');
+  if (!section) return;
+
+  section.classList.remove('hidden');
+
+  try {
+    const data = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions`);
+    const execs = data?.executions ?? [];
+
+    if (!execs.length) {
+      list.innerHTML = '';
+      empty?.classList.remove('hidden');
+      return;
+    }
+
+    empty?.classList.add('hidden');
+    list.innerHTML = execs.map((ex) => {
+      const finished = ex.finished;
+      const statusClass = finished === true ? 'success' : finished === false ? 'error' : 'running';
+      const statusLabel = finished === true ? 'success' : finished === false ? 'error' : 'running';
+      const icon = finished === true ? '✓' : finished === false ? '✗' : '⋯';
+      const started = ex.startedAt ? formatDate(ex.startedAt) : '—';
+
+      return `
+        <div class="ws-exec-item" data-exec-id="${escapeHtml(String(ex.id))}" role="listitem" tabindex="0">
+          <div class="ws-exec-icon ${statusClass}">${icon}</div>
+          <div class="ws-exec-info">
+            <div class="ws-exec-id">#${escapeHtml(String(ex.id))}</div>
+            <div class="ws-exec-time">${started}</div>
+          </div>
+          <span class="ws-exec-status ${statusClass}">${statusLabel}</span>
+        </div>`;
+    }).join('');
+
+    // Click handlers for execution details
+    list.querySelectorAll('.ws-exec-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const execId = item.dataset.execId;
+        if (execId && workspaceId) showExecutionDetail(workspaceId, execId);
+      });
+    });
+  } catch (err) {
+    console.error('Failed to load executions:', err);
+    list.innerHTML = `<div class="ws-exec-empty">Failed to load executions</div>`;
+  }
+}
+
+async function showExecutionDetail(workspaceId, executionId) {
+  // Remove any existing overlay
+  document.querySelector('.ws-exec-detail-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'ws-exec-detail-overlay';
+  overlay.innerHTML = `
+    <div class="ws-exec-detail-dialog">
+      <div class="ws-exec-detail-header">
+        <span>Execution #${escapeHtml(executionId)}</span>
+        <button class="ws-exec-detail-close" aria-label="Close">✕</button>
+      </div>
+      <div class="ws-exec-detail-body">
+        <pre>Loading execution details...</pre>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  // Close handlers
+  overlay.querySelector('.ws-exec-detail-close').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  try {
+    const data = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}`);
+    overlay.querySelector('pre').textContent = data?.summary || 'No details available';
+  } catch (err) {
+    overlay.querySelector('pre').textContent = `Error: ${err.message}`;
+  }
 }
 
 // ── UI: Design history ─────────────────────────────────────────────────
@@ -698,6 +798,11 @@ export function initWorkspaces() {
     const expanded = btn?.getAttribute('aria-expanded') === 'true';
     btn?.setAttribute('aria-expanded', String(!expanded));
     list?.classList.toggle('collapsed');
+  });
+
+  // Execution refresh
+  $('#ws-exec-refresh')?.addEventListener('click', () => {
+    if (activeWsId) loadExecutions(activeWsId);
   });
 
   // Rename dialog

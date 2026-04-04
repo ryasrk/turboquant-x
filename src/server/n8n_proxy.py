@@ -68,15 +68,21 @@ def _forward_headers(request: Request) -> dict[str, str]:
 # ── Auto-login: set n8n session cookie in browser ────────────────────
 
 @router.get("/workspace/n8n-login")
-async def n8n_auto_login():
+async def n8n_auto_login(request: Request):
     """Auto-login to n8n and redirect to the editor.
 
     Sets the n8n session cookie in the browser so the editor
     sees the user as authenticated without requiring manual login.
+    Supports ?next=/workspace/n8n/... to redirect to a specific page.
     """
+    # Determine redirect target (only allow /workspace/n8n/ paths)
+    next_url = request.query_params.get("next", "/workspace/n8n/")
+    if not next_url.startswith("/workspace/n8n"):
+        next_url = "/workspace/n8n/"
+
     if N8N_API_KEY:
         # API key mode — no session cookie needed, redirect directly
-        return RedirectResponse(url="/workspace/n8n/", status_code=302)
+        return RedirectResponse(url=next_url, status_code=302)
 
     from src.server.n8n_setup import ensure_n8n_ready, get_session_cookies
 
@@ -88,7 +94,7 @@ async def n8n_auto_login():
         raise HTTPException(status_code=503, detail="n8n session not established")
 
     # Build redirect response with n8n session cookie set for the browser
-    response = RedirectResponse(url="/workspace/n8n/", status_code=302)
+    response = RedirectResponse(url=next_url, status_code=302)
     for part in cookie_str.split(";"):
         part = part.strip()
         if "=" in part:

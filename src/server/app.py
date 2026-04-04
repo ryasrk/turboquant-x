@@ -104,6 +104,8 @@ def init_agent_registry() -> None:
         DiffFilesTool, EncodeDecodeTool,
         TerminalTool,
         GenerateWordTool, GeneratePdfTool, GenerateCsvTool,
+        N8nWorkflowStatusTool, N8nListExecutionsTool, N8nExecutionDetailTool,
+        N8nDiagnoseErrorTool, N8nInstallNodeTool,
     )
 
     _agent_registry = ToolRegistry()
@@ -155,6 +157,13 @@ def init_agent_registry() -> None:
     _agent_registry.register(GenerateWordTool())
     _agent_registry.register(GeneratePdfTool())
     _agent_registry.register(GenerateCsvTool())
+
+    # n8n Workflow Management
+    _agent_registry.register(N8nWorkflowStatusTool())
+    _agent_registry.register(N8nListExecutionsTool())
+    _agent_registry.register(N8nExecutionDetailTool())
+    _agent_registry.register(N8nDiagnoseErrorTool())
+    _agent_registry.register(N8nInstallNodeTool())
 
     # Web (optional deps)
     try:

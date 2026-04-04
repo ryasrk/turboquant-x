@@ -1113,3 +1113,150 @@ body {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+
+/* ── Panel link (Open in n8n) ─────────────────────────────────────── */
+.ws-panel-link {
+  float: right;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--accent);
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.ws-panel-link:hover { opacity: 1; text-decoration: underline; }
+
+.ws-icon-action {
+  float: right;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.ws-icon-action:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Execution history panel ──────────────────────────────────────── */
+.ws-exec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.ws-exec-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ws-exec-item:hover { border-color: var(--accent); }
+
+.ws-exec-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+}
+.ws-exec-icon.success { color: var(--holo2, #10b981); }
+.ws-exec-icon.error { color: #ef4444; }
+.ws-exec-icon.running { color: var(--accent); }
+
+.ws-exec-info {
+  flex: 1;
+  min-width: 0;
+}
+.ws-exec-id {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-exec-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.ws-exec-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+.ws-exec-status.success { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.ws-exec-status.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.ws-exec-status.running { background: rgba(99, 102, 241, 0.15); color: var(--accent); }
+
+.ws-exec-empty {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* Execution detail overlay */
+.ws-exec-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.ws-exec-detail-dialog {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(90vw, 700px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ws-exec-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.ws-exec-detail-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.ws-exec-detail-body pre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  color: var(--text);
+}
+.ws-exec-detail-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text-dim);
+  padding: 4px 8px;
+}
+.ws-exec-detail-close:hover { color: var(--text); }

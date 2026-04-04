@@ -19,6 +19,10 @@ from src.agent.tools.encode_tool import EncodeDecodeTool
 from src.agent.tools.terminal_tool import TerminalTool
 from src.agent.tools.mcp_bridge_tool import McpBridgeTool
 from src.agent.tools.document_tools import GenerateWordTool, GeneratePdfTool, GenerateCsvTool
+from src.agent.tools.n8n_tools import (
+    N8nWorkflowStatusTool, N8nListExecutionsTool, N8nExecutionDetailTool,
+    N8nDiagnoseErrorTool, N8nInstallNodeTool,
+)
 
 __all__ = [
     # File System
@@ -47,4 +51,7 @@ __all__ = [
     "McpBridgeTool",
     # Document Generation
     "GenerateWordTool", "GeneratePdfTool", "GenerateCsvTool",
+    # n8n Workflow Management
+    "N8nWorkflowStatusTool", "N8nListExecutionsTool", "N8nExecutionDetailTool",
+    "N8nDiagnoseErrorTool", "N8nInstallNodeTool",
 ]
