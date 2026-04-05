@@ -282,7 +282,7 @@ connections[COUNT]{src,dest}:
 
 ## Common Node Types & Required Params
 
-TRIGGERS: n8n-nodes-base.cron (daily/weekly), scheduleTrigger (interval: rule.interval), webhook (httpMethod,path), manualWorkflowTrigger, @n8n/n8n-nodes-langchain.chatTrigger
+TRIGGERS: n8n-nodes-base.cron (daily/weekly), scheduleTrigger (interval: rule.interval), webhook (httpMethod,path), manualTrigger, @n8n/n8n-nodes-langchain.chatTrigger
 
 MESSAGING:
 - telegram: chatId (REQUIRED), text (REQUIRED). Creds: telegramApi
@@ -381,10 +381,21 @@ def validate_workflow(data: dict[str, Any]) -> list[str]:
     if not has_trigger:
         errors.append("Workflow must have at least one trigger node")
 
-    # Validate connections reference existing nodes
-    for source_name in data.get("connections", {}):
+    # Validate connections reference existing nodes (both source AND dest)
+    for source_name, conn_data in data.get("connections", {}).items():
         if source_name not in node_names:
             errors.append(f"Connection source '{source_name}' not found in nodes")
+        # Check destination nodes exist
+        if isinstance(conn_data, dict):
+            for conn_type, outputs in conn_data.items():
+                if isinstance(outputs, list):
+                    for output_group in outputs:
+                        if isinstance(output_group, list):
+                            for link in output_group:
+                                if isinstance(link, dict):
+                                    dest = link.get("node", "")
+                                    if dest and dest not in node_names:
+                                        errors.append(f"Connection dest '{dest}' (from '{source_name}') not found in nodes")
 
     return errors
 
@@ -444,101 +455,34 @@ async def generate_workflow_via_llm(
 
     yield {"event": "thinking", "message": "Analyzing your automation request..."}
 
-    # ── Fetch raw node data for filtering ────────────────────────
-    all_nodes: list[dict] = []
+    # ── Smart search for relevant nodes (TF-IDF) ────────────────
+    node_list_str = ""
     try:
-        from src.server.n8n_manager import get_available_nodes
-        all_nodes = await get_available_nodes()
+        from src.server.smart_search import search_nodes
+        relevant_nodes = await search_nodes(prompt, top_k=20)
+
+        if relevant_nodes:
+            # Build compact TOON-style node list with credential type hints
+            node_entries = []
+            seen = set()
+            for n in relevant_nodes:
+                name = n.get("name", "")
+                if name in seen:
+                    continue
+                seen.add(name)
+                cred_types = n.get("credentials", [])
+                cred_str = ""
+                if cred_types and isinstance(cred_types, list):
+                    cred_names = [c.get("name", "") for c in cred_types if isinstance(c, dict) and c.get("name")]
+                    if cred_names:
+                        cred_str = f" [creds:{','.join(cred_names[:2])}]"
+                node_entries.append({"name": name, "cred": cred_str})
+
+            node_list_str = "Available n8n nodes (ranked by relevance):\n"
+            node_list_str += "nodes[{}]{{type}}:\n".format(len(node_entries))
+            node_list_str += "\n".join(f"  {e['name']}{e['cred']}" for e in node_entries)
     except Exception:
-        logger.warning("Could not fetch n8n node types for prompt")
-
-    # ── Filter nodes relevant to the user's prompt ──────────────
-    prompt_lower = prompt.lower()
-    prompt_keywords = set(prompt_lower.split())
-
-    # Build keyword mapping for common services/concepts
-    _KEYWORD_MAP: dict[str, list[str]] = {
-        "telegram": ["telegram"],
-        "slack": ["slack"],
-        "discord": ["discord"],
-        "email": ["email", "gmail", "smtp", "imap"],
-        "gmail": ["gmail", "email"],
-        "github": ["github"],
-        "google": ["google", "sheets", "drive", "calendar"],
-        "sheets": ["googlesheets", "sheets"],
-        "drive": ["googledrive", "drive"],
-        "http": ["httprequest", "http", "webhook", "api"],
-        "webhook": ["webhook", "httprequest"],
-        "api": ["httprequest", "webhook", "api"],
-        "database": ["postgres", "mysql", "mongodb", "redis", "database"],
-        "postgres": ["postgres"],
-        "mysql": ["mysql"],
-        "ai": ["langchain", "openai", "ai"],
-        "openai": ["openai", "langchain"],
-        "schedule": ["cron", "schedule", "trigger"],
-        "cron": ["cron", "schedule"],
-        "file": ["ftp", "ssh", "file", "binary", "readbinary", "writebinary"],
-        "rss": ["rssfeed", "rss"],
-        "twitter": ["twitter"],
-        "notion": ["notion"],
-        "airtable": ["airtable"],
-        "jira": ["jira"],
-        "trello": ["trello"],
-        "whatsapp": ["whatsapp"],
-        "sms": ["twilio", "sms"],
-        "reminder": ["cron", "schedule", "trigger", "telegram", "slack", "email"],
-        "notification": ["telegram", "slack", "email", "discord", "whatsapp"],
-        "monitor": ["httprequest", "cron", "schedule", "trigger", "webhook"],
-    }
-
-    # Find relevant node names based on prompt keywords
-    relevant_terms: set[str] = set()
-    for word in prompt_keywords:
-        if word in _KEYWORD_MAP:
-            relevant_terms.update(_KEYWORD_MAP[word])
-        # Also match partial keywords like "tele" -> telegram
-        for key, terms in _KEYWORD_MAP.items():
-            if key.startswith(word) or word.startswith(key):
-                relevant_terms.update(terms)
-
-    # Always include core logic/utility nodes
-    essential_patterns = [
-        "manual", "trigger", "cron", "schedule",
-        ".if", ".switch", ".merge", ".code", ".set",
-        ".httprequest", ".function", ".noop",
-        ".executeworkflow",
-    ]
-
-    def is_relevant(node_name: str) -> bool:
-        lower = node_name.lower()
-        # Essential nodes always included
-        if any(p in lower for p in essential_patterns):
-            return True
-        # Match against prompt-derived terms
-        for term in relevant_terms:
-            if term in lower:
-                return True
-        # Direct match against prompt
-        parts = lower.replace("n8n-nodes-base.", "").replace("@n8n/", "").split(".")
-        return any(part in prompt_lower for part in parts if len(part) > 2)
-
-    filtered_nodes = [n for n in all_nodes if is_relevant(n.get("name", ""))]
-
-    # Build compact TOON-style node list with type info
-    if filtered_nodes:
-        node_names = sorted(set(n.get("name", "") for n in filtered_nodes))
-        node_list_str = "Available n8n nodes (ONLY use these):\n"
-        node_list_str += "nodes[{}]{{type}}:\n".format(len(node_names[:50]))
-        node_list_str += "\n".join(f"  {n}" for n in node_names[:50])
-        if len(node_names) > 50:
-            node_list_str += f"\n  # +{len(node_names) - 50} more"
-    elif all_nodes:
-        common = sorted(set(n.get("name", "") for n in all_nodes))[:40]
-        node_list_str = "Available n8n nodes (common):\n"
-        node_list_str += "nodes[{}]{{type}}:\n".format(len(common))
-        node_list_str += "\n".join(f"  {n}" for n in common)
-    else:
-        node_list_str = ""
+        logger.debug("Smart node search failed, falling back to no node list")
 
     # ── Fetch real credentials from n8n ─────────────────────────
     creds_context = ""
@@ -560,26 +504,30 @@ async def generate_workflow_via_llm(
     except Exception:
         logger.debug("Could not fetch n8n credentials for designer context")
 
-    # ── Search for relevant templates (compact) ─────────────────
+    # ── Smart search for relevant templates ───────────────────────
     template_context = ""
     try:
-        from src.server.n8n_templates import search_templates, get_template_by_id, strip_credentials
-        matches = search_templates(prompt, limit=3)
+        from src.server.smart_search import search_templates_smart
+        from src.server.n8n_templates import get_template_by_id, strip_credentials
+        matches = await search_templates_smart(prompt, top_k=2)
         if matches:
             yield {"event": "thinking", "message": f"Found {len(matches)} relevant template(s) for reference..."}
             ref_parts = []
-            for m in matches[:2]:  # at most 2 full references
-                tpl = get_template_by_id(m["id"])
+            for m in matches:
+                tpl_id = m.get("id")
+                if not tpl_id:
+                    continue
+                tpl = get_template_by_id(tpl_id)
                 if tpl and tpl.get("workflow"):
                     cleaned = strip_credentials(tpl["workflow"])
                     try:
                         from src.server.workflow_toon import workflow_to_toon
                         ref_parts.append(
-                            f"### Template: {m['name']}\n{workflow_to_toon(cleaned)}"
+                            f"### Template: {m.get('name', 'Untitled')}\n{workflow_to_toon(cleaned)}"
                         )
                     except Exception:
                         ref_parts.append(
-                            f"### Template: {m['name']}\n"
+                            f"### Template: {m.get('name', 'Untitled')}\n"
                             f"```json\n{json.dumps(cleaned, separators=(',', ':'))}\n```"
                         )
             if ref_parts:
@@ -634,16 +582,31 @@ async def generate_workflow_via_llm(
         # Rough token estimate: ~4 chars per token
         est_tokens = len(system_content) // 4 + len(prompt) // 4 + 4096  # +4096 for response
         if est_tokens > ctx_size * 0.85:
-            # Trim: drop templates first, then truncate node list
+            # Smart truncation priorities: keep creds (critical), trim templates first, then nodes
             yield {"event": "thinking", "message": "Optimizing prompt for model context window..."}
+            budget = int(ctx_size * 4 * 0.80) - len(_get_system_prompt()) - len(prompt) - 16000  # chars budget
+
             system_content = _get_system_prompt()
-            if node_list_str:
-                # Only include first portion of node list
-                max_node_chars = max(2000, (ctx_size * 4) - len(_get_system_prompt()) - len(prompt) - 16000)
-                if len(node_list_str) > max_node_chars:
-                    node_list_str = node_list_str[:int(max_node_chars)] + "\n... (truncated)"
+
+            # Priority 1: Always keep credentials (they're small and critical)
+            if creds_context:
+                budget -= len(creds_context)
+                system_content += creds_context
+
+            # Priority 2: Node list (truncate if needed)
+            if node_list_str and budget > 500:
+                if len(node_list_str) > budget:
+                    node_list_str = node_list_str[:max(500, budget)] + "\n... (truncated)"
                 system_content += f"\n\n## {node_list_str}"
-            # Skip template context when space is limited
+                budget -= len(node_list_str)
+
+            # Priority 3: Templates only if enough space remains
+            if template_context and budget > 1000:
+                if len(template_context) > budget:
+                    template_context = ""  # Drop entirely if too big
+                else:
+                    system_content += template_context
+
             messages = [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt},
@@ -686,19 +649,62 @@ async def generate_workflow_via_llm(
 
         yield {"event": "building", "message": "Parsing workflow response..."}
 
-        # Try TOON parsing first, then fall back to JSON
-        workflow = None
-        try:
-            from src.server.workflow_toon import extract_toon_from_response, toon_to_workflow
-            toon_text = extract_toon_from_response(response_text)
-            if toon_text:
-                workflow = toon_to_workflow(toon_text)
-                logger.info("Parsed TOON response → %d nodes", len(workflow.get("nodes", [])))
-        except Exception as exc:
-            logger.debug("TOON parsing failed, falling back to JSON: %s", exc)
+        # ── Parse + validate with one retry on failure ──────────
+        async def _parse_response(text: str) -> dict[str, Any] | None:
+            """Try TOON first, fall back to JSON."""
+            wf = None
+            try:
+                from src.server.workflow_toon import extract_toon_from_response, toon_to_workflow
+                toon_text = extract_toon_from_response(text)
+                if toon_text:
+                    wf = toon_to_workflow(toon_text)
+                    logger.info("Parsed TOON response → %d nodes", len(wf.get("nodes", [])))
+            except Exception as exc:
+                logger.debug("TOON parsing failed, falling back to JSON: %s", exc)
+            if wf is None:
+                wf = extract_json_from_llm_response(text)
+            return wf
 
+        workflow = await _parse_response(response_text)
+
+        # Retry once on parse failure or validation failure
+        retry_reason = None
         if workflow is None:
-            workflow = extract_json_from_llm_response(response_text)
+            retry_reason = "Your response could not be parsed as TOON or JSON. Return ONLY valid TOON format — no markdown, no explanation."
+        else:
+            if "pinData" not in workflow:
+                workflow["pinData"] = {}
+            validation_errors = validate_workflow(workflow)
+            if validation_errors:
+                workflow = _auto_fix_workflow(workflow)
+                remaining = validate_workflow(workflow)
+                if remaining:
+                    retry_reason = f"Workflow has validation errors: {'; '.join(remaining)}. Fix these issues and return corrected TOON."
+                    workflow = None
+
+        if retry_reason and not dispose_after:
+            # Retry with error feedback
+            yield {"event": "building", "message": "Retrying with corrections..."}
+            retry_messages = messages + [
+                {"role": "assistant", "content": response_text[:2000]},
+                {"role": "user", "content": retry_reason},
+            ]
+            try:
+                result2 = await asyncio.to_thread(
+                    engine_to_use.chat, retry_messages, max_tokens=4096, temperature=0.2
+                )
+                if isinstance(result2, tuple):
+                    msg2, _ = result2
+                    retry_text = msg2.get("content", "") if isinstance(msg2, dict) else str(msg2)
+                elif isinstance(result2, dict):
+                    retry_text = result2.get("content", "") or result2.get("choices", [{}])[0].get("message", {}).get("content", "")
+                else:
+                    retry_text = str(result2)
+
+                if retry_text:
+                    workflow = await _parse_response(retry_text)
+            except Exception as e:
+                logger.debug("Retry failed: %s", e)
 
         if workflow is None:
             logger.error("Failed to extract workflow from LLM response: %s", response_text[:500])
@@ -709,15 +715,9 @@ async def generate_workflow_via_llm(
         if "pinData" not in workflow:
             workflow["pinData"] = {}
 
-        # Validate
+        # Final validation
         validation_errors = validate_workflow(workflow)
         if validation_errors:
-            logger.warning("Workflow validation errors: %s", validation_errors)
-            yield {
-                "event": "building",
-                "message": f"Fixing {len(validation_errors)} validation issue(s)...",
-            }
-            # Try to auto-fix common issues
             workflow = _auto_fix_workflow(workflow)
             remaining = validate_workflow(workflow)
             if remaining:
@@ -744,6 +744,28 @@ async def generate_workflow_via_llm(
                 }
         except Exception:
             pass
+
+        # Attempt test execution for early error detection
+        wf_id = workflow.get("id")
+        if wf_id:
+            try:
+                from src.server.n8n_manager import test_execute_workflow
+                yield {"event": "building", "message": "Running test execution..."}
+                test_result = await test_execute_workflow(str(wf_id), timeout=20.0)
+                if test_result["success"]:
+                    yield {"event": "building", "message": "Test execution passed."}
+                elif test_result["error"] or test_result["node_errors"]:
+                    err_parts = []
+                    if test_result["error"]:
+                        err_parts.append(f"Error: {test_result['error']}")
+                    for ne in test_result["node_errors"][:3]:
+                        err_parts.append(f"Node '{ne['node']}': {ne['message']}")
+                    yield {
+                        "event": "building",
+                        "message": f"Test execution had issues: {'; '.join(err_parts)}. The workflow was imported but may need manual adjustment.",
+                    }
+            except Exception:
+                logger.debug("Test execution skipped (workflow not yet imported or n8n unavailable)")
 
     except Exception:
         logger.exception("Error generating workflow via LLM")
@@ -786,7 +808,7 @@ def _auto_fix_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
             "parameters": {},
             "id": str(uuid.uuid4()),
             "name": "Manual Trigger",
-            "type": "n8n-nodes-base.manualWorkflowTrigger",
+            "type": "n8n-nodes-base.manualTrigger",
             "typeVersion": 1,
             "position": [0, 300],
         }

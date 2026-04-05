@@ -280,9 +280,11 @@ class N8nInstallNodeTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Install a community node package in n8n. Use when a workflow requires "
-            "a node that is not installed, or the user asks to add a new integration. "
-            "Provide the npm package name (e.g. 'n8n-nodes-slack')."
+            "Install a community node package in n8n. ONLY for community packages "
+            "(npm packages starting with 'n8n-nodes-' or '@scope/n8n-nodes-'). "
+            "Do NOT use for built-in nodes (n8n-nodes-base.* or @n8n/n8n-nodes-langchain.*) — "
+            "those are already installed. If a built-in node is 'not found', it likely has a "
+            "different name — use n8n_list_node_types to search for it."
         )
 
     @property
@@ -292,7 +294,7 @@ class N8nInstallNodeTool(Tool):
             "properties": {
                 "package_name": {
                     "type": "string",
-                    "description": "npm package name to install (e.g. 'n8n-nodes-slack')",
+                    "description": "npm package name to install (e.g. 'n8n-nodes-google-drive', '@custom/n8n-nodes-xyz')",
                 },
             },
             "required": ["package_name"],
@@ -304,6 +306,27 @@ class N8nInstallNodeTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         package_name = kwargs["package_name"]
+
+        # Guard: prevent installing built-in packages
+        if package_name.startswith("n8n-nodes-base.") or package_name.startswith("@n8n/"):
+            # This is a built-in node type, not an npm package
+            node_short = package_name.split(".")[-1] if "." in package_name else package_name.split("/")[-1]
+            try:
+                from src.server.smart_search import search_nodes
+                matches = await search_nodes(node_short, top_k=3)
+                suggestions = [f"{m.get('displayName', '?')} ({m.get('name', '?')})" for m in matches]
+                return (
+                    f"'{package_name}' is a built-in node type, not an npm package — it's already installed.\n"
+                    f"If you're looking for this node, search results: {suggestions}\n"
+                    f"Use n8n_list_node_types(search=\"{node_short}\") to find the correct name."
+                )
+            except Exception:
+                return (
+                    f"'{package_name}' is a built-in node type (n8n-nodes-base or @n8n/n8n-nodes-langchain), "
+                    f"not an npm package. Built-in nodes are already installed. "
+                    f"Use n8n_list_node_types to search for it."
+                )
+
         from src.server.n8n_manager import install_community_node
 
         try:
@@ -311,6 +334,90 @@ class N8nInstallNodeTool(Tool):
             return f"Successfully installed {package_name}: {json.dumps(result)}"
         except Exception as e:
             return f"Failed to install {package_name}: {e}"
+
+
+class N8nListCommunityNodesTool(Tool):
+    """List installed community node packages in n8n."""
+
+    @property
+    def name(self) -> str:
+        return "n8n_list_community_nodes"
+
+    @property
+    def description(self) -> str:
+        return (
+            "List community node packages installed in n8n (not built-in nodes). "
+            "Shows package name, version, and installed node types. Use to check "
+            "what extra integrations are installed."
+        )
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs: Any) -> str:
+        from src.server.n8n_manager import list_community_nodes
+
+        try:
+            packages = await list_community_nodes()
+            if not packages:
+                return "No community packages installed. Only built-in nodes (n8n-nodes-base) are available."
+
+            lines = [f"community_packages[{len(packages)}]{{name,version,nodes}}:"]
+            for pkg in packages:
+                name = pkg.get("packageName", pkg.get("name", "?"))
+                ver = pkg.get("installedVersion", pkg.get("version", "?"))
+                node_names = []
+                for n in pkg.get("installedNodes", []):
+                    node_names.append(n.get("name", "?") if isinstance(n, dict) else str(n))
+                lines.append(f"  {name},{ver},{';'.join(node_names[:3])}")
+
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error listing community nodes: {e}"
+
+
+class N8nUninstallNodeTool(Tool):
+    """Uninstall a community node package from n8n."""
+
+    @property
+    def name(self) -> str:
+        return "n8n_uninstall_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Uninstall a community node package from n8n. Only works for community "
+            "packages, not built-in nodes. Use n8n_list_community_nodes first to see "
+            "what's installed."
+        )
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "package_name": {
+                    "type": "string",
+                    "description": "npm package name to uninstall",
+                },
+            },
+            "required": ["package_name"],
+        }
+
+    @property
+    def requires_approval(self) -> bool:
+        return True
+
+    async def execute(self, **kwargs: Any) -> str:
+        package_name = kwargs["package_name"]
+        from src.server.n8n_manager import uninstall_community_node
+
+        try:
+            result = await uninstall_community_node(package_name)
+            return f"Successfully uninstalled {package_name}"
+        except Exception as e:
+            return f"Failed to uninstall {package_name}: {e}"
 
 
 class N8nListCredentialsTool(Tool):
@@ -564,13 +671,24 @@ class N8nUpdateWorkflowTool(Tool):
                 wf.setdefault("settings", {}).update(kwargs["settings"])
 
             # Push updated workflow
+            # Validate node params against real schema
+            warnings = await N8nCreateWorkflowTool._validate_node_params(
+                wf.get("nodes", [])
+            )
             update_resp = await n8n_api_call("PUT", f"/rest/workflows/{workflow_id}", json_data=wf)
             update_resp.raise_for_status()
 
             updated = update_resp.json()
             updated_wf = updated.get("data", updated) if isinstance(updated, dict) else updated
             node_count = len(updated_wf.get("nodes", []))
-            return f"Updated workflow '{updated_wf.get('name', workflow_id)}' ({node_count} nodes)"
+            result = f"Updated workflow '{updated_wf.get('name', workflow_id)}' ({node_count} nodes)"
+            if warnings:
+                result += "\n\n⚠️ PARAM VALIDATION WARNINGS:\n" + "\n".join(warnings)
+                result += (
+                    "\n\nUse n8n_get_node_params(node_type) to look up correct "
+                    "param names, then n8n_update_workflow to fix them."
+                )
+            return result
         except Exception as e:
             return f"Failed to update workflow {workflow_id}: {e}"
 
@@ -824,43 +942,10 @@ class N8nGetWorkflowFullTool(Tool):
             raw = resp.json()
             wf = raw.get("data", raw) if isinstance(raw, dict) else raw
 
-            # Return TOON-formatted compact summary for token efficiency
-            nodes = wf.get("nodes", [])
-            lines = [
-                f"# workflow {workflow_id}",
-                f"name: {wf.get('name', 'Untitled')}",
-                f"active: {wf.get('active', False)}",
-            ]
-
-            # Nodes in TOON tabular format
-            lines.append(f"\nnodes[{len(nodes)}]{{name,type,cred_ids,params}}:")
-            for n in nodes:
-                ntype = n.get("type", "?")
-                nname = n.get("name", ntype)
-                creds = n.get("credentials", {})
-                params = n.get("parameters", {})
-                cred_str = ";".join(f"{k}={v.get('id','?')}" for k, v in creds.items() if isinstance(v, dict)) or "-"
-                key_params = {k: v for k, v in params.items() if v and k not in ("options", "additionalFields")}
-                p_str = json.dumps(key_params, default=str, ensure_ascii=False) if key_params else "-"
-                if len(p_str) > 150:
-                    p_str = p_str[:150] + "..."
-                lines.append(f"  {nname},{ntype},{cred_str},{p_str}")
-
-            # Connections in TOON format
-            conn_pairs = []
-            for src_node, targets in wf.get("connections", {}).items():
-                if isinstance(targets, dict):
-                    for _key, target_list in targets.items():
-                        if isinstance(target_list, list):
-                            for group in target_list:
-                                if isinstance(group, list):
-                                    for t in group:
-                                        conn_pairs.append(f"  {src_node},{t.get('node', '?')}")
-            if conn_pairs:
-                lines.append(f"\nconnections[{len(conn_pairs)}]{{src,dest}}:")
-                lines.extend(conn_pairs)
-
-            return "\n".join(lines)
+            # Use the TOON encoder for consistent, round-trippable output
+            from src.server.workflow_toon import workflow_to_toon
+            header = f"# workflow {workflow_id}\nactive: {wf.get('active', False)}\n"
+            return header + workflow_to_toon(wf)
         except Exception as e:
             return f"Error fetching workflow {workflow_id}: {e}"
 
@@ -957,6 +1042,9 @@ class N8nCreateWorkflowTool(Tool):
         else:
             return "Provide either workflow_json OR (name + nodes + connections)."
 
+        # ── Auto-validate node params against real schema ───────────────
+        warnings = await self._validate_node_params(nodes)
+
         payload = {
             "name": name,
             "nodes": nodes,
@@ -970,9 +1058,96 @@ class N8nCreateWorkflowTool(Tool):
             resp.raise_for_status()
             raw = resp.json()
             wf = raw.get("data", raw) if isinstance(raw, dict) else raw
-            return f"Created workflow '{wf.get('name')}' (ID: {wf.get('id')})"
+            result = f"Created workflow '{wf.get('name')}' (ID: {wf.get('id')})"
+            if warnings:
+                result += "\n\n⚠️ PARAM VALIDATION WARNINGS:\n" + "\n".join(warnings)
+                result += (
+                    "\n\nUse n8n_get_node_params(node_type) to look up correct "
+                    "param names, then n8n_update_workflow to fix them."
+                )
+            return result
         except Exception as e:
             return f"Failed to create workflow: {e}"
+
+    @staticmethod
+    async def _validate_node_params(nodes: list[dict]) -> list[str]:
+        """Validate each node's parameters against the real n8n schema.
+
+        Returns a list of warning strings for any invalid/missing params.
+        """
+        warnings = []
+        try:
+            from src.server.n8n_manager import get_available_nodes
+
+            all_nodes = await get_available_nodes()
+            if not all_nodes:
+                return warnings
+
+            # Build lookup: type_name → node schema
+            schema_map = {}
+            for n in all_nodes:
+                nname = n.get("name", "")
+                if nname:
+                    schema_map[nname] = n
+
+            for node in nodes:
+                node_type = node.get("type", "")
+                node_name = node.get("name", node_type)
+                params = node.get("parameters", {})
+
+                if not node_type or node_type not in schema_map:
+                    continue
+
+                schema = schema_map[node_type]
+                schema_props = schema.get("properties", [])
+                if not schema_props:
+                    continue
+
+                # Build set of valid param names from schema
+                valid_names = {p.get("name", "") for p in schema_props if p.get("name")}
+
+                # Check for required params that are missing
+                # Determine active resource/operation from the node's params
+                active_resource = params.get("resource", "")
+                active_operation = params.get("operation", "")
+
+                for prop in schema_props:
+                    pname = prop.get("name", "")
+                    required = prop.get("required", False)
+                    if not required or not pname:
+                        continue
+
+                    # Check displayOptions filter
+                    show = prop.get("displayOptions", {}).get("show", {})
+                    if show:
+                        skip = False
+                        if "resource" in show and active_resource:
+                            if active_resource not in show["resource"]:
+                                skip = True
+                        if "operation" in show and active_operation:
+                            if active_operation not in show["operation"]:
+                                skip = True
+                        if skip:
+                            continue
+
+                    if pname not in params:
+                        warnings.append(
+                            f"  [{node_name}] Missing REQUIRED param '{pname}' "
+                            f"(type: {prop.get('type', '?')})"
+                        )
+
+                # Check for unknown/hallucinated param names
+                for pname in params:
+                    if pname not in valid_names:
+                        warnings.append(
+                            f"  [{node_name}] Unknown param '{pname}' — "
+                            f"not in {node_type} schema. Check n8n_get_node_params."
+                        )
+
+        except Exception as e:
+            logger.debug("Param validation skipped: %s", e)
+
+        return warnings
 
 
 class N8nDeleteWorkflowTool(Tool):
@@ -1356,18 +1531,25 @@ class N8nGetNodeTypesTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        from src.server.n8n_manager import get_available_nodes
-
         search = kwargs.get("search", "").lower()
 
         try:
-            nodes = await get_available_nodes()
             if search:
-                nodes = [
-                    n for n in nodes
-                    if search in n.get("name", "").lower()
-                    or search in n.get("displayName", "").lower()
-                ]
+                # Use TF-IDF smart search for better accuracy
+                try:
+                    from src.server.smart_search import search_nodes
+                    nodes = await search_nodes(search, top_k=50)
+                except Exception:
+                    from src.server.n8n_manager import get_available_nodes
+                    all_nodes = await get_available_nodes()
+                    nodes = [
+                        n for n in all_nodes
+                        if search in n.get("name", "").lower()
+                        or search in n.get("displayName", "").lower()
+                    ]
+            else:
+                from src.server.n8n_manager import get_available_nodes
+                nodes = await get_available_nodes()
 
             if not nodes:
                 return f"No node types found{f' matching \"{search}\"' if search else ''}."
@@ -1383,6 +1565,179 @@ class N8nGetNodeTypesTool(Tool):
             return "\n".join(lines)
         except Exception as e:
             return f"Error listing node types: {e}"
+
+
+class N8nGetNodeParamsTool(Tool):
+    """Get detailed parameters for a specific n8n node type."""
+
+    @property
+    def name(self) -> str:
+        return "n8n_get_node_params"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Get the full parameter schema for a specific n8n node type. Returns all "
+            "configurable parameters with their types, required status, default values, "
+            "and available options. Essential for understanding how to configure a node "
+            "correctly when creating or updating workflows. Provide the exact node type "
+            "name (e.g. 'n8n-nodes-base.telegram') or a search term."
+        )
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "node_type": {
+                    "type": "string",
+                    "description": (
+                        "The node type name (e.g. 'n8n-nodes-base.telegram', "
+                        "'n8n-nodes-base.httpRequest') or a search term (e.g. 'telegram')"
+                    ),
+                },
+                "resource": {
+                    "type": "string",
+                    "description": "Optional: filter params to a specific resource (e.g. 'message', 'chat')",
+                },
+                "operation": {
+                    "type": "string",
+                    "description": "Optional: filter params to a specific operation (e.g. 'sendMessage', 'get')",
+                },
+            },
+            "required": ["node_type"],
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        node_type = kwargs.get("node_type", "")
+        resource_filter = kwargs.get("resource", "")
+        operation_filter = kwargs.get("operation", "")
+        from src.server.n8n_manager import get_available_nodes
+
+        try:
+            nodes = await get_available_nodes()
+
+            # Find exact match first
+            node = None
+            for n in nodes:
+                if n.get("name", "") == node_type:
+                    node = n
+                    break
+
+            # Fuzzy match if no exact match
+            if node is None:
+                search_term = node_type.lower()
+                for n in nodes:
+                    if search_term in n.get("name", "").lower() or search_term in n.get("displayName", "").lower():
+                        node = n
+                        break
+
+            # TF-IDF fallback
+            if node is None:
+                try:
+                    from src.server.smart_search import search_nodes
+                    results = await search_nodes(node_type, top_k=1)
+                    if results:
+                        node = results[0]
+                except Exception:
+                    pass
+
+            if node is None:
+                return f"Node type '{node_type}' not found. Use n8n_list_node_types to search."
+
+            lines = [
+                f"# {node.get('displayName', '?')} ({node.get('name', '?')})",
+                f"description: {node.get('description', '')}",
+            ]
+
+            # Credentials
+            creds = node.get("credentials", [])
+            if creds:
+                cred_strs = [f"{c.get('name','?')}{'(REQUIRED)' if c.get('required') else ''}" for c in creds if isinstance(c, dict)]
+                lines.append(f"credentials: {', '.join(cred_strs)}")
+
+            # Version info
+            ver = node.get("version", "?")
+            lines.append(f"version: {ver}")
+            lines.append("")
+
+            # Build compact parameter listing
+            props = node.get("properties", [])
+            if not props:
+                lines.append("No configurable parameters.")
+                return "\n".join(lines)
+
+            # Categorize params by resource/operation context
+            lines.append(f"params[{len(props)}]{{name,type,info}}:")
+
+            for p in props:
+                name = p.get("name", "?")
+                ptype = p.get("type", "?")
+                default = p.get("default", "")
+                required = p.get("required", False)
+                desc = p.get("description", "")
+
+                # Apply filters
+                disp_opts = p.get("displayOptions", {})
+                show = disp_opts.get("show", {})
+                if resource_filter and "resource" in show:
+                    allowed = show["resource"]
+                    if isinstance(allowed, list) and resource_filter not in allowed:
+                        continue
+                if operation_filter and "operation" in show:
+                    allowed = show["operation"]
+                    if isinstance(allowed, list) and operation_filter not in allowed:
+                        continue
+
+                # Build compact info string
+                parts = []
+                if required:
+                    parts.append("REQUIRED")
+                if default not in ("", None, False, 0, []):
+                    def_str = str(default)
+                    if len(def_str) > 30:
+                        def_str = def_str[:30] + "..."
+                    parts.append(f"default={def_str}")
+
+                # Options (for dropdown-type params)
+                options = p.get("options", [])
+                if options and ptype == "options":
+                    opt_vals = []
+                    for o in options[:8]:
+                        if isinstance(o, dict):
+                            opt_vals.append(str(o.get("value", o.get("name", "?"))))
+                        else:
+                            opt_vals.append(str(o))
+                    opt_str = "|".join(opt_vals)
+                    if len(options) > 8:
+                        opt_str += f"|+{len(options) - 8}more"
+                    parts.append(f"[{opt_str}]")
+
+                # Context (when this param applies)
+                if show:
+                    ctx_parts = []
+                    for ctx_key, ctx_vals in show.items():
+                        if isinstance(ctx_vals, list):
+                            ctx_parts.append(f"{ctx_key}={','.join(str(v) for v in ctx_vals[:3])}")
+                    if ctx_parts:
+                        parts.append(f"when:{';'.join(ctx_parts)}")
+
+                info = " ".join(parts) if parts else ""
+
+                # Truncate description
+                if desc and len(desc) > 60:
+                    desc = desc[:57] + "..."
+
+                line = f"  {name}({ptype})"
+                if info:
+                    line += f" {info}"
+                if desc:
+                    line += f" — {desc}"
+                lines.append(line)
+
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error getting node params: {e}"
 
 
 # ── Template tools ───────────────────────────────────────────────────
@@ -1426,13 +1781,31 @@ class N8nSearchTemplatesTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        from src.server.n8n_templates import search_templates, get_categories
+        from src.server.n8n_templates import get_categories
 
         query = kwargs.get("query", "")
         category = kwargs.get("category")
         limit = int(kwargs.get("limit", 10))
 
-        results = search_templates(query, category=category, limit=limit)
+        # Use TF-IDF smart search for better accuracy
+        results = []
+        try:
+            from src.server.smart_search import search_templates_smart
+            smart_results = await search_templates_smart(query, top_k=limit)
+            if smart_results:
+                # Filter by category if specified
+                if category:
+                    cat_lower = category.lower()
+                    smart_results = [t for t in smart_results if cat_lower in t.get("category", "").lower()]
+                results = smart_results
+        except Exception:
+            pass
+
+        # Fallback to keyword search
+        if not results:
+            from src.server.n8n_templates import search_templates
+            results = search_templates(query, category=category, limit=limit)
+
         if not results:
             cats = get_categories()
             return (

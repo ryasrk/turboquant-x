@@ -181,6 +181,91 @@ async def list_community_nodes() -> list[dict[str, Any]]:
     return data.get("data", data) if isinstance(data, dict) else data
 
 
+# ── Test execution ───────────────────────────────────────────────────
+
+async def test_execute_workflow(workflow_id: str, timeout: float = 30.0) -> dict[str, Any]:
+    """Run a test execution of a workflow and return the result.
+
+    Args:
+        workflow_id: The n8n workflow ID to test.
+        timeout: Max seconds to wait for execution to complete.
+
+    Returns:
+        Dict with keys: success (bool), error (str|None), execution_id (str|None),
+        node_errors (list of {node, message}).
+    """
+    import asyncio as _asyncio
+    from src.server.n8n_setup import n8n_api_call
+
+    result: dict[str, Any] = {"success": False, "error": None, "execution_id": None, "node_errors": []}
+
+    try:
+        # Trigger test execution via n8n internal API
+        resp = await n8n_api_call(
+            "POST",
+            f"/rest/workflows/{workflow_id}/run",
+            json={"runData": {}},
+        )
+        if resp.status_code == 404:
+            # Fallback: try the manual trigger endpoint
+            resp = await n8n_api_call(
+                "POST",
+                f"/rest/test-webhook/{workflow_id}",
+                json={},
+            )
+        resp.raise_for_status()
+        run_data = resp.json()
+
+        # The response may contain the execution result directly or an execution ID
+        exec_id = None
+        if isinstance(run_data, dict):
+            exec_id = run_data.get("executionId") or run_data.get("data", {}).get("executionId")
+            if not exec_id:
+                exec_id = run_data.get("id")
+
+        if exec_id:
+            result["execution_id"] = str(exec_id)
+            # Wait for execution to complete
+            for _ in range(int(timeout / 2)):
+                await _asyncio.sleep(2)
+                try:
+                    detail = await get_execution_detail(str(exec_id))
+                    stopped = detail.get("stoppedAt") or detail.get("finished") is not None
+                    if stopped:
+                        # Check for errors
+                        inner = detail.get("data", {})
+                        if isinstance(inner, dict):
+                            rd = inner.get("resultData", {})
+                            top_err = rd.get("error")
+                            if top_err:
+                                err_msg = top_err if isinstance(top_err, str) else top_err.get("message", str(top_err))
+                                result["error"] = err_msg
+                            # Check per-node errors
+                            run_results = rd.get("runData", {})
+                            for node_name, runs in run_results.items():
+                                for run in (runs if isinstance(runs, list) else [runs]):
+                                    if isinstance(run, dict) and run.get("error"):
+                                        err = run["error"]
+                                        msg = err if isinstance(err, str) else err.get("message", str(err))
+                                        result["node_errors"].append({"node": node_name, "message": msg})
+
+                        if not result["error"] and not result["node_errors"]:
+                            result["success"] = True
+                        return result
+                except Exception:
+                    continue
+
+            result["error"] = "Execution timed out"
+        else:
+            # Direct execution result
+            result["success"] = True
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
+
+
 # ── Execution logs ───────────────────────────────────────────────────
 
 async def get_executions(

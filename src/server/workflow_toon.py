@@ -67,6 +67,9 @@ def workflow_to_toon(wf: dict[str, Any]) -> str:
                     # Compact JSON for complex values
                     val = json.dumps(v, separators=(",", ":"), ensure_ascii=False, default=str)
                     section_lines.append(f"    {k}: {val}")
+                elif isinstance(v, str) and v and (v.isdigit() or v.replace(".", "", 1).isdigit() or v.replace("-", "", 1).isdigit()):
+                    # Quote strings that look like numbers to preserve type
+                    section_lines.append(f'    {k}: "{v}"')
                 else:
                     section_lines.append(f"    {k}: {v}")
             param_sections.append("\n".join(section_lines))

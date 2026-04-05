@@ -1,0 +1,58 @@
+nohup: ignoring input
+2026-04-05 11:36:44 [INFO] __main__: Auto-selected model: qwen2.5-7b-instruct (models/qwen2.5-7b-instruct-q4_k_m.gguf)
+/home/ryasr/personal-project/llm-turboquant/turboquant-x/src/utils/memory.py:75: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml
+2026-04-05 11:36:44 [INFO] src.utils.gpu_layers: GPU layer distribution — model: qwen2.5-7b-instruct-q4_k_m.gguf | layers: 28 | free VRAM: 6.9 GB | budget: 6.4 GB | bytes/layer: 167 MB | kv/layer: 8 MB | optimal n_gpu_layers: 28
+2026-04-05 11:36:44 [INFO] __main__: Auto GPU layers: 28 (resolved from VRAM + model size)
+2026-04-05 11:36:44 [INFO] __main__: Starting TurboQuant-X Server
+2026-04-05 11:36:44 [INFO] __main__: Model: qwen2.5-7b-instruct (models/qwen2.5-7b-instruct-q4_k_m.gguf)
+2026-04-05 11:36:44 [INFO] __main__: Inference mode: standard
+2026-04-05 11:36:44 [INFO] __main__: KV Cache: K=q8_0, V=q4_0
+2026-04-05 11:36:44 [INFO] __main__: Server: 0.0.0.0:8000
+INFO:     Started server process [366895]
+INFO:     Waiting for application startup.
+2026-04-05 11:36:45 [INFO] src.engine.inference: Loading model qwen2.5-7b-instruct (ctx=8192, gpu_layers=28, threads=8/16, batch=512, KV: K=q8_0 V=q4_0)
+llama_context: n_ctx_seq (8192) < n_ctx_train (32768) -- the full capacity of the model will not be utilized
+2026-04-05 11:36:52 [INFO] src.engine.inference: Model loaded in 7.1s
+2026-04-05 11:36:52 [INFO] src.server.app: Model loaded successfully: qwen2.5-7b-instruct (standard)
+2026-04-05 11:36:52 [INFO] src.server.app: Agent registry initialized with 58 tools: ['read_file', 'write_file', 'list_dir', 'find_files', 'replace_in_file', 'exec_shell', 'get_env', 'current_time', 'system_info', 'grep_code', 'python_eval', 'count_lines', 'json_query', 'calculate', 'csv_read', 'read_pdf', 'index_document', 'search_document', 'save_note', 'recall_note', 'delete_note', 'sql_query', 'diff_files', 'encode_decode', 'terminal_exec', 'generate_word', 'generate_pdf', 'generate_csv', 'n8n_workflow_status', 'n8n_list_executions', 'n8n_execution_detail', 'n8n_diagnose_error', 'n8n_install_node', 'n8n_list_community_nodes', 'n8n_uninstall_node', 'n8n_list_credentials', 'n8n_create_credential', 'n8n_delete_credential', 'n8n_update_workflow', 'n8n_suggest_improvements', 'n8n_list_workflows', 'n8n_get_workflow', 'n8n_create_workflow', 'n8n_delete_workflow', 'n8n_activate_workflow', 'n8n_execute_workflow', 'n8n_get_credential', 'n8n_update_credential', 'n8n_get_settings', 'n8n_list_node_types', 'n8n_get_node_params', 'n8n_search_templates', 'n8n_get_template_detail', 'n8n_search_official', 'n8n_fetch_official_template', 'web_search', 'fetch_webpage', 'http_request']
+2026-04-05 11:36:52 [INFO] src.server.app: Thought log initialized: logs/agent-thoughts.log
+2026-04-05 11:36:52 [INFO] src.server.app: Database initialized
+2026-04-05 11:36:52 [INFO] src.server.upload_routes: Started orphan attachment cleanup task
+2026-04-05 11:36:52 [INFO] src.server.app: Orphan attachment cleanup task started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-04-05 11:36:52 [INFO] httpx: HTTP Request: GET http://localhost:5678/healthz "HTTP/1.1 200 OK"
+2026-04-05 11:36:53 [INFO] httpx: HTTP Request: POST http://localhost:5678/rest/login "HTTP/1.1 200 OK"
+2026-04-05 11:36:53 [INFO] src.server.n8n_setup: Logged into n8n as admin@turboquant.local
+2026-04-05 11:36:53 [INFO] httpx: HTTP Request: GET http://localhost:5678/types/nodes.json "HTTP/1.1 200 OK"
+2026-04-05 11:36:54 [INFO] src.server.n8n_manager: Cached 872 n8n node types
+2026-04-05 11:36:54 [INFO] src.server.smart_search: Built node TF-IDF index: 872 nodes
+2026-04-05 11:36:54 [INFO] src.server.n8n_templates: Indexed 283 n8n templates from /home/ryasr/personal-project/llm-turboquant/turboquant-x/data/n8n_templates
+2026-04-05 11:36:54 [INFO] src.server.smart_search: Built template TF-IDF index: 283 templates
+2026-04-05 11:36:54 [INFO] src.server.app: TF-IDF search indexes pre-built
+2026-04-05 11:37:08 [INFO] src.server.app: [e3ada32e] GET /health → 200 (71.4ms)
+INFO:     172.27.160.1:53609 - "GET /health HTTP/1.1" 200 OK
+/home/ryasr/personal-project/llm-turboquant/turboquant-x/env/lib/python3.12/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 17 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  return self._jws.encode(
+2026-04-05 11:37:28 [INFO] src.server.app: [bc5e2462] POST /v1/auth/login → 200 (197.5ms)
+INFO:     127.0.0.1:52796 - "POST /v1/auth/login HTTP/1.1" 200 OK
+/home/ryasr/personal-project/llm-turboquant/turboquant-x/env/lib/python3.12/site-packages/jwt/api_jwt.py:365: InsecureKeyLengthWarning: The HMAC key is 17 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  decoded = self.decode_complete(
+2026-04-05 11:37:28 [INFO] src.engine.cloud.registry: Registered cloud provider: zhipu (OpenAICompatibleProvider)
+2026-04-05 11:37:28 [INFO] src.engine.cloud_engine: Cloud engine ready: provider=zhipu, model=glm-4.5-flash, base_url=(default)
+2026-04-05 11:37:28 [INFO] src.server.app: [44768843] POST /v1/workspaces/4cd5d17a1a1c43f5/chat → 200 (9.3ms)
+INFO:     127.0.0.1:52806 - "POST /v1/workspaces/4cd5d17a1a1c43f5/chat HTTP/1.1" 200 OK
+2026-04-05 11:37:55 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:37:59 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:03 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:07 [INFO] src.server.app: [8faaef47] GET /health → 200 (72.5ms)
+INFO:     172.27.160.1:60371 - "GET /health HTTP/1.1" 200 OK
+2026-04-05 11:38:15 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:17 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:18 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:20 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:22 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:24 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:47 [INFO] httpx: HTTP Request: POST https://open.bigmodel.cn/api/paas/v4/chat/completions "HTTP/1.1 200 OK"
+2026-04-05 11:38:47 [INFO] src.engine.cloud_engine: Cloud engine unloaded

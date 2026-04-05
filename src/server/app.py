@@ -133,13 +133,15 @@ def init_agent_registry() -> None:
         TerminalTool,
         GenerateWordTool, GeneratePdfTool, GenerateCsvTool,
         N8nWorkflowStatusTool, N8nListExecutionsTool, N8nExecutionDetailTool,
-        N8nDiagnoseErrorTool, N8nInstallNodeTool, N8nListCredentialsTool,
+        N8nDiagnoseErrorTool, N8nInstallNodeTool, N8nListCommunityNodesTool,
+        N8nUninstallNodeTool, N8nListCredentialsTool,
         N8nCreateCredentialTool, N8nDeleteCredentialTool, N8nUpdateWorkflowTool,
         N8nSuggestImprovementsTool,
         N8nListWorkflowsTool, N8nGetWorkflowFullTool, N8nCreateWorkflowTool,
         N8nDeleteWorkflowTool, N8nActivateWorkflowTool, N8nExecuteWorkflowTool,
         N8nGetCredentialDataTool, N8nUpdateCredentialTool, N8nGetSettingsTool,
         N8nGetNodeTypesTool,
+        N8nGetNodeParamsTool,
         N8nSearchTemplatesTool, N8nGetTemplateDetailTool,
         N8nSearchOfficialTemplatesTool, N8nFetchOfficialTemplateTool,
     )
@@ -200,6 +202,8 @@ def init_agent_registry() -> None:
     _agent_registry.register(N8nExecutionDetailTool())
     _agent_registry.register(N8nDiagnoseErrorTool())
     _agent_registry.register(N8nInstallNodeTool())
+    _agent_registry.register(N8nListCommunityNodesTool())
+    _agent_registry.register(N8nUninstallNodeTool())
     _agent_registry.register(N8nListCredentialsTool())
     _agent_registry.register(N8nCreateCredentialTool())
     _agent_registry.register(N8nDeleteCredentialTool())
@@ -216,6 +220,7 @@ def init_agent_registry() -> None:
     _agent_registry.register(N8nUpdateCredentialTool())
     _agent_registry.register(N8nGetSettingsTool())
     _agent_registry.register(N8nGetNodeTypesTool())
+    _agent_registry.register(N8nGetNodeParamsTool())
     # n8n Templates
     _agent_registry.register(N8nSearchTemplatesTool())
     _agent_registry.register(N8nGetTemplateDetailTool())
@@ -473,6 +478,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Orphan attachment cleanup task started")
     except Exception as e:
         logger.warning("Failed to start attachment cleanup task: %s", e)
+
+    # Pre-build TF-IDF search indexes (non-blocking background task)
+    async def _prebuild_search_indexes():
+        try:
+            from src.server.smart_search import get_node_index, get_template_index
+            await get_node_index()
+            await get_template_index()
+            logger.info("TF-IDF search indexes pre-built")
+        except Exception as e:
+            logger.debug("TF-IDF pre-build skipped: %s", e)
+
+    asyncio.create_task(_prebuild_search_indexes())
 
     yield
 

@@ -1,0 +1,23 @@
+nohup: ignoring input
+Initializing n8n process
+n8n ready on ::, port 5678
+n8n Task Broker ready on 127.0.0.1, port 5679
+Failed to start Python task runner in internal mode. because its virtual environment is missing from this system. Launching a Python runner in internal mode is intended only for debugging and is not recommended for production. Users are encouraged to deploy in external mode. See: https://docs.n8n.io/hosting/configuration/task-runners/#setting-up-external-mode
+[license SDK] Skipping renewal on init: license cert is not initialized
+Registered runner "JS Task Runner" (EemR06nsoO1pu3ZXgKVW5) 
+Version: 2.14.2
+Building workflow dependency index...
+Finished building workflow dependency index. Processed 0 draft workflows, 0 published workflows.
+
+Editor is now accessible via:
+http://localhost:5678
+401 Wrong username or password. Do you have caps lock on?
+400 Instance owner already setup
+400 Instance owner already setup
+400 Instance owner already setup
+400 Instance owner already setup
+400 Instance owner already setup
+400 Instance owner already setup
+400 Instance owner already setup
+Owner was set up successfully
+Cannot read properties of undefined (reading 'execute')
