@@ -1262,14 +1262,22 @@ _N8N_SYSTEM_PROMPT = (
     "You are a proactive n8n workspace assistant with tools for workflows, "
     "executions, credentials, nodes, and templates.\n\n"
     "WORKFLOW CREATION (MANDATORY STEPS — follow IN ORDER):\n"
-    "1. Search templates: n8n_search_templates → n8n_search_official\n"
-    "2. For EACH node you plan to use, call n8n_get_node_params(node_type, resource, operation) "
+    "1. Search templates: n8n_search_templates (quick look only — do NOT deploy unless it is an EXACT match).\n"
+    "2. DECIDE: If a template matches ALL the required node types (trigger + action nodes), "
+    "use n8n_get_template_detail to deploy it. "
+    "Otherwise, SKIP templates and BUILD CUSTOM — this is the common case.\n"
+    "3. For EACH node you plan to use, call n8n_get_node_params(node_type, resource, operation) "
     "to get the REAL parameter names, types, and required fields.\n"
-    "3. Build the workflow using ONLY the parameter names returned by n8n_get_node_params. "
+    "   - TRIGGER NODE: Every workflow MUST have a trigger (e.g. scheduleTrigger, webhook, githubTrigger).\n"
+    "   - Call n8n_get_node_params for the trigger node too!\n"
+    "4. Build the workflow using ONLY the parameter names returned by n8n_get_node_params. "
     "NEVER use param names from memory — they are often wrong.\n"
-    "4. Deploy via n8n_create_workflow.\n\n"
-    "CRITICAL: If you skip step 2, your workflow WILL have wrong parameter names and WILL fail. "
-    "For example: Slack uses 'channelId' not 'channel', and requires resource+operation params.\n\n"
+    "5. Deploy via n8n_create_workflow.\n\n"
+    "CRITICAL: NEVER deploy an unrelated template. If no template matches, BUILD CUSTOM.\n"
+    "CRITICAL: If you skip step 3, your workflow WILL have wrong parameter names and WILL fail. "
+    "For example: Slack uses 'channelId' not 'channel', and requires resource+operation params.\n"
+    "CRITICAL: DO NOT skip calling n8n_get_node_params for ANY node — including trigger nodes.\n"
+    "CRITICAL: Every workflow MUST start with a trigger node (scheduleTrigger, webhook, etc.).\n\n"
     "CREDENTIALS: Before activation — inspect nodes for credential refs, "
     "n8n_list_credentials to check existing, create missing ones, "
     "link IDs to nodes via n8n_update_workflow, THEN activate.\n"
@@ -1279,7 +1287,64 @@ _N8N_SYSTEM_PROMPT = (
     "2) Errors → n8n_list_executions(status='error') → n8n_diagnose_error. "
     "3) Check credentials before activating. "
     "4) Be concise — show findings, diagnosis, and fix. "
-    "5) ALWAYS call n8n_get_node_params for every node before creating a workflow."
+    "5) ALWAYS call n8n_get_node_params for EVERY node before creating a workflow."
+)
+
+
+# Extra instructions for local models (small LLMs that need explicit guidance)
+_LOCAL_MODEL_SUPPLEMENT = (
+    "## CRITICAL EXECUTION RULES (MUST FOLLOW)\n"
+    "1. You MUST call tools using EXACTLY the <tool_call> format shown below.\n"
+    "2. Call ONE tool per response. After getting the result, call the NEXT tool.\n"
+    "3. NEVER explain what you will do — just output the <tool_call> tag.\n"
+    "4. NEVER say 'let me call' or 'I will call' — output the <tool_call> directly.\n"
+    "5. Every response MUST contain exactly ONE <tool_call> tag until the workflow is created.\n"
+    "6. Brief context (1-2 sentences max) before the tool call is OK.\n\n"
+    "## MANDATORY: Template Decision Rule\n"
+    "- After n8n_search_templates, check if ANY template has the EXACT node types you need.\n"
+    "- If NO template matches (common case), DO NOT search official or fetch templates.\n"
+    "- Instead, go STRAIGHT to n8n_get_node_params for each node and build CUSTOM.\n"
+    "- NEVER deploy a template that does not match the user's request.\n\n"
+    "## MANDATORY: Trigger Node + Get Params for ALL Nodes\n"
+    "- Every workflow MUST start with a trigger node (scheduleTrigger, webhook, githubTrigger, etc.).\n"
+    "- You MUST call n8n_get_node_params for EVERY node you include in the workflow:\n"
+    "  trigger, httpRequest, slack, telegram, github, etc. No exceptions.\n"
+    "- If you skip n8n_get_node_params for any node, the params WILL be wrong.\n\n"
+    "## n8n Workflow JSON Format\n"
+    "When calling n8n_create_workflow, the workflow_json MUST be a valid JSON string with this structure:\n"
+    '```\n'
+    '{"nodes":[{"parameters":{"PARAM":"VALUE"},"type":"n8n-nodes-base.TYPE","typeVersion":1,"position":[X,Y],"name":"NAME"}],'
+    '"connections":{"NodeA":{"main":[[{"node":"NodeB","type":"main","index":0}]]}}}\n'
+    '```\n\n'
+    "## When n8n_get_node_params Shows Summary Mode\n"
+    "If a node has too many params (e.g., Slack), the tool shows available resources/operations.\n"
+    "You MUST call it again with resource and operation filters:\n"
+    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.slack", "resource": "message", "operation": "post"}}</tool_call>\n\n'
+    "## One-Shot Example: Schedule → HTTP → Slack Workflow\n"
+    "NOTE: This example uses Slack. If the user asks for a DIFFERENT service "
+    "(Telegram, email, Discord, etc.), replace the Slack node with that service's node.\n"
+    "Step 1 — Search templates (quick check):\n"
+    '<tool_call>{"name": "n8n_search_templates", "arguments": {"query": "slack message schedule"}}</tool_call>\n'
+    "Step 2 — No match found → Build custom. Get TRIGGER params:\n"
+    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.scheduleTrigger"}}</tool_call>\n'
+    "Step 3 — Get HTTP params:\n"
+    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.httpRequest"}}</tool_call>\n'
+    "Step 4 — Get Slack params (with resource/operation filter):\n"
+    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.slack", "resource": "message", "operation": "post"}}</tool_call>\n'
+    "Step 5 — Create workflow (MUST include trigger + all nodes):\n"
+    '<tool_call>{"name": "n8n_create_workflow", "arguments": {"name": "Schedule HTTP to Slack", "workflow_json": '
+    '"{\\"nodes\\":[{\\"parameters\\":{\\"rule\\":{\\"interval\\":[{\\"field\\":\\"minutes\\",\\"minutesInterval\\":5}]}},\\"type\\":\\"n8n-nodes-base.scheduleTrigger\\",\\"typeVersion\\":1,\\"position\\":[250,300],\\"name\\":\\"Every 5 Minutes\\"},'
+    '{\\"parameters\\":{\\"url\\":\\"https://api.example.com/data\\",\\"method\\":\\"GET\\"},\\"type\\":\\"n8n-nodes-base.httpRequest\\",\\"typeVersion\\":4.2,\\"position\\":[500,300],\\"name\\":\\"Fetch Data\\"},'
+    '{\\"parameters\\":{\\"authentication\\":\\"accessToken\\",\\"resource\\":\\"message\\",\\"operation\\":\\"post\\",\\"select\\":\\"channel\\",\\"channelId\\":{\\"value\\":\\"C1234567890\\",\\"mode\\":\\"id\\"},\\"text\\":\\"=Data: {{$json.data}}\\"},\\"type\\":\\"n8n-nodes-base.slack\\",\\"typeVersion\\":2.2,\\"position\\":[750,300],\\"name\\":\\"Post to Slack\\"}],'
+    '\\"connections\\":{\\"Every 5 Minutes\\":{\\"main\\":[[{\\"node\\":\\"Fetch Data\\",\\"type\\":\\"main\\",\\"index\\":0}]]},'
+    '\\"Fetch Data\\":{\\"main\\":[[{\\"node\\":\\"Post to Slack\\",\\"type\\":\\"main\\",\\"index\\":0}]]}}}"'
+    "}}</tool_call>\n\n"
+    "## IMPORTANT: Node Type Matching\n"
+    "- ALWAYS use the EXACT node type the user asks for.\n"
+    "- If user says 'Telegram' → use n8n-nodes-base.telegram (NOT slack)\n"
+    "- If user says 'email' → use n8n-nodes-base.emailSend (NOT slack)\n"
+    "- If user says 'Discord' → use n8n-nodes-base.discord (NOT slack)\n"
+    "- The example above uses Slack only as a TEMPLATE PATTERN. Replace nodes as needed.\n"
 )
 
 
@@ -1358,7 +1423,7 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None,
     # For chat (agent with tools), we need a cloud engine that supports tool calling.
     # Local engine uses text-based <tool_call> parsing via AgentLoop.
     if provider == "local":
-        from src.agent.loop import AgentLoop
+        from src.agent.loop import AgentLoop, _build_system_prompt
         from src.server.app import get_engine
 
         try:
@@ -1371,9 +1436,22 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None,
             yield {"data": "[DONE]"}
             return
 
+        # Local model needs tool list + <tool_call> format in the system prompt.
+        # The n8n system prompt is already in messages[0] but lacks tool definitions.
+        # Prepend the agent tool format so the local model knows HOW to call tools.
+        agent_tool_prompt = _build_system_prompt(n8n_registry)
+        local_supplement = _LOCAL_MODEL_SUPPLEMENT
+        for i, m in enumerate(messages):
+            if m.get("role") == "system":
+                messages[i] = {
+                    "role": "system",
+                    "content": agent_tool_prompt + "\n\n" + local_supplement + "\n\n" + m["content"],
+                }
+                break
+
         try:
-            loop = AgentLoop(n8n_registry, max_tool_result_chars=4000)
-            async for event in loop.run(local_engine, messages, max_tokens=2048):
+            loop = AgentLoop(n8n_registry, max_tool_result_chars=4000, content_only=True)
+            async for event in loop.run(local_engine, messages, max_tokens=4096, temperature=0.3, top_p=0.85):
                 yield {"data": json.dumps(event)}
             yield {"data": "[DONE]"}
         except Exception as exc:

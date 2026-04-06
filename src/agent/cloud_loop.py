@@ -18,7 +18,7 @@ from src.agent.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-MAX_ITERATIONS = 10
+MAX_ITERATIONS = 20
 MAX_TOOL_RESULT_CHARS = 4_000
 
 _AGENT_SYSTEM_PROMPT = (

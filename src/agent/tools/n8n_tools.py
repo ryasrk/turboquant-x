@@ -1667,16 +1667,17 @@ class N8nGetNodeParamsTool(Tool):
                 lines.append("No configurable parameters.")
                 return "\n".join(lines)
 
-            # Categorize params by resource/operation context
-            lines.append(f"params[{len(props)}]{{name,type,info}}:")
+            # Fuzzy-match resource/operation filters against available values
+            if resource_filter or operation_filter:
+                resource_filter = self._fuzzy_match_filter(
+                    props, "resource", resource_filter
+                )
+                operation_filter = self._fuzzy_match_filter(
+                    props, "operation", operation_filter
+                )
 
+            filtered_props = []
             for p in props:
-                name = p.get("name", "?")
-                ptype = p.get("type", "?")
-                default = p.get("default", "")
-                required = p.get("required", False)
-                desc = p.get("description", "")
-
                 # Apply filters
                 disp_opts = p.get("displayOptions", {})
                 show = disp_opts.get("show", {})
@@ -1688,8 +1689,48 @@ class N8nGetNodeParamsTool(Tool):
                     allowed = show["operation"]
                     if isinstance(allowed, list) and operation_filter not in allowed:
                         continue
+                filtered_props.append(p)
 
-                # Build compact info string
+            # If still too many params (>30) and no filters, show summary first
+            if len(filtered_props) > 30 and not resource_filter and not operation_filter:
+                # Extract available resources and operations
+                resources = set()
+                operations = {}
+                for p in props:
+                    if p.get("name") == "resource" and p.get("options"):
+                        for o in p["options"]:
+                            if isinstance(o, dict):
+                                resources.add(o.get("value", ""))
+                    if p.get("name") == "operation" and p.get("options"):
+                        show = p.get("displayOptions", {}).get("show", {})
+                        res = show.get("resource", [""])[0] if "resource" in show else ""
+                        for o in p["options"]:
+                            if isinstance(o, dict):
+                                operations.setdefault(res, []).append(o.get("value", ""))
+
+                lines.append(f"params[{len(props)}] — TOO MANY to list all. Use resource/operation filters:")
+                if resources:
+                    lines.append(f"  resources: {', '.join(sorted(resources))}")
+                for res, ops in sorted(operations.items()):
+                    label = f"  operations[{res}]" if res else "  operations"
+                    lines.append(f"{label}: {', '.join(ops[:10])}")
+                lines.append("")
+                lines.append("Example: n8n_get_node_params(node_type, resource='message', operation='post')")
+                lines.append("")
+                lines.append("Showing REQUIRED params only:")
+                filtered_props = [p for p in filtered_props if p.get("required")]
+
+            # Categorize params by resource/operation context
+            lines.append(f"params[{len(filtered_props)}]{{name,type,info}}:")
+            for p in filtered_props:
+                name = p.get("name", "?")
+                ptype = p.get("type", "?")
+                default = p.get("default", "")
+                required = p.get("required", False)
+                desc = p.get("description", "")
+                disp_opts = p.get("displayOptions", {})
+                show = disp_opts.get("show", {})
+
                 parts = []
                 if required:
                     parts.append("REQUIRED")
@@ -1738,6 +1779,44 @@ class N8nGetNodeParamsTool(Tool):
             return "\n".join(lines)
         except Exception as e:
             return f"Error getting node params: {e}"
+
+    @staticmethod
+    def _fuzzy_match_filter(
+        props: list[dict], field: str, value: str
+    ) -> str:
+        """Fuzzy-match a resource/operation filter value against actual options.
+
+        If `value` is 'postMessage' but the real option is 'post', returns 'post'.
+        Returns the best match or the original value if no match found.
+        """
+        if not value:
+            return value
+        # Collect all allowed values for this field from option params
+        allowed_values: set[str] = set()
+        for p in props:
+            if p.get("name") == field and p.get("options"):
+                for o in p["options"]:
+                    if isinstance(o, dict) and o.get("value"):
+                        allowed_values.add(str(o["value"]))
+
+        if not allowed_values:
+            return value
+
+        # Exact match
+        if value in allowed_values:
+            return value
+
+        # Case-insensitive match
+        lower_map = {v.lower(): v for v in allowed_values}
+        if value.lower() in lower_map:
+            return lower_map[value.lower()]
+
+        # Substring match: "postMessage" contains "post"
+        for av in allowed_values:
+            if av.lower() in value.lower() or value.lower() in av.lower():
+                return av
+
+        return value
 
 
 # ── Template tools ───────────────────────────────────────────────────

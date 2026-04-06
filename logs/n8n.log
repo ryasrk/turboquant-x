@@ -21,3 +21,173 @@ http://localhost:5678
 400 Instance owner already setup
 Owner was set up successfully
 Cannot read properties of undefined (reading 'execute')
+(element ?? []).forEach is not a function
+User attempted to access a workflow without permissions
+404 Could not load the workflow - you can only access workflows owned by you
+User attempted to access a workflow without permissions
+404 Could not load the workflow - you can only access workflows owned by you
+400 Workflow must be archived before it can be deleted.
+2026-04-05T06:14:37.977Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T06:14:48.200Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T06:14:58.681Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T06:15:09.585Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T07:14:37.970Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T07:14:48.207Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T07:14:58.639Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T07:15:09.498Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T08:14:37.973Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T08:14:48.215Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T08:14:58.666Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T08:15:09.592Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T09:14:37.971Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T09:14:48.198Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T09:14:58.627Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T09:15:09.591Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T10:14:35.321Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T10:14:48.321Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T10:15:05.353Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T10:15:18.354Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T11:14:37.974Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T11:14:48.199Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T11:14:58.643Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T11:15:09.533Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T12:14:37.973Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T12:14:48.206Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T12:14:58.637Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T12:15:09.584Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T13:14:37.974Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T13:14:48.201Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T13:14:58.633Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T13:15:09.468Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+2026-04-05T14:14:37.976Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T14:14:48.212Z [Rudder] error: Response error code: EAI_AGAIN
+2026-04-05T14:14:58.627Z [Rudder] error: Response error code: EAI_AGAIN
+Error fetching feature flags Error [PostHogFetchNetworkError]: Network error while fetching PostHog
+    at new PostHogFetchNetworkError (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:41:5)
+    at PostHog.<anonymous> (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/posthog-core/src/index.ts:546:17)
+    at step (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:102:23)
+    at Object.throw (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:83:53)
+    at rejected (/home/ryasr/.npm/_npx/a8a7eec953f1f314/node_modules/node_modules/tslib/tslib.es6.js:74:65) {
+  error: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13,
+  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:14902:13
+}
+2026-04-05T14:15:09.571Z [Rudder] error: Error: EAI_AGAIN
+getaddrinfo EAI_AGAIN telemetry.n8n.io
+getaddrinfo EAI_AGAIN telemetry.n8n.io

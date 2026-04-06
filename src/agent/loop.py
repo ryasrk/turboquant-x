@@ -87,7 +87,7 @@ def _strip_think_blocks(text: str, *, tag: str = "") -> str:
 
     return text.strip()
 
-MAX_ITERATIONS = 10
+MAX_ITERATIONS = 20
 MAX_TOOL_RESULT_CHARS = 16_000
 
 _AGENT_SYSTEM_PROMPT_TEMPLATE = (
@@ -136,6 +136,12 @@ _FUNCTIONS_RE = re.compile(
 _ACTION_CALL_RE = re.compile(
     r"Action:\s*(\w+)\(([^)]*)\)",
     re.MULTILINE,
+)
+# JSON tool calls inside markdown code blocks: ```json\n{"name":"x","arguments":{...}}\n```
+# Also matches ```python blocks since small LLMs sometimes use that tag.
+_MD_JSON_BLOCK_RE = re.compile(
+    r"```(?:json|python)?\s*\n?\s*(\{[^`]*\})\s*\n?\s*```",
+    re.DOTALL,
 )
 
 _json_decoder = json.JSONDecoder()
@@ -292,6 +298,36 @@ def _parse_tool_calls_from_content(content: str) -> list[dict] | None:
             "function": {"name": name, "arguments": json.dumps(args_dict)},
         }]
 
+    # Try markdown code blocks containing JSON tool call objects.
+    # Must have BOTH "name"/"tool" AND "arguments" keys to distinguish
+    # from workflow JSON payloads that also have a "name" field.
+    md_matches = _MD_JSON_BLOCK_RE.findall(content)
+    if md_matches:
+        tool_calls = []
+        for i, raw_json in enumerate(md_matches):
+            try:
+                parsed = json.loads(raw_json)
+                if not isinstance(parsed, dict):
+                    continue
+                name = parsed.get("name") or parsed.get("tool") or ""
+                # Require "arguments" key to confirm this is a tool call,
+                # not a random JSON payload (e.g. workflow_json)
+                if not name or "arguments" not in parsed:
+                    continue
+                arguments = parsed.get("arguments", {})
+                if isinstance(arguments, dict):
+                    arguments = json.dumps(arguments)
+                elif not isinstance(arguments, str):
+                    arguments = json.dumps(arguments)
+                tool_calls.append({
+                    "id": f"call_{i}_{name}",
+                    "function": {"name": name, "arguments": arguments},
+                })
+            except (json.JSONDecodeError, KeyError):
+                pass
+        if tool_calls:
+            return tool_calls
+
     return None
 
 
@@ -304,6 +340,16 @@ def _strip_tool_call_tags(content: str) -> str:
     content = _FUNCTIONS_RE.sub("", content)
     # Also strip loose <tool_call>...JSON...<tool_call> (model using open tag as close)
     content = re.sub(r"<tool_call>.*?(?=<tool_call>|$)", "", content, flags=re.DOTALL)
+    # Strip markdown JSON code blocks that look like tool calls (have "name" key)
+    def _strip_md_tool_block(m: re.Match) -> str:
+        try:
+            parsed = json.loads(m.group(1))
+            if isinstance(parsed, dict) and ("name" in parsed or "tool" in parsed):
+                return ""
+        except (json.JSONDecodeError, KeyError):
+            pass
+        return m.group(0)
+    content = _MD_JSON_BLOCK_RE.sub(_strip_md_tool_block, content)
     return content.strip()
 
 
@@ -355,10 +401,12 @@ class AgentLoop:
         registry: ToolRegistry,
         max_iterations: int = MAX_ITERATIONS,
         max_tool_result_chars: int = MAX_TOOL_RESULT_CHARS,
+        content_only: bool = False,
     ):
         self.registry = registry
         self.max_iterations = max_iterations
         self.max_tool_result_chars = max_tool_result_chars
+        self.content_only = content_only
 
     async def run(
         self,
@@ -395,54 +443,121 @@ class AgentLoop:
                 messages = [{"role": "system", "content": _build_system_prompt(self.registry)}] + messages
 
             for iteration in range(self.max_iterations):
-                logger.debug("Agent iteration %d/%d", iteration + 1, self.max_iterations)
+                logger.debug("Agent iteration %d/%d (content_only=%s)", iteration + 1, self.max_iterations, self.content_only)
 
-                # Phase 1: Call with FC handler to get tool calls
-                result = await asyncio.to_thread(
-                    self._call_model_fc, engine, messages, tools_schema,
-                    max_tokens=max_tokens, temperature=temperature, top_p=top_p,
-                )
+                tool_calls = None
+                content = ""
+                model_fr = "stop"
 
-                message = result["choices"][0]["message"]
-                tool_calls = message.get("tool_calls")
-
-                # If FC handler returned structured tool_calls, also strip any tool
-                # call tags from the content to prevent the model from seeing them
-                # in conversation history and re-issuing the same calls.
-                if tool_calls:
-                    raw_content = message.get("content", "") or ""
-                    if raw_content:
-                        cleaned = _strip_tool_call_tags(raw_content)
-                        cleaned = _strip_think_blocks(cleaned, tag=f"iter-{iteration + 1}-fc-cleanup")
-                        message["content"] = cleaned.strip() or None
-
-                    # Deduplicate tool_calls by (name, arguments)
-                    seen_tc_keys: set[str] = set()
-                    deduped: list[dict] = []
-                    for tc in tool_calls:
-                        key = f"{tc['function']['name']}:{tc['function']['arguments']}"
-                        if key not in seen_tc_keys:
-                            seen_tc_keys.add(key)
-                            deduped.append(tc)
-                        else:
-                            logger.debug("Deduped tool_call: %s", key)
-                    tool_calls = deduped
-                    if not tool_calls:
-                        tool_calls = None
-
-                # Qwen3 outputs tool calls as text tags — parse from content
-                if not tool_calls:
+                if self.content_only:
+                    # ── Content-only mode (local models) ──────────────────
+                    # Use plain handler exclusively; parse <tool_call> tags
+                    # from text.  Avoids chatml-function-calling handler
+                    # which repeats the same call on every iteration for
+                    # small models.
+                    result = await asyncio.to_thread(
+                        self._call_model_plain, engine, messages,
+                        max_tokens=max_tokens, temperature=temperature, top_p=top_p,
+                    )
+                    message = result["choices"][0]["message"]
                     content = message.get("content", "") or ""
-                    logger.debug("FC content (no tool_calls): %s", content[:500])
+                    model_fr = result["choices"][0].get("finish_reason", "stop")
+                    logger.info("Iter %d — content_only, content_len: %d", iteration + 1, len(content))
+
                     parsed_tc = _parse_tool_calls_from_content(content)
-                    logger.debug("Parsed tool_calls from content: %s", parsed_tc)
                     if parsed_tc:
+                        # Filter to known tools only
+                        parsed_tc = [
+                            tc for tc in parsed_tc
+                            if self.registry.get(tc['function']['name']) is not None
+                        ]
+                    logger.info("Iter %d — parsed tool_calls: %s",
+                                iteration + 1,
+                                [(tc['function']['name']) for tc in parsed_tc] if parsed_tc else None)
+                    if parsed_tc:  # non-empty after registry validation
                         tool_calls = parsed_tc
-                        # Strip tool call tags and thoughts from content
+                        # Strip tool call tags and thoughts from content for display
                         remaining = _strip_tool_call_tags(content)
-                        remaining = _strip_think_blocks(remaining, tag=f"iter-{iteration + 1}-tc")
-                        if remaining:
+                        remaining = _strip_think_blocks(remaining, tag=f"iter-{iteration + 1}-co")
+                        if remaining.strip():
                             yield {"type": "content", "delta": remaining}
+                        # Build a pseudo message for history (plain text, no FC)
+                        message = {"role": "assistant", "content": content}
+                else:
+                    # ── FC mode (default) ─────────────────────────────────
+                    result = await asyncio.to_thread(
+                        self._call_model_fc, engine, messages, tools_schema,
+                        max_tokens=max_tokens, temperature=temperature, top_p=top_p,
+                    )
+
+                    message = result["choices"][0]["message"]
+                    tool_calls = message.get("tool_calls")
+                    model_fr = result["choices"][0].get("finish_reason", "stop")
+                    logger.info("Iter %d — FC tool_calls: %s, content_len: %d",
+                                iteration + 1,
+                                [(tc['function']['name']) for tc in tool_calls] if tool_calls else None,
+                                len(message.get("content", "") or ""))
+
+                    # If FC handler returned structured tool_calls, also strip any tool
+                    # call tags from the content to prevent the model from seeing them
+                    # in conversation history and re-issuing the same calls.
+                    # Save raw content BEFORE cleaning for fallback parsing.
+                    raw_content_before_clean = (message.get("content", "") or "")
+                    if tool_calls:
+                        if raw_content_before_clean:
+                            cleaned = _strip_tool_call_tags(raw_content_before_clean)
+                            cleaned = _strip_think_blocks(cleaned, tag=f"iter-{iteration + 1}-fc-cleanup")
+                            message["content"] = cleaned.strip() or None
+
+                        # Deduplicate tool_calls by (name, arguments)
+                        seen_tc_keys: set[str] = set()
+                        deduped: list[dict] = []
+                        for tc in tool_calls:
+                            key = f"{tc['function']['name']}:{tc['function']['arguments']}"
+                            if key not in seen_tc_keys:
+                                seen_tc_keys.add(key)
+                                deduped.append(tc)
+                            else:
+                                logger.debug("Deduped tool_call: %s", key)
+                        tool_calls = deduped
+                        if not tool_calls:
+                            tool_calls = None
+
+                        # If ALL FC tool_calls are repeats (already in seen_calls),
+                        # also check the RAW content for additional tool calls that the
+                        # FC handler missed (small models often put extra calls in text)
+                        if tool_calls:
+                            all_fc_repeated = all(
+                                f"{tc['function']['name']}:{tc['function']['arguments']}" in seen_calls
+                                for tc in tool_calls
+                            )
+                            if all_fc_repeated and raw_content_before_clean:
+                                extra_tc = _parse_tool_calls_from_content(raw_content_before_clean)
+                                if extra_tc:
+                                    # Filter out already-seen calls
+                                    new_tc = [
+                                        tc for tc in extra_tc
+                                        if f"{tc['function']['name']}:{tc['function']['arguments']}" not in seen_calls
+                                    ]
+                                    if new_tc:
+                                        tool_calls = new_tc
+                                        logger.info("Recovered %d tool calls from content after FC repeats", len(new_tc))
+
+                    # Qwen3 outputs tool calls as text tags — parse from content
+                    if not tool_calls:
+                        content = message.get("content", "") or ""
+                        logger.debug("FC content (no tool_calls): %s", content[:500])
+                        parsed_tc = _parse_tool_calls_from_content(content)
+                        logger.info("Parsed tool_calls from content (%d chars): %s",
+                                    len(content),
+                                    [(tc['function']['name'], tc['function']['arguments'][:60]) for tc in parsed_tc] if parsed_tc else None)
+                        if parsed_tc:
+                            tool_calls = parsed_tc
+                            # Strip tool call tags and thoughts from content
+                            remaining = _strip_tool_call_tags(content)
+                            remaining = _strip_think_blocks(remaining, tag=f"iter-{iteration + 1}-tc")
+                            if remaining:
+                                yield {"type": "content", "delta": remaining}
 
                 if not tool_calls:
                     # Model decided to answer directly (or no more tool calls)
@@ -473,6 +588,33 @@ class AgentLoop:
 
                 if not tool_calls:
                     content = _strip_think_blocks(content, tag=f"iter-{iteration + 1}-answer")
+
+                    # Content-only nudge: if the model narrates intent to call
+                    # a tool but didn't produce a <tool_call> tag, inject a
+                    # nudge and continue the loop instead of returning.
+                    if (
+                        self.content_only
+                        and tool_results_log
+                        and iteration < self.max_iterations - 1
+                        and any(kw in content.lower() for kw in (
+                            "let's call", "let me call", "i will call", "call this tool",
+                            "next tool", "let's use", "let me use",
+                            "n8n_get_node_params", "n8n_create_workflow",
+                            "n8n_search", "get_node_params",
+                        ))
+                    ):
+                        logger.info("Iter %d — nudging model to produce <tool_call>", iteration + 1)
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "You said you would call a tool but didn't output the <tool_call> tag. "
+                                "Output ONLY the tool call now, no explanation:\n"
+                                '<tool_call>{"name": "TOOL_NAME", "arguments": {...}}</tool_call>'
+                            ),
+                        })
+                        continue
+
                     done_reason = "length" if model_fr == "length" else "completed"
                     yield {"type": "content", "delta": content}
                     yield {"type": "done", "finish_reason": done_reason, "iterations": iteration + 1, "tools_used": tools_used}
@@ -481,20 +623,28 @@ class AgentLoop:
                 # Execute tool calls
                 has_repeat = False
                 iteration_results: list[dict[str, str]] = []
+                all_repeated = True  # Track if ALL calls in this iteration are repeats
 
                 for tc in tool_calls:
                     tc_id = tc["id"]
                     fn = tc["function"]
                     name = fn["name"]
                     raw_args = fn["arguments"]
+
+                    # Skip tool calls with unknown names (hallucinated tool names)
+                    if self.registry.get(name) is None:
+                        logger.warning("Skipping unknown tool: %s", name)
+                        continue
+
                     arguments = json.loads(raw_args)
 
                     call_key = f"{name}:{raw_args}"
                     if call_key in seen_calls:
-                        logger.warning("Repeated tool call: %s, breaking loop", name)
+                        logger.warning("Skipping repeated tool call: %s", name)
                         has_repeat = True
-                        break
+                        continue  # skip this call, try others
                     seen_calls.add(call_key)
+                    all_repeated = False
 
                     yield {"type": "tool_call", "id": tc_id, "name": name, "arguments": arguments}
 
@@ -561,32 +711,105 @@ class AgentLoop:
 
                 tool_results_log.extend(iteration_results)
 
-                if has_repeat or iteration == self.max_iterations - 1:
+                # Track consecutive all-repeat iterations for stuck detection
+                if all_repeated:
+                    consecutive_repeats = getattr(self, '_consecutive_repeats', 0) + 1
+                    self._consecutive_repeats = consecutive_repeats
+                else:
+                    self._consecutive_repeats = 0
+                    consecutive_repeats = 0
+
+                stuck = (consecutive_repeats >= 2) or (all_repeated and not iteration_results)
+                if stuck or iteration == self.max_iterations - 1:
                     # Force final answer via Phase 2
                     content, synth_fr = await self._synthesize_answer(
                         engine, messages, tool_results_log,
                         max_tokens=max_tokens, temperature=temperature, top_p=top_p,
                     )
+                    # Check if synthesis output contains parseable tool calls
+                    # (small models often produce explained plans with JSON blocks)
+                    synth_tc = _parse_tool_calls_from_content(content)
+                    if synth_tc and iteration < self.max_iterations - 1:
+                        new_synth_tc = [
+                            tc for tc in synth_tc
+                            if (
+                                self.registry.get(tc['function']['name']) is not None
+                                and f"{tc['function']['name']}:{tc['function']['arguments']}" not in seen_calls
+                            )
+                        ]
+                        if new_synth_tc:
+                            logger.info("Extracted %d tool calls from synthesis, continuing loop", len(new_synth_tc))
+                            tool_calls = new_synth_tc
+                            # Re-enter execution by NOT returning; fall through to execution code
+                            # We need to execute these tool calls, so continue the loop
+                            self._consecutive_repeats = 0
+                            # Execute the recovered tool calls inline
+                            for tc in new_synth_tc:
+                                tc_id = tc["id"]
+                                fn = tc["function"]
+                                name = fn["name"]
+                                raw_args = fn["arguments"]
+                                # Double-check tool exists in registry
+                                if self.registry.get(name) is None:
+                                    logger.warning("Skipping unknown tool from synthesis: %s", name)
+                                    continue
+                                arguments = json.loads(raw_args)
+                                call_key = f"{name}:{raw_args}"
+                                if call_key in seen_calls:
+                                    continue
+                                seen_calls.add(call_key)
+                                yield {"type": "tool_call", "id": tc_id, "name": name, "arguments": arguments}
+                                result_str = await self.registry.execute(name, arguments)
+                                if len(result_str) > self.max_tool_result_chars:
+                                    result_str = result_str[:self.max_tool_result_chars] + "\n...[truncated]"
+                                yield {"type": "tool_result", "id": tc_id, "name": name, "content": result_str}
+                                tool_results_log.append({"name": name, "args": raw_args, "result": result_str})
+                                if name not in tools_used:
+                                    tools_used.append(name)
+                            # After executing recovered calls, do another synthesis
+                            content, synth_fr = await self._synthesize_answer(
+                                engine, messages, tool_results_log,
+                                max_tokens=max_tokens, temperature=temperature, top_p=top_p,
+                            )
                     content = _strip_think_blocks(content, tag="synthesis-forced")
                     done_reason = "length" if synth_fr == "length" else "completed"
                     yield {"type": "content", "delta": content}
                     yield {"type": "done", "finish_reason": done_reason, "iterations": iteration + 1, "tools_used": tools_used}
                     return
 
-                # Build FC-compatible history for next iteration
-                messages.append(message)
-                for tr in iteration_results:
-                    tc_match = next(
-                        (tc for tc in tool_calls if tc["function"]["name"] == tr["name"]),
-                        None,
-                    )
-                    if tc_match:
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc_match["id"],
-                            "name": tr["name"],
-                            "content": tr["result"],
-                        })
+                # Build history for next iteration
+                if self.content_only:
+                    # Content-only mode: inject tool results as plain text
+                    # so the model sees them in a format it can understand.
+                    messages.append({"role": "assistant", "content": _strip_tool_call_tags(content)})
+                    if iteration_results:
+                        # Present tool results as a user message so the model
+                        # clearly sees the boundary and can act on results.
+                        parts = ["Tool results:\n"]
+                        for tr in iteration_results:
+                            parts.append(f"**{tr['name']}** returned:\n```\n{tr['result']}\n```\n")
+                        parts.append(
+                            "IMPORTANT: Output your next action using EXACTLY this format — "
+                            "do NOT describe or explain what you will do:\n"
+                            '<tool_call>{"name": "TOOL_NAME", "arguments": {"param": "value"}}</tool_call>\n'
+                            "If you have all needed info, call n8n_create_workflow now."
+                        )
+                        messages.append({"role": "user", "content": "\n".join(parts)})
+                else:
+                    # FC mode: use tool_call_id messages
+                    messages.append(message)
+                    for tr in iteration_results:
+                        tc_match = next(
+                            (tc for tc in tool_calls if tc["function"]["name"] == tr["name"]),
+                            None,
+                        )
+                        if tc_match:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_match["id"],
+                                "name": tr["name"],
+                                "content": tr["result"],
+                            })
 
             # Exhausted max iterations
             yield {"type": "done", "finish_reason": "max_iterations", "iterations": self.max_iterations, "tools_used": tools_used}
