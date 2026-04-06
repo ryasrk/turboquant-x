@@ -34,6 +34,7 @@ class InferenceMode(str, Enum):
     TURBOQUANT = "turboquant"
     ZERO_QUANT = "zero-quant"
     ULTRA_QUANT = "ultra-quant"
+    NULL_QUANT = "null-quant"
     CLOUD = "cloud"
 
 
@@ -47,7 +48,8 @@ _inference_mode: InferenceMode = InferenceMode.STANDARD
 _start_time: float = 0.0
 _switch_lock = threading.Lock()  # prevents concurrent mode/model switches
 _loading: bool = False  # True while a model is being loaded/switched
-_agent_registry: Any = None  # ToolRegistry instance
+_agent_registry: Any = None  # ToolRegistry instance — full registry (all tools)
+_core_registry: Any = None  # ToolRegistry instance — slim registry (meta-tools only, for lazy loading)
 
 
 def get_engine() -> InferenceEngine:
@@ -111,14 +113,39 @@ def is_loading() -> bool:
 
 
 def get_agent_registry():
-    """Get the global agent tool registry."""
+    """Get the global agent tool registry.
+
+    When lazy_tool_loading is enabled, returns the core registry (meta-tools
+    only) for agent loops. The full registry is accessible via
+    get_full_agent_registry() for workspace chat and meta-tool invocations.
+    """
+    return _core_registry if _core_registry is not None else _agent_registry
+
+
+def get_full_agent_registry():
+    """Get the full agent tool registry (all tools, including MCP).
+
+    Always returns the complete registry — use for /v1/agent/tools listing,
+    workspace chat n8n tool merging, and meta-tool invoke_tool dispatching.
+    """
     return _agent_registry
 
 
 def init_agent_registry() -> None:
-    """Initialize the agent tool registry with built-in tools."""
+    """Initialize the agent tool registry with built-in tools.
+
+    When MCP is enabled with replace_builtin_n8n=true, the 30 built-in n8n_*
+    tools are skipped — the n8n-mcp MCP server provides equivalent + advanced
+    capabilities via the bridge layer instead.
+
+    When lazy_tool_loading=true, a separate core registry is built containing
+    only the 3 meta-tools (search_tools, get_tool_detail, invoke_tool).
+    The full registry is stored for meta-tool access — the agent discovers
+    and invokes tools on demand, dramatically reducing context usage.
+    """
     global _agent_registry
     from src.agent.registry import ToolRegistry
+    from src.agent.mcp_loader import should_replace_builtin_n8n
     from src.agent.tools import (
         ReadFileTool, WriteFileTool, ListDirTool, FindFilesTool, ReplaceInFileTool,
         ExecTool, WebSearchTool,
@@ -132,19 +159,26 @@ def init_agent_registry() -> None:
         DiffFilesTool, EncodeDecodeTool,
         TerminalTool,
         GenerateWordTool, GeneratePdfTool, GenerateCsvTool,
-        N8nWorkflowStatusTool, N8nListExecutionsTool, N8nExecutionDetailTool,
-        N8nDiagnoseErrorTool, N8nInstallNodeTool, N8nListCommunityNodesTool,
-        N8nUninstallNodeTool, N8nListCredentialsTool,
-        N8nCreateCredentialTool, N8nDeleteCredentialTool, N8nUpdateWorkflowTool,
-        N8nSuggestImprovementsTool,
-        N8nListWorkflowsTool, N8nGetWorkflowFullTool, N8nCreateWorkflowTool,
-        N8nDeleteWorkflowTool, N8nActivateWorkflowTool, N8nExecuteWorkflowTool,
-        N8nGetCredentialDataTool, N8nUpdateCredentialTool, N8nGetSettingsTool,
-        N8nGetNodeTypesTool,
-        N8nGetNodeParamsTool,
-        N8nSearchTemplatesTool, N8nGetTemplateDetailTool,
-        N8nSearchOfficialTemplatesTool, N8nFetchOfficialTemplateTool,
     )
+
+    _skip_builtin_n8n = should_replace_builtin_n8n()
+    if _skip_builtin_n8n:
+        logger.info("MCP n8n-mcp enabled — skipping built-in n8n_* tool registration")
+    else:
+        from src.agent.tools import (
+            N8nWorkflowStatusTool, N8nListExecutionsTool, N8nExecutionDetailTool,
+            N8nDiagnoseErrorTool, N8nInstallNodeTool, N8nListCommunityNodesTool,
+            N8nUninstallNodeTool, N8nListCredentialsTool,
+            N8nCreateCredentialTool, N8nDeleteCredentialTool, N8nUpdateWorkflowTool,
+            N8nSuggestImprovementsTool,
+            N8nListWorkflowsTool, N8nGetWorkflowFullTool, N8nCreateWorkflowTool,
+            N8nDeleteWorkflowTool, N8nActivateWorkflowTool, N8nExecuteWorkflowTool,
+            N8nGetCredentialDataTool, N8nUpdateCredentialTool, N8nGetSettingsTool,
+            N8nGetNodeTypesTool,
+            N8nGetNodeParamsTool,
+            N8nSearchTemplatesTool, N8nGetTemplateDetailTool,
+            N8nSearchOfficialTemplatesTool, N8nFetchOfficialTemplateTool,
+        )
 
     _agent_registry = ToolRegistry()
 
@@ -196,36 +230,42 @@ def init_agent_registry() -> None:
     _agent_registry.register(GeneratePdfTool())
     _agent_registry.register(GenerateCsvTool())
 
-    # n8n Workflow Management
-    _agent_registry.register(N8nWorkflowStatusTool())
-    _agent_registry.register(N8nListExecutionsTool())
-    _agent_registry.register(N8nExecutionDetailTool())
-    _agent_registry.register(N8nDiagnoseErrorTool())
-    _agent_registry.register(N8nInstallNodeTool())
-    _agent_registry.register(N8nListCommunityNodesTool())
-    _agent_registry.register(N8nUninstallNodeTool())
-    _agent_registry.register(N8nListCredentialsTool())
-    _agent_registry.register(N8nCreateCredentialTool())
-    _agent_registry.register(N8nDeleteCredentialTool())
-    _agent_registry.register(N8nUpdateWorkflowTool())
-    _agent_registry.register(N8nSuggestImprovementsTool())
-    # n8n Full-Access
-    _agent_registry.register(N8nListWorkflowsTool())
-    _agent_registry.register(N8nGetWorkflowFullTool())
-    _agent_registry.register(N8nCreateWorkflowTool())
-    _agent_registry.register(N8nDeleteWorkflowTool())
-    _agent_registry.register(N8nActivateWorkflowTool())
-    _agent_registry.register(N8nExecuteWorkflowTool())
-    _agent_registry.register(N8nGetCredentialDataTool())
-    _agent_registry.register(N8nUpdateCredentialTool())
-    _agent_registry.register(N8nGetSettingsTool())
-    _agent_registry.register(N8nGetNodeTypesTool())
-    _agent_registry.register(N8nGetNodeParamsTool())
-    # n8n Templates
-    _agent_registry.register(N8nSearchTemplatesTool())
-    _agent_registry.register(N8nGetTemplateDetailTool())
-    _agent_registry.register(N8nSearchOfficialTemplatesTool())
-    _agent_registry.register(N8nFetchOfficialTemplateTool())
+    # n8n Workflow Management (skipped when MCP n8n-mcp replaces them)
+    if not _skip_builtin_n8n:
+        _agent_registry.register(N8nWorkflowStatusTool())
+        _agent_registry.register(N8nListExecutionsTool())
+        _agent_registry.register(N8nExecutionDetailTool())
+        _agent_registry.register(N8nDiagnoseErrorTool())
+        _agent_registry.register(N8nInstallNodeTool())
+        _agent_registry.register(N8nListCommunityNodesTool())
+        _agent_registry.register(N8nUninstallNodeTool())
+        _agent_registry.register(N8nListCredentialsTool())
+        _agent_registry.register(N8nCreateCredentialTool())
+        _agent_registry.register(N8nDeleteCredentialTool())
+        _agent_registry.register(N8nUpdateWorkflowTool())
+        _agent_registry.register(N8nSuggestImprovementsTool())
+        # n8n Full-Access
+        _agent_registry.register(N8nListWorkflowsTool())
+        _agent_registry.register(N8nGetWorkflowFullTool())
+        _agent_registry.register(N8nCreateWorkflowTool())
+        _agent_registry.register(N8nDeleteWorkflowTool())
+        _agent_registry.register(N8nActivateWorkflowTool())
+        _agent_registry.register(N8nExecuteWorkflowTool())
+        _agent_registry.register(N8nGetCredentialDataTool())
+        _agent_registry.register(N8nUpdateCredentialTool())
+        _agent_registry.register(N8nGetSettingsTool())
+        _agent_registry.register(N8nGetNodeTypesTool())
+        _agent_registry.register(N8nGetNodeParamsTool())
+        # n8n Templates
+        _agent_registry.register(N8nSearchTemplatesTool())
+        _agent_registry.register(N8nGetTemplateDetailTool())
+        _agent_registry.register(N8nSearchOfficialTemplatesTool())
+        _agent_registry.register(N8nFetchOfficialTemplateTool())
+
+    # Design edit & redeploy (always registered — work on design DB + n8n API)
+    from src.agent.tools import N8nEditDesignJsonTool, N8nRedeployWorkflowTool
+    _agent_registry.register(N8nEditDesignJsonTool())
+    _agent_registry.register(N8nRedeployWorkflowTool())
 
     # Web (optional deps)
     try:
@@ -239,6 +279,42 @@ def init_agent_registry() -> None:
         logger.warning("Web tools unavailable (install aiohttp)")
 
     logger.info("Agent registry initialized with %d tools: %s", len(_agent_registry.list_tools()), _agent_registry.list_tools())
+
+
+def _build_core_registry() -> None:
+    """Build the slim core registry with meta-tools for lazy loading.
+
+    Called after the full registry (including MCP tools) is ready.
+    The core registry contains only 3 meta-tools:
+    - search_tools: find tools by keyword
+    - get_tool_detail: get full parameter schema for a tool
+    - invoke_tool: call any tool by name
+    """
+    global _core_registry
+    from src.agent.registry import ToolRegistry
+    from src.agent.mcp_loader import is_lazy_tool_loading
+    from src.agent.tools.meta_tools import (
+        SearchToolsTool, GetToolDetailTool, InvokeToolTool, set_full_registry
+    )
+
+    if not is_lazy_tool_loading():
+        logger.debug("Lazy tool loading disabled — using full registry for agent")
+        return
+
+    # Wire meta-tools to the full registry, excluding n8n tools from chat
+    set_full_registry(_agent_registry, excluded_prefixes=["n8n_", "mcp_n8n_"])
+
+    _core_registry = ToolRegistry()
+    _core_registry.register(SearchToolsTool())
+    _core_registry.register(GetToolDetailTool())
+    _core_registry.register(InvokeToolTool())
+
+    logger.info(
+        "Lazy tool loading enabled — core registry has %d meta-tools, "
+        "full registry has %d tools available via invoke_tool",
+        len(_core_registry.list_tools()),
+        len(_agent_registry.list_tools()),
+    )
 
 
 def _unload_engines() -> None:
@@ -326,6 +402,29 @@ def _create_and_load_engine(app: FastAPI, mode: InferenceMode) -> None:
             zero_quant_preset=uq_dict.get("zero_quant_preset", "turbo"),
         )
         _turbo_engine = UltraQuantEngine(model_config, uq_config)
+        _engine = _turbo_engine.engine
+    elif mode == InferenceMode.NULL_QUANT:
+        from src.engine.null_quant_engine import NullQuantEngine
+        from src.turboquant.null_quant import NullQuantConfig
+
+        nq_dict = getattr(app.state, "null_quant_config", {})
+        nq_config = NullQuantConfig(
+            eviction_ratio=nq_dict.get("eviction_ratio", 0.75),
+            sink_tokens=nq_dict.get("sink_tokens", 256),
+            recent_tokens=nq_dict.get("recent_tokens", 256),
+            scoring_method=nq_dict.get("scoring_method", "l2_norm"),
+            block_size=nq_dict.get("block_size", 64),
+            shallow_fraction=nq_dict.get("shallow_fraction", 0.25),
+            deep_fraction=nq_dict.get("deep_fraction", 0.25),
+            shallow_k_bits=nq_dict.get("shallow_k_bits", 8),
+            shallow_v_bits=nq_dict.get("shallow_v_bits", 8),
+            middle_k_bits=nq_dict.get("middle_k_bits", 4),
+            middle_v_bits=nq_dict.get("middle_v_bits", 2),
+            deep_k_bits=nq_dict.get("deep_k_bits", 8),
+            deep_v_bits=nq_dict.get("deep_v_bits", 8),
+            compress_block_size=nq_dict.get("compress_block_size", 128),
+        )
+        _turbo_engine = NullQuantEngine(model_config, nq_config)
         _engine = _turbo_engine.engine
     else:
         _engine = InferenceEngine(model_config, kv_config)
@@ -468,6 +567,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning("MCP server connection failed: %s", e)
 
+    # Build core registry for lazy tool loading (must be after MCP registration)
+    try:
+        _build_core_registry()
+    except Exception as e:
+        logger.warning("Failed to build core registry: %s", e)
+
     # Create upload directory
     os.makedirs(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'uploads'), exist_ok=True)
 
@@ -511,6 +616,7 @@ def create_app(
     turboquant_config: dict[str, Any] | None = None,
     zero_quant_config: dict[str, Any] | None = None,
     ultra_quant_config: dict[str, Any] | None = None,
+    null_quant_config: dict[str, Any] | None = None,
     thought_log_path: str | None = None,
     cloud_config: Any | None = None,
     cloud_yaml_config: dict[str, Any] | None = None,
@@ -544,6 +650,7 @@ def create_app(
     app.state.turboquant_config = turboquant_config or {}
     app.state.zero_quant_config = zero_quant_config or {}
     app.state.ultra_quant_config = ultra_quant_config or {}
+    app.state.null_quant_config = null_quant_config or {}
     app.state.thought_log_path = thought_log_path
     app.state.cloud_config = cloud_config
     app.state._cloud_yaml_config = cloud_yaml_config or {}

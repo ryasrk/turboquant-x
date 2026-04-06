@@ -8,46 +8,99 @@
 #   stdio — runs a subprocess, communicates via stdin/stdout (most common)
 #   sse   — connects to an HTTP SSE endpoint
 #
-# Example MCP servers you can install:
-#   npx -y @modelcontextprotocol/server-filesystem /path/to/dir
-#   npx -y @modelcontextprotocol/server-github
-#   npx -y @modelcontextprotocol/server-sqlite /path/to/db
-#   uvx mcp-server-git --repository /path/to/repo
-#   docker run -i --rm mcp/fetch
+# When 'replace_builtin_n8n' is true, the built-in n8n_* tools (from
+# src/agent/tools/n8n_tools.py) are NOT registered — n8n-mcp MCP server
+# provides equivalent + advanced capabilities instead.
+#
+# When 'lazy_tool_loading' is true, the agent starts with only 3 meta-tools
+# (search_tools, get_tool_detail, invoke_tool) instead of all 70+ tools.
+# This drastically reduces context usage — ideal for local models with
+# small context windows. The agent discovers and invokes tools on demand.
 
 # Set to true to enable MCP server connections at startup
-enabled: false
+enabled: true
+
+# When true, skip registering built-in n8n_* tools (replaced by n8n-mcp)
+replace_builtin_n8n: false
+
+# When true, agent gets only meta-tools (search/invoke) instead of all tools
+lazy_tool_loading: true
 
 # List of MCP servers to connect to
 servers:
-  # Example: Filesystem MCP server
+  # ── n8n-MCP (replaces built-in n8n tools) ─────────────────────────
+  # Provides 20+ tools: node search, validation, templates, workflow
+  # management, execution monitoring, credential management, and more.
+  # Requires N8N_API_URL + N8N_API_KEY for workflow management features.
+  - name: n8n
+    transport: stdio
+    command: ["npx", "-y", "n8n-mcp"]
+    require_approval: false
+    env:
+      MCP_MODE: "stdio"
+      LOG_LEVEL: "error"
+      DISABLE_CONSOLE_OUTPUT: "true"
+      N8N_API_URL: "http://127.0.0.1:5678"
+      N8N_API_KEY: "${N8N_API_KEY}"
+
+  # ── Official Reference MCP Servers ────────────────────────────────
+
+  # Filesystem — DISABLED: 14 tools duplicate built-in file tools
+  # (read_file, write_file, list_dir, find_files, replace_in_file).
+  # Only unique tools were read_media_file and directory_tree.
+  # Also: mcp_filesystem_read_file is self-marked DEPRECATED.
   # - name: filesystem
   #   transport: stdio
-  #   command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/user/documents"]
+  #   command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/ryasr/personal-project"]
   #   require_approval: false
-  #   env: {}
 
-  # Example: GitHub MCP server
+  # Memory — persistent knowledge graph for entity/relation storage
+  - name: memory
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-memory"]
+    require_approval: false
+
+  # Sequential Thinking — structured step-by-step reasoning
+  - name: sequentialthinking
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"]
+    require_approval: false
+
+  # Time — timezone conversions and current time (Python-based)
+  - name: time
+    transport: stdio
+    command: ["uvx", "mcp-server-time"]
+    require_approval: false
+
+  # Fetch — DISABLED: duplicates built-in fetch_webpage + http_request tools.
+  # - name: fetch
+  #   transport: stdio
+  #   command: ["uvx", "mcp-server-fetch"]
+  #   require_approval: false
+
+  # Git — repository operations (Python-based)
+  - name: git
+    transport: stdio
+    command: ["uvx", "mcp-server-git", "--repository", "/home/ryasr/personal-project/llm-turboquant/turboquant-x"]
+    require_approval: true
+
+  # ── Additional servers (uncomment to enable) ──────────────────────
+
+  # GitHub — issue/PR management (requires GITHUB_TOKEN)
   # - name: github
   #   transport: stdio
   #   command: ["npx", "-y", "@modelcontextprotocol/server-github"]
-  #   require_approval: true     # require user approval for write operations
+  #   require_approval: true
   #   env:
   #     GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
 
-  # Example: SQLite MCP server
+  # SQLite — database operations
   # - name: sqlite
   #   transport: stdio
-  #   command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "./data/my.db"]
+  #   command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "./data/turboquant.db"]
   #   require_approval: false
 
-  # Example: Git MCP server (Python-based)
-  # - name: git
-  #   transport: stdio
-  #   command: ["uvx", "mcp-server-git", "--repository", "."]
-  #   require_approval: true
-
-  # Example: SSE-based MCP server (remote)
+  # SSE-based MCP server (remote)
   # - name: remote-tools
   #   transport: sse
   #   url: "http://localhost:8080/mcp"

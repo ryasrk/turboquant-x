@@ -4,7 +4,7 @@ TurboQuant-X is a FastAPI-based LLM inference server for local GGUF models and c
 
 It supports two broad operating modes:
 
-- Local inference through llama.cpp with `standard`, `turboquant`, `zero-quant`, and `ultra-quant` execution modes
+- Local inference through llama.cpp with `standard`, `turboquant`, `zero-quant`, `ultra-quant`, and `null-quant` execution modes
 - Cloud inference through provider adapters for OpenAI, NVIDIA, Anthropic, Moonshot, Zhipu, DeepSeek, and Groq
 
 Additionally, TurboQuant-X provides an **n8n workflow automation** layer — a workspace UI for managing n8n integrations with AI-powered workflow design, a library of ~290 community templates, and 24 agent tools for full n8n control.
@@ -176,6 +176,7 @@ Examples:
 env/bin/python3 -m src.main --host 0.0.0.0 --port 8000
 env/bin/python3 -m src.main --mode turboquant
 env/bin/python3 -m src.main --mode zero-quant
+env/bin/python3 -m src.main --mode null-quant
 env/bin/python3 -m src.main --mode ultra-quant
 ```
 
@@ -212,13 +213,14 @@ The UI includes:
 
 Local inference is backed by llama.cpp and can be switched at runtime.
 
-| Mode | Purpose |
-|---|---|
-| `standard` | baseline local inference without Python-side KV compression |
-| `turboquant` | TurboQuant compression flow |
-| `zero-quant` | depth-adaptive compression |
-| `ultra-quant` | memory-budget-aware large-model configuration |
-| `cloud` | routes completions to the active cloud provider |
+| Mode | Purpose | Compression Ratio | Accuracy Tier |
+|---|---|---:|:---:|
+| `standard` | baseline local inference without Python-side KV compression | 8.0× | ★★★ |
+| `turboquant` | TurboQuant PolarQuant compression flow | 8–21× | ★–★★★ |
+| `zero-quant` | depth-adaptive zone compression | 7.6–7.9× | ★★–★★★ |
+| `null-quant` | token eviction + zone compression (max KV savings) | 15–124× | — |
+| `ultra-quant` | memory-budget-aware large-model configuration | varies | varies |
+| `cloud` | routes completions to the active cloud provider | — | — |
 
 Runtime mode switching endpoint:
 
@@ -497,7 +499,8 @@ env/bin/python3 -c "from src.turboquant_cpp import CPP_AVAILABLE; print(CPP_AVAI
 
 The `benchmarks/` directory contains scripts for:
 
-- all-mode comparison
+- all-mode comparison (13 configs across 5 modes)
+- NullQuant-specific benchmarks
 - speed benchmarking
 - quality benchmarking
 - perplexity benchmarking
@@ -505,9 +508,24 @@ The `benchmarks/` directory contains scripts for:
 - needle-in-a-haystack evaluation
 - report generation
 
+### Quick Results (seq_len=1024)
+
+| Mode | Ratio | MSE | Speed | Tier |
+|---|---:|---:|---:|:---:|
+| Standard Q8/Q8 | 8.0× | 0.000285 | 100 ms | ★★★ |
+| TurboQuant K8/V4 | 10.7× | 0.003159 | 324 ms | ★★★ |
+| TurboQuant K4/V4 | 16.0× | 0.007078 | 568 ms | ★★★ |
+| ZeroQuant default | 7.8× | 0.003197 | 350 ms | ★★★ |
+| NullQuant default | 31.0× | 0.462350 | 177 ms | — |
+| NullQuant extreme | 123.2× | 0.920313 | 159 ms | — |
+
+Full results with MAE, PSNR, cosine similarity, K/V MSE breakdown, and all 13 configs: [`benchmarks/BENCHMARK.md`](benchmarks/BENCHMARK.md)
+
 Examples:
 
 ```bash
+env/bin/python3 benchmarks/benchmark_all_modes.py
+env/bin/python3 -m benchmarks.benchmark_null_quant --runs 5 --seq-len 4096
 env/bin/python3 benchmarks/benchmark_speed.py
 env/bin/python3 benchmarks/benchmark_quality.py
 env/bin/python3 benchmarks/generate_report.py

@@ -8,25 +8,25 @@ providers:
   openai:
     # api_key loaded from .env: TURBOQUANT_CLOUD_OPENAI_API_KEY
     model: "gpt-4o"
-    max_tokens: 4096
+    max_tokens: 16384
     temperature: 0.7
     top_p: 0.95
     timeout: 120
     # base_url: "https://api.openai.com/v1"  # default
 
-  nvidia:  # NVIDIA NIM / Build API
+  nvidia:  # NVIDIA NIM / Build API (reasoning model — needs high token budget)
     # api_key loaded from .env: TURBOQUANT_CLOUD_NVIDIA_API_KEY
     model: "openai/gpt-oss-120b"
-    max_tokens: 4096
+    max_tokens: 32768
     temperature: 1.0
     top_p: 1.0
-    timeout: 120
+    timeout: 180
     # base_url: "https://integrate.api.nvidia.com/v1"  # default
 
   anthropic:
     # api_key loaded from .env: TURBOQUANT_CLOUD_ANTHROPIC_API_KEY
     model: "claude-sonnet-4-20250514"
-    max_tokens: 4096
+    max_tokens: 8192
     temperature: 0.7
     top_p: 0.95
     timeout: 120
@@ -35,16 +35,16 @@ providers:
   moonshot:  # Kimi AI
     # api_key loaded from .env: TURBOQUANT_CLOUD_MOONSHOT_API_KEY
     model: "moonshot-v1-128k"
-    max_tokens: 4096
+    max_tokens: 8192
     temperature: 0.7
     top_p: 0.95
     timeout: 120
     # base_url: "https://api.moonshot.cn/v1"  # default
 
-  zhipu:  # GLM / ChatGLM
+  zhipu:  # GLM / ChatGLM (reasoning model)
     # api_key loaded from .env: TURBOQUANT_CLOUD_ZHIPU_API_KEY
     model: "glm-4.5-flash"
-    max_tokens: 4096
+    max_tokens: 16384
     temperature: 0.7
     top_p: 0.95
     timeout: 120
@@ -53,7 +53,7 @@ providers:
   deepseek:
     # api_key loaded from .env: TURBOQUANT_CLOUD_DEEPSEEK_API_KEY
     model: "deepseek-chat"
-    max_tokens: 4096
+    max_tokens: 8192
     temperature: 0.7
     top_p: 0.95
     timeout: 120
@@ -62,7 +62,7 @@ providers:
   groq:
     # api_key loaded from .env: TURBOQUANT_CLOUD_GROQ_API_KEY
     model: "llama-3.3-70b-versatile"
-    max_tokens: 4096
+    max_tokens: 8192
     temperature: 0.7
     top_p: 0.95
     timeout: 60

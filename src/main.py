@@ -78,6 +78,7 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         "inference_mode": config.get("inference_mode", "standard"),
         "turboquant": dict(config.get("turboquant", {})),
         "ultra_quant": dict(config.get("ultra_quant", {})),
+        "null_quant": dict(config.get("null_quant", {})),
         "cloud": dict(config.get("cloud", {})),
     }
 
@@ -319,6 +320,31 @@ def build_ultra_quant_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_null_quant_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Build NullQuant token-eviction + zone-compression settings from config.
+
+    Reads the ``null_quant`` section and returns a plain dict that
+    ``create_app`` forwards to :class:`~src.turboquant.null_quant.NullQuantConfig`.
+    """
+    nq = config.get("null_quant", {})
+    return {
+        "eviction_ratio": nq.get("eviction_ratio", 0.75),
+        "sink_tokens": nq.get("sink_tokens", 256),
+        "recent_tokens": nq.get("recent_tokens", 256),
+        "scoring_method": nq.get("scoring_method", "l2_norm"),
+        "block_size": nq.get("block_size", 64),
+        "shallow_fraction": nq.get("shallow_fraction", 0.25),
+        "deep_fraction": nq.get("deep_fraction", 0.25),
+        "shallow_k_bits": nq.get("shallow_k_bits", 8),
+        "shallow_v_bits": nq.get("shallow_v_bits", 8),
+        "middle_k_bits": nq.get("middle_k_bits", 4),
+        "middle_v_bits": nq.get("middle_v_bits", 2),
+        "deep_k_bits": nq.get("deep_k_bits", 8),
+        "deep_v_bits": nq.get("deep_v_bits", 8),
+        "compress_block_size": nq.get("compress_block_size", 128),
+    }
+
+
 def build_cloud_config(config: dict[str, Any]) -> Any:
     """Build cloud provider config from YAML + env vars.
 
@@ -396,7 +422,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["standard", "turboquant", "zero-quant", "ultra-quant", "cloud"],
+        choices=["standard", "turboquant", "zero-quant", "ultra-quant", "null-quant", "cloud"],
         default=None,
         help="Inference mode (overrides config)",
     )
@@ -490,6 +516,7 @@ def main(argv: list[str] | None = None) -> None:
     turboquant_cfg = build_turboquant_config(config)
     zero_quant_cfg = build_zero_quant_config(config)
     ultra_quant_cfg = build_ultra_quant_config(config)
+    null_quant_cfg = build_null_quant_config(config)
 
     server_cfg = config.get("server", {})
     host = server_cfg.get("host", "0.0.0.0")
@@ -526,6 +553,21 @@ def main(argv: list[str] | None = None) -> None:
             ultra_quant_cfg["enable_mmap"],
             ultra_quant_cfg["enable_mlock_critical"],
         )
+    elif inference_mode == InferenceMode.NULL_QUANT:
+        logger.info(
+            "NullQuant: eviction=%.0f%% sink=%d recent=%d scoring=%s | "
+            "zones: shallow K%d/V%d | middle K%d/V%d | deep K%d/V%d",
+            null_quant_cfg["eviction_ratio"] * 100,
+            null_quant_cfg["sink_tokens"],
+            null_quant_cfg["recent_tokens"],
+            null_quant_cfg["scoring_method"],
+            null_quant_cfg["shallow_k_bits"],
+            null_quant_cfg["shallow_v_bits"],
+            null_quant_cfg["middle_k_bits"],
+            null_quant_cfg["middle_v_bits"],
+            null_quant_cfg["deep_k_bits"],
+            null_quant_cfg["deep_v_bits"],
+        )
     elif inference_mode == InferenceMode.CLOUD and cloud_cfg is not None:
         logger.info(
             "Cloud mode: provider=%s, model=%s, base_url=%s",
@@ -538,7 +580,7 @@ def main(argv: list[str] | None = None) -> None:
     # Create and run app
     app = create_app(
         model_config, kv_config, cors_origins, inference_mode,
-        turboquant_cfg, zero_quant_cfg, ultra_quant_cfg,
+        turboquant_cfg, zero_quant_cfg, ultra_quant_cfg, null_quant_cfg,
         thought_log_path=config.get("logging", {}).get("thought_log"),
         cloud_config=cloud_cfg,
         cloud_yaml_config=config.get("cloud", {}),

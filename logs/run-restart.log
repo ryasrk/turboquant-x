@@ -1,0 +1,246 @@
+nohup: ignoring input
+◈ Starting n8n on port 5678...
+  Waiting for n8n to be ready...
+Initializing n8n process
+n8n ready on ::, port 5678
+n8n Task Broker ready on 127.0.0.1, port 5679
+Failed to start Python task runner in internal mode. because its virtual environment is missing from this system. Launching a Python runner in internal mode is intended only for debugging and is not recommended for production. Users are encouraged to deploy in external mode. See: https://docs.n8n.io/hosting/configuration/task-runners/#setting-up-external-mode
+[license SDK] Skipping renewal on init: license cert is not initialized
+Registered runner "JS Task Runner" (VgUvKWhJYHxempdZ8YUhs) 
+Version: 2.14.2
+Building workflow dependency index...
+Start Active Workflows:
+Finished building workflow dependency index. Processed 2 draft workflows, 0 published workflows.
+Activated workflow "Webhook Data Logger" (ID: OnXSdBWPyUBVGTMl)
+Activated workflow "Daily Coffee Reminder" (ID: JlERAgGGvzOaGBMa)
+
+Editor is now accessible via:
+http://localhost:8000/workspace/n8n
+  n8n ready on port 5678
+  Auto-provisioning n8n owner account...
+  n8n auto-setup: ready
+◈ Starting TurboQuant-X on 0.0.0.0:8000...
+  Config: config/cloud.yaml
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TurboQuant-X:  http://localhost:8000
+  Workspaces:    http://localhost:8000/workspaces
+  n8n (proxied): http://localhost:8000/workspace/n8n/
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2026-04-06 11:15:29 [INFO] __main__: Auto-selected model: qwen2.5-7b-instruct (models/qwen2.5-7b-instruct-q4_k_m.gguf)
+/home/ryasr/personal-project/llm-turboquant/turboquant-x/src/utils/memory.py:75: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml
+2026-04-06 11:15:29 [INFO] src.utils.gpu_layers: GPU layer distribution — model: qwen2.5-7b-instruct-q4_k_m.gguf | layers: 28 | free VRAM: 7.2 GB | budget: 6.6 GB | bytes/layer: 167 MB | kv/layer: 8 MB | optimal n_gpu_layers: 28
+2026-04-06 11:15:29 [INFO] __main__: Auto GPU layers: 28 (resolved from VRAM + model size)
+2026-04-06 11:15:29 [INFO] __main__: Starting TurboQuant-X Server
+2026-04-06 11:15:29 [INFO] __main__: Model: qwen2.5-7b-instruct (models/qwen2.5-7b-instruct-q4_k_m.gguf)
+2026-04-06 11:15:29 [INFO] __main__: Inference mode: standard
+2026-04-06 11:15:29 [INFO] __main__: KV Cache: K=q8_0, V=q4_0
+2026-04-06 11:15:29 [INFO] __main__: Server: 0.0.0.0:8000
+INFO:     Started server process [23420]
+INFO:     Waiting for application startup.
+2026-04-06 11:15:29 [INFO] src.engine.inference: Loading model qwen2.5-7b-instruct (ctx=8192, gpu_layers=28, threads=8/16, batch=512, KV: K=q8_0 V=q4_0)
+llama_context: n_ctx_seq (8192) < n_ctx_train (32768) -- the full capacity of the model will not be utilized
+2026-04-06 11:15:31 [INFO] src.engine.inference: Model loaded in 1.6s
+2026-04-06 11:15:31 [INFO] src.server.app: Model loaded successfully: qwen2.5-7b-instruct (standard)
+2026-04-06 11:15:31 [INFO] src.server.app: Agent registry initialized with 58 tools: ['read_file', 'write_file', 'list_dir', 'find_files', 'replace_in_file', 'exec_shell', 'get_env', 'current_time', 'system_info', 'grep_code', 'python_eval', 'count_lines', 'json_query', 'calculate', 'csv_read', 'read_pdf', 'index_document', 'search_document', 'save_note', 'recall_note', 'delete_note', 'sql_query', 'diff_files', 'encode_decode', 'terminal_exec', 'generate_word', 'generate_pdf', 'generate_csv', 'n8n_workflow_status', 'n8n_list_executions', 'n8n_execution_detail', 'n8n_diagnose_error', 'n8n_install_node', 'n8n_list_community_nodes', 'n8n_uninstall_node', 'n8n_list_credentials', 'n8n_create_credential', 'n8n_delete_credential', 'n8n_update_workflow', 'n8n_suggest_improvements', 'n8n_list_workflows', 'n8n_get_workflow', 'n8n_create_workflow', 'n8n_delete_workflow', 'n8n_activate_workflow', 'n8n_execute_workflow', 'n8n_get_credential', 'n8n_update_credential', 'n8n_get_settings', 'n8n_list_node_types', 'n8n_get_node_params', 'n8n_search_templates', 'n8n_get_template_detail', 'n8n_search_official', 'n8n_fetch_official_template', 'web_search', 'fetch_webpage', 'http_request']
+2026-04-06 11:15:31 [INFO] src.server.app: Thought log initialized: logs/agent-thoughts.log
+2026-04-06 11:15:31 [INFO] src.server.app: Database initialized
+2026-04-06 11:15:31 [INFO] src.server.upload_routes: Started orphan attachment cleanup task
+2026-04-06 11:15:31 [INFO] src.server.app: Orphan attachment cleanup task started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-04-06 11:15:31 [INFO] httpx: HTTP Request: GET http://127.0.0.1:5678/healthz "HTTP/1.1 200 OK"
+2026-04-06 11:15:31 [INFO] httpx: HTTP Request: POST http://127.0.0.1:5678/rest/login "HTTP/1.1 200 OK"
+2026-04-06 11:15:31 [INFO] src.server.n8n_setup: Logged into n8n as admin@turboquant.local
+2026-04-06 11:15:31 [INFO] httpx: HTTP Request: GET http://127.0.0.1:5678/types/nodes.json "HTTP/1.1 200 OK"
+2026-04-06 11:15:32 [INFO] src.server.n8n_manager: Cached 872 n8n node types
+2026-04-06 11:15:32 [INFO] src.server.smart_search: Built node TF-IDF index: 872 nodes
+2026-04-06 11:15:32 [INFO] src.server.n8n_templates: Indexed 283 n8n templates from /home/ryasr/personal-project/llm-turboquant/turboquant-x/data/n8n_templates
+2026-04-06 11:15:32 [INFO] src.server.smart_search: Built template TF-IDF index: 283 templates
+2026-04-06 11:15:32 [INFO] src.server.app: TF-IDF search indexes pre-built
+INFO:     172.27.160.1:54559 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:15:32 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:15:32 [INFO] src.server.n8n_proxy: WS proxy: connected to n8n backend for rest/push
+2026-04-06 11:15:33 [INFO] httpx: HTTP Request: GET http://127.0.0.1:5678//healthz "HTTP/1.1 200 OK"
+2026-04-06 11:15:33 [INFO] src.server.app: [6bc8bf30] GET /workspace/n8n//healthz → 200 (18.8ms)
+INFO:     172.27.160.1:62607 - "GET /workspace/n8n//healthz HTTP/1.1" 200 OK
+2026-04-06 11:15:33 [INFO] httpx: HTTP Request: GET http://127.0.0.1:5678/rest/workflows/4c92up13NYBnKAPC/collaboration/write-lock "HTTP/1.1 304 Not Modified"
+2026-04-06 11:15:33 [INFO] src.server.app: [c10b6bc8] GET /workspace/n8n/rest/workflows/4c92up13NYBnKAPC/collaboration/write-lock → 304 (26.8ms)
+INFO:     172.27.160.1:62607 - "GET /workspace/n8n/rest/workflows/4c92up13NYBnKAPC/collaboration/write-lock HTTP/1.1" 304 Not Modified
+2026-04-06 11:15:44 [INFO] httpx: HTTP Request: GET http://127.0.0.1:5678//healthz "HTTP/1.1 200 OK"
+2026-04-06 11:15:44 [INFO] src.server.app: [adf7fe84] GET /workspace/n8n//healthz → 200 (49.2ms)
+INFO:     172.27.160.1:59738 - "GET /workspace/n8n//healthz HTTP/1.1" 200 OK
+Received SIGTERM. Shutting down...
+[runnner:js] Received SIGTERM signal, shutting down...
+2026-04-06 11:16:40 [INFO] src.server.n8n_proxy: WS proxy: [n8n→client] ended cleanly
+[runnner:js] Task runner stopped
+INFO:     connection closed
+
+Stopping n8n...
+INFO:     172.27.160.1:61205 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:42 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:42 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+2026-04-06 11:16:42 [ERROR] src.server.n8n_proxy: Cannot connect to n8n at http://127.0.0.1:5678
+2026-04-06 11:16:42 [INFO] src.server.app: [d7cae597] GET /workspace/n8n/rest/workflows/4c92up13NYBnKAPC/collaboration/write-lock → 502 (16.4ms)
+INFO:     172.27.160.1:57972 - "GET /workspace/n8n/rest/workflows/4c92up13NYBnKAPC/collaboration/write-lock HTTP/1.1" 502 Bad Gateway
+INFO:     172.27.160.1:64886 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:44 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:44 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:55374 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:46 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:46 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+2026-04-06 11:16:46 [ERROR] src.server.n8n_proxy: Cannot connect to n8n at http://127.0.0.1:5678
+2026-04-06 11:16:46 [INFO] src.server.app: [9395eacd] GET /workspace/n8n/rest/workflows/4c92up13NYBnKAPC/collaboration/write-lock → 502 (13.8ms)
+INFO:     172.27.160.1:57972 - "GET /workspace/n8n/rest/workflows/4c92up13NYBnKAPC/collaboration/write-lock HTTP/1.1" 502 Bad Gateway
+2026-04-06 11:16:47 [ERROR] src.server.n8n_proxy: Cannot connect to n8n at http://127.0.0.1:5678
+2026-04-06 11:16:47 [INFO] src.server.app: [868b5ce5] GET /workspace/n8n//healthz → 502 (14.4ms)
+INFO:     172.27.160.1:57972 - "GET /workspace/n8n//healthz HTTP/1.1" 502 Bad Gateway
+INFO:     172.27.160.1:54189 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:48 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:48 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:58845 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:50 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:50 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:50921 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:52 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:52 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:50766 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:54 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:54 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:64563 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:56 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:56 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:63495 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:16:58 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:16:58 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:59289 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:00 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:00 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:65256 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:02 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:02 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:62435 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:05 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:05 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:50678 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:05 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:05 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:57021 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:07 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:07 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:55683 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:09 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:09 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:59352 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:12 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:12 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:63679 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:14 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:14 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:52399 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:16 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:16 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:54168 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:18 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:18 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:61899 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:20 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:20 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:53457 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:22 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:22 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:53102 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:24 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:24 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:58441 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:26 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:26 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:57734 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:28 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:28 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:61125 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:30 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:30 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:65058 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:32 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:32 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:63386 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:34 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:34 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:58823 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:35 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:35 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     172.27.160.1:56601 - "WebSocket /workspace/n8n/rest/push?pushRef=pgkv1rm66c" [accepted]
+2026-04-06 11:17:37 [INFO] src.server.n8n_proxy: WS proxy: connecting to ws://127.0.0.1:5678/rest/push?pushRef=pgkv1rm66c (auth: cookie)
+INFO:     connection open
+2026-04-06 11:17:37 [WARNING] src.server.n8n_proxy: WS proxy error for rest/push: ConnectionRefusedError: [Errno 111] Connection refused
+INFO:     connection closed
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-04-06 11:17:38 [INFO] src.agent.mcp_loader: All MCP servers disconnected
+2026-04-06 11:17:38 [INFO] src.engine.inference: Model unloaded
+2026-04-06 11:17:38 [INFO] src.server.app: Server shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [23420]
+
+◈ Shutting down...
+◈ Done.

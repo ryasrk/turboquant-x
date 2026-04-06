@@ -741,7 +741,7 @@ export function syncModeFromHealth(inferenceMode) {
     return;
   }
 
-  // Local modes: standard, turboquant, zero-quant, ultra-quant
+  // Local modes: standard, turboquant, zero-quant, ultra-quant, null-quant
   modeSelect.value = inferenceMode;
   const headerMode = document.getElementById('header-mode-select');
   if (headerMode) headerMode.value = inferenceMode;

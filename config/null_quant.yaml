@@ -1,0 +1,49 @@
+# NullQuant configuration — token eviction + depth-adaptive zone compression
+# Most aggressive KV cache optimization mode: 32–128× KV reduction
+#
+# Usage:
+#   python -m src.main --config config/null_quant.yaml --mode null-quant
+#
+# See src/turboquant/null_quant.py for full algorithm documentation.
+
+inference_mode: "null-quant"
+
+model:
+  path: "models/qwen2.5-7b-instruct-q4_k_m.gguf"
+  n_ctx: 8192
+  n_gpu_layers: -1
+  chat_format: "chatml"
+
+kv_cache:
+  cache_type_k: "q8_0"
+  cache_type_v: "q8_0"
+  flash_attention: true
+
+null_quant:
+  # --- Token Eviction (Stage 1) ---
+  eviction_ratio: 0.75          # Evict 75% of tokens (keep 25%)
+  sink_tokens: 256              # Always preserve first N tokens (attention sinks)
+  recent_tokens: 256            # Always preserve last N tokens (recent context)
+  scoring_method: "l2_norm"     # Token importance: l2_norm | random | uniform_stride
+  block_size: 64                # Score/evict in blocks of this size
+
+  # --- Zone Compression (Stage 2) ---
+  shallow_fraction: 0.25        # First 25% of layers = shallow zone
+  deep_fraction: 0.25           # Last 25% of layers = deep zone
+  shallow_k_bits: 8             # Keys: 8-bit in shallow zone
+  shallow_v_bits: 8             # Values: 8-bit in shallow zone
+  middle_k_bits: 4              # Keys: 4-bit in middle zone (most layers)
+  middle_v_bits: 2              # Values: 2-bit in middle zone (most aggressive)
+  deep_k_bits: 8                # Keys: 8-bit in deep zone
+  deep_v_bits: 8                # Values: 8-bit in deep zone
+  compress_block_size: 128      # PolarQuant block size for zone compression
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8000"
+
+logging:
+  level: "INFO"

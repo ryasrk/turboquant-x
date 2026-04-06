@@ -2073,3 +2073,401 @@ class N8nFetchOfficialTemplateTool(Tool):
             lines.append(f"Credentials needed: {', '.join(creds_needed)}")
         lines.append(f"\nTo deploy: n8n_create_workflow(workflow_json='{cache_key}')")
         return "\n".join(lines)
+
+
+# ── Design JSON Edit & Redeploy Tools ────────────────────────────────
+
+
+def _navigate_json_path(data: Any, path: str) -> tuple[Any, str]:
+    """Navigate a dot-notation path, returning (parent_obj, final_key).
+
+    Supports: 'nodes[0].parameters.query', 'settings.executionOrder'
+    Raises KeyError/IndexError on invalid paths.
+    """
+    import re as _re
+    parts = _re.split(r"\.|(?=\[)", path)
+    parts = [p for p in parts if p]
+
+    current = data
+    for i, part in enumerate(parts[:-1]):
+        m = _re.match(r"^(\w+)?\[(\d+)\]$", part)
+        if m:
+            key, idx = m.group(1), int(m.group(2))
+            if key:
+                current = current[key]
+            current = current[idx]
+        else:
+            current = current[part]
+
+    # Handle final key (may include array index)
+    final = parts[-1]
+    m = _re.match(r"^(\w+)?\[(\d+)\]$", final)
+    if m:
+        key, idx = m.group(1), int(m.group(2))
+        if key:
+            current = current[key]
+        return current, idx
+    return current, final
+
+
+class N8nEditDesignJsonTool(Tool):
+    """Edit a specific path in the workspace's latest design JSON."""
+
+    @property
+    def name(self) -> str:
+        return "n8n_edit_design_json"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Edit the workspace's latest design JSON at a specific path using dot notation. "
+            "Can set, delete, or append values. Use for editing node parameters, "
+            "connections, settings, or any part of the workflow JSON. "
+            "After editing, use n8n_redeploy_workflow to push changes to n8n."
+        )
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": "The workspace ID (from workspace context)",
+                },
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Dot-notation path to the value to edit. "
+                        "Examples: 'nodes[0].parameters.query', 'settings.executionOrder', "
+                        "'nodes[2].name', 'nodes[1].parameters.options.timeout'"
+                    ),
+                },
+                "value": {
+                    "type": "string",
+                    "description": (
+                        "New value as a JSON string. Examples: '\"hello\"', '42', 'true', "
+                        "'{\"key\": \"val\"}', '[1,2,3]'. Use JSON format even for strings."
+                    ),
+                },
+                "operation": {
+                    "type": "string",
+                    "description": "Operation: 'set' (default), 'delete', or 'append' (for arrays)",
+                    "enum": ["set", "delete", "append"],
+                },
+            },
+            "required": ["workspace_id", "path"],
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        workspace_id = kwargs["workspace_id"]
+        path = kwargs["path"]
+        operation = kwargs.get("operation", "set")
+        value_str = kwargs.get("value", "null")
+
+        from src.server.database import get_connection, update_workspace_design
+
+        # Get latest design
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id, result_data FROM workspace_designs "
+                "WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1",
+                (workspace_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return f"Error: No design found for workspace {workspace_id}"
+
+        design_id = row["id"]
+        result_data = row["result_data"]
+        if not result_data:
+            return "Error: Design has no workflow JSON data"
+
+        try:
+            workflow = json.loads(result_data)
+        except json.JSONDecodeError:
+            return "Error: Design data is not valid JSON"
+
+        # Parse the value
+        if operation != "delete":
+            try:
+                value = json.loads(value_str)
+            except json.JSONDecodeError:
+                # Treat as plain string if not valid JSON
+                value = value_str
+
+        # Navigate to path and apply operation
+        try:
+            parent, key = _navigate_json_path(workflow, path)
+        except (KeyError, IndexError, TypeError) as e:
+            return f"Error: Invalid path '{path}' — {e}"
+
+        old_value = None
+        try:
+            if isinstance(key, int):
+                old_value = parent[key]
+            else:
+                old_value = parent.get(key)
+        except (IndexError, TypeError):
+            pass
+
+        if operation == "set":
+            parent[key] = value
+        elif operation == "delete":
+            if isinstance(key, int):
+                del parent[key]
+            elif key in parent:
+                del parent[key]
+            else:
+                return f"Error: Key '{key}' not found at path"
+        elif operation == "append":
+            target = parent[key] if not isinstance(key, int) else parent
+            if not isinstance(target, list):
+                return f"Error: Cannot append — value at '{path}' is not an array"
+            target.append(value)
+        else:
+            return f"Error: Unknown operation '{operation}'"
+
+        # Save back to database
+        update_workspace_design(design_id, result_data=json.dumps(workflow))
+
+        # Format result
+        old_repr = json.dumps(old_value)[:200] if old_value is not None else "null"
+        new_repr = json.dumps(value)[:200] if operation != "delete" else "(deleted)"
+        return (
+            f"Design JSON updated\n"
+            f"  Path: {path}\n"
+            f"  Operation: {operation}\n"
+            f"  Old value: {old_repr}\n"
+            f"  New value: {new_repr}\n"
+            f"\nUse n8n_redeploy_workflow to push changes to n8n."
+        )
+
+
+class N8nRedeployWorkflowTool(Tool):
+    """Redeploy the workspace's latest design JSON to n8n."""
+
+    @property
+    def name(self) -> str:
+        return "n8n_redeploy_workflow"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Redeploy the workspace's latest design JSON to n8n. "
+            "Use after editing the design with n8n_edit_design_json to push "
+            "changes live. Updates existing workflow or creates a new one."
+        )
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": "The workspace ID (from workspace context)",
+                },
+            },
+            "required": ["workspace_id"],
+        }
+
+    @property
+    def requires_approval(self) -> bool:
+        return True
+
+    async def execute(self, **kwargs: Any) -> str:
+        workspace_id = kwargs["workspace_id"]
+
+        from src.server.database import get_connection, update_workspace_design
+        from src.server.n8n_setup import n8n_api_call, ensure_n8n_ready
+
+        # Get workspace info
+        conn = get_connection()
+        try:
+            ws_row = conn.execute(
+                "SELECT id, n8n_workflow_id, title FROM workspaces WHERE id = ?",
+                (workspace_id,),
+            ).fetchone()
+            if not ws_row:
+                return f"Error: Workspace {workspace_id} not found"
+
+            design_row = conn.execute(
+                "SELECT id, result_data FROM workspace_designs "
+                "WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1",
+                (workspace_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if not design_row or not design_row["result_data"]:
+            return "Error: No design data found to redeploy"
+
+        try:
+            workflow_json = json.loads(design_row["result_data"])
+        except json.JSONDecodeError:
+            return "Error: Design data is not valid JSON"
+
+        if not workflow_json.get("nodes"):
+            return "Error: Design has no nodes to deploy"
+
+        if not await ensure_n8n_ready():
+            return "Error: n8n is not available. Start n8n first."
+
+        existing_wf_id = ws_row["n8n_workflow_id"]
+        payload = {
+            "name": workflow_json.get("name", ws_row["title"] or "Untitled"),
+            "nodes": workflow_json["nodes"],
+            "connections": workflow_json.get("connections", {}),
+            "active": False,
+            "settings": workflow_json.get("settings", {"executionOrder": "v1"}),
+        }
+
+        try:
+            if existing_wf_id:
+                # Update existing workflow
+                resp = await n8n_api_call("PUT", f"/rest/workflows/{existing_wf_id}", json_data=payload)
+                resp.raise_for_status()
+                result = resp.json()
+                wf = result.get("data", result) if isinstance(result, dict) else result
+                node_count = len(wf.get("nodes", []))
+                return (
+                    f"Redeployed to n8n\n"
+                    f"  Action: updated existing workflow\n"
+                    f"  Workflow ID: {existing_wf_id}\n"
+                    f"  Nodes: {node_count}\n"
+                    f"  Status: inactive (use n8n_activate_workflow to activate)"
+                )
+            else:
+                # Create new workflow
+                from src.server.workflow_designer import n8n_import_workflow
+                result = await n8n_import_workflow(workflow_json)
+                new_id = result.get("id")
+                if new_id:
+                    # Link the new workflow to the workspace
+                    conn2 = get_connection()
+                    try:
+                        import time as _time
+                        conn2.execute(
+                            "UPDATE workspaces SET n8n_workflow_id = ?, updated_at = ? WHERE id = ?",
+                            (str(new_id), _time.time(), workspace_id),
+                        )
+                        conn2.commit()
+                    finally:
+                        conn2.close()
+
+                return (
+                    f"Deployed to n8n\n"
+                    f"  Action: created new workflow\n"
+                    f"  Workflow ID: {new_id}\n"
+                    f"  Nodes: {len(result.get('nodes', []))}\n"
+                    f"  Status: inactive (use n8n_activate_workflow to activate)"
+                )
+        except Exception as e:
+            return f"Error deploying to n8n: {e}"
+
+
+class N8nSearchSkillsTool(Tool):
+    """On-demand skill retrieval for n8n domain knowledge."""
+
+    _cache: dict[str, str] | None = None
+
+    @property
+    def name(self) -> str:
+        return "n8n_search_skills"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Search n8n domain knowledge skills for best practices, patterns, and "
+            "syntax reference. Use BEFORE complex operations like creating workflows, "
+            "writing expressions, configuring nodes, or using code nodes. "
+            "Query examples: 'expression syntax', 'webhook pattern', 'code node javascript', "
+            "'validation', 'workflow patterns', 'node configuration'. "
+            "Pass query='' to list all available skills."
+        )
+
+    @property
+    def parameters(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query — keywords about the n8n topic you need help with. Empty string lists all available skills.",
+                },
+            },
+            "required": ["query"],
+        }
+
+    def _load_skills(self) -> dict[str, str]:
+        if N8nSearchSkillsTool._cache is not None:
+            return N8nSearchSkillsTool._cache
+        from pathlib import Path
+        skills_dir = Path(__file__).resolve().parents[3] / "data" / "skills"
+        if not skills_dir.is_dir():
+            return {}
+        result: dict[str, str] = {}
+        for md_file in sorted(skills_dir.glob("*.md")):
+            try:
+                result[md_file.stem] = md_file.read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+        N8nSearchSkillsTool._cache = result
+        return result
+
+    async def execute(self, **kwargs: Any) -> str:
+        query = kwargs.get("query", "").strip().lower()
+        skills = self._load_skills()
+
+        if not skills:
+            return "No skill files found."
+
+        # List mode
+        if not query:
+            lines = ["Available n8n skills:"]
+            for name, content in skills.items():
+                first_line = content.split("\n")[0].strip("# ").strip()
+                lines.append(f"  - {name}: {first_line}")
+            lines.append("\nUse a query to get the full content of a specific skill.")
+            return "\n".join(lines)
+
+        # Score each skill by keyword overlap
+        query_words = set(query.split())
+        scored: list[tuple[str, int, str]] = []
+        for name, content in skills.items():
+            score = 0
+            name_lower = name.lower().replace("-", " ")
+            content_lower = content[:500].lower()
+            for word in query_words:
+                if word in name_lower:
+                    score += 3  # Name match weighted higher
+                if word in content_lower:
+                    score += 1
+            # Exact name match bonus
+            if query.replace(" ", "-") == name.lower():
+                score += 10
+            if score > 0:
+                scored.append((name, score, content))
+
+        if not scored:
+            # Fallback: return skill names
+            return (
+                f"No skills matched '{query}'. Available skills:\n"
+                + "\n".join(f"  - {n}" for n in skills)
+            )
+
+        # Return top match
+        scored.sort(key=lambda x: x[1], reverse=True)
+        best_name, best_score, best_content = scored[0]
+
+        result = f"## Skill: {best_name}\n\n{best_content}"
+
+        # If second match is close, mention it
+        if len(scored) > 1 and scored[1][1] >= best_score * 0.7:
+            result += f"\n\n---\nAlso relevant: {scored[1][0]} (use query='{scored[1][0]}' to read)"
+
+        return result

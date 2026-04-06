@@ -34,6 +34,8 @@ from src.agent.tools.n8n_tools import (
     # Template tools
     N8nSearchTemplatesTool, N8nGetTemplateDetailTool,
     N8nSearchOfficialTemplatesTool, N8nFetchOfficialTemplateTool,
+    # Design edit & redeploy
+    N8nEditDesignJsonTool, N8nRedeployWorkflowTool,
 )
 
 __all__ = [
@@ -78,4 +80,6 @@ __all__ = [
     # n8n Templates
     "N8nSearchTemplatesTool", "N8nGetTemplateDetailTool",
     "N8nSearchOfficialTemplatesTool", "N8nFetchOfficialTemplateTool",
+    # Design edit & redeploy
+    "N8nEditDesignJsonTool", "N8nRedeployWorkflowTool",
 ]

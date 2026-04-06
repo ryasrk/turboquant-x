@@ -101,6 +101,22 @@ async def connect_mcp_servers(
     return total_tools
 
 
+def should_replace_builtin_n8n(config_path: str | None = None) -> bool:
+    """Return True if MCP is enabled and replace_builtin_n8n is set."""
+    config = load_mcp_config(config_path)
+    return config.get("enabled", False) and config.get("replace_builtin_n8n", False)
+
+
+def is_lazy_tool_loading(config_path: str | None = None) -> bool:
+    """Return True if lazy tool loading is enabled.
+
+    When True, the agent receives only meta-tools (search_tools,
+    get_tool_detail, invoke_tool) instead of all 70+ tool definitions.
+    """
+    config = load_mcp_config(config_path)
+    return config.get("lazy_tool_loading", False)
+
+
 def _create_client(server_cfg: dict) -> McpClient:
     """Create an McpClient from a server config dict."""
     name = server_cfg.get("name", "unknown")

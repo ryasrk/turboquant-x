@@ -89,9 +89,76 @@ def _strip_think_blocks(text: str, *, tag: str = "") -> str:
 
 MAX_ITERATIONS = 20
 MAX_TOOL_RESULT_CHARS = 16_000
+# Reserve tokens for output (max_tokens) + tool schema overhead
+_CTX_RESERVE_TOKENS = 1500
+
+
+def _estimate_message_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token for English text."""
+    return max(1, len(text) // 4)
+
+
+def _trim_messages_to_fit(
+    messages: list[dict[str, Any]],
+    max_ctx: int,
+    reserve: int,
+    tools_schema: list[dict] | None = None,
+) -> list[dict[str, Any]]:
+    """Drop oldest non-system messages until total fits within context budget.
+
+    Keeps: system prompt (first message if role=system) + the most recent messages.
+    Drops from the second message forward (oldest first).
+    """
+    budget = max_ctx - reserve  # tokens available for prompt
+    if budget <= 0:
+        return messages
+
+    # Estimate tool schema overhead
+    schema_tokens = 0
+    if tools_schema:
+        schema_tokens = _estimate_message_tokens(json.dumps(tools_schema))
+
+    def total_tokens(msgs: list[dict]) -> int:
+        t = schema_tokens
+        for m in msgs:
+            content = m.get("content", "") or ""
+            t += _estimate_message_tokens(content) + 4  # role/separator overhead
+            # tool_calls in assistant messages add tokens
+            if m.get("tool_calls"):
+                t += _estimate_message_tokens(json.dumps(m["tool_calls"], default=str))
+        return t
+
+    if total_tokens(messages) <= budget:
+        return messages
+
+    # Split: system (index 0 if system) + rest
+    system_msgs = []
+    rest = list(messages)
+    if rest and rest[0].get("role") == "system":
+        system_msgs = [rest.pop(0)]
+
+    # Keep at least the last 2 messages (current user turn + latest context)
+    while len(rest) > 2 and total_tokens(system_msgs + rest) > budget:
+        dropped = rest.pop(0)
+        logger.info("Context trim: dropped %s message (len=%d)",
+                     dropped.get("role", "?"), len(dropped.get("content", "") or ""))
+
+    trimmed = system_msgs + rest
+    logger.info("Context trimmed: %d messages, ~%d tokens (budget=%d)",
+                len(trimmed), total_tokens(trimmed), budget)
+    return trimmed
 
 _AGENT_SYSTEM_PROMPT_TEMPLATE = (
     "You are a helpful AI assistant with access to the following tools:\n{tool_list}\n\n"
+    "### Tool Discovery Workflow\n"
+    "You have meta-tools that let you discover and use many specialized tools:\n"
+    "1. **search_tools** — searches for TOOLS by capability keyword (NOT a web search). "
+    "Use short keywords like 'web', 'git', 'time', 'file', 'memory'.\n"
+    "2. **get_tool_detail** — shows full parameter schema for a discovered tool.\n"
+    "3. **invoke_tool** — calls any discovered tool with arguments.\n\n"
+    "**Example workflow** to search the web:\n"
+    '  Step 1: search_tools({{"query": "web"}}) → finds "web_search" tool\n'
+    '  Step 2: invoke_tool({{"tool_name": "web_search", "arguments": "{{\\"query\\": \\"your topic\\"}}" }}) → returns search results\n\n'
     "### Instructions\n"
     "- **ALWAYS use tools** for: current time/date, real-time data, live information, file operations, calculations, or web searches.\n"
     "- For general knowledge, conversation, or creative tasks, answer directly without tools.\n"
@@ -444,6 +511,13 @@ class AgentLoop:
 
             for iteration in range(self.max_iterations):
                 logger.debug("Agent iteration %d/%d (content_only=%s)", iteration + 1, self.max_iterations, self.content_only)
+
+                # Trim conversation history to fit context window
+                max_ctx = getattr(getattr(engine, '_model_config', None), 'n_ctx', 8192)
+                messages = _trim_messages_to_fit(
+                    messages, max_ctx, _CTX_RESERVE_TOKENS + max_tokens,
+                    tools_schema=tools_schema if not self.content_only else None,
+                )
 
                 tool_calls = None
                 content = ""
@@ -856,6 +930,10 @@ class AgentLoop:
         plain_msgs.append({"role": "assistant", "content": "\n".join(summary_parts)})
         plain_msgs.append({"role": "user", "content": "Based on the tool results above, please provide a complete answer to my original question."})
 
+        # Trim to fit context window
+        max_ctx = getattr(getattr(engine, '_model_config', None), 'n_ctx', 8192)
+        plain_msgs = _trim_messages_to_fit(plain_msgs, max_ctx, _CTX_RESERVE_TOKENS + max_tokens)
+
         result = await asyncio.to_thread(
             self._call_model_plain, engine, plain_msgs,
             max_tokens=max_tokens, temperature=temperature, top_p=top_p,
@@ -897,6 +975,23 @@ class AgentLoop:
                 )
                 logger.debug("FC response: %s", json.dumps(result, default=str)[:2000])
                 return result
+            except ValueError as exc:
+                if "exceed context window" in str(exc):
+                    logger.warning("Context overflow in FC call: %s — retrying with trimmed messages", exc)
+                    # Aggressive trim: keep system + last 2 messages
+                    trimmed = [m for m in messages if m.get("role") == "system"]
+                    non_system = [m for m in messages if m.get("role") != "system"]
+                    trimmed.extend(non_system[-2:] if len(non_system) > 2 else non_system)
+                    result = engine._model.create_chat_completion(
+                        messages=trimmed,
+                        tools=tools_schema,
+                        tool_choice="auto",
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                    )
+                    return result
+                raise
             finally:
                 engine._model.chat_handler = original_handler
 
@@ -912,9 +1007,23 @@ class AgentLoop:
         """Call model with standard handler for text generation."""
         engine._ensure_loaded()
         with engine._lock:
-            return engine._model.create_chat_completion(
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-            )
+            try:
+                return engine._model.create_chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                )
+            except ValueError as exc:
+                if "exceed context window" in str(exc):
+                    logger.warning("Context overflow in plain call: %s — retrying trimmed", exc)
+                    trimmed = [m for m in messages if m.get("role") == "system"]
+                    non_system = [m for m in messages if m.get("role") != "system"]
+                    trimmed.extend(non_system[-2:] if len(non_system) > 2 else non_system)
+                    return engine._model.create_chat_completion(
+                        messages=trimmed,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                    )
+                raise

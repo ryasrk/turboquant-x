@@ -612,6 +612,10 @@ function renderDesignPanel(ws) {
   hideActions();
   hideN8nIframe();
 
+  // Clear stale workflow preview from previous workspace
+  const preview = $('#ws-workflow-preview');
+  if (preview) { preview.innerHTML = ''; preview.classList.add('hidden'); }
+
   // Update "Open in n8n" link
   const openLink = $('#ws-n8n-open');
   if (openLink && wfId) {
@@ -627,16 +631,46 @@ function renderDesignPanel(ws) {
   } else if (status === 'designed') {
     showActions('designed');
     if (wfId) loadN8nIframe(wfId);
+    loadLatestDesignPreview(ws.id);
   } else if (status === 'ready' || status === 'approved') {
     showActions('approved');
     // Show prompt input so user can re-design
     $('#ws-prompt-area')?.classList.remove('hidden');
     if (wfId) loadN8nIframe(wfId);
+    loadLatestDesignPreview(ws.id);
   } else if (status === 'active') {
     showActions('active');
     if (wfId) loadN8nIframe(wfId);
+    loadLatestDesignPreview(ws.id);
   }
-  // draft / failed: show prompt input (default state)
+  // draft / failed: clear prompt and show prompt input (default state)
+  if (status === 'draft' || status === 'failed') {
+    const promptInput = $('#ws-prompt-input');
+    if (promptInput) promptInput.value = '';
+  }
+}
+
+// ── UI: Load latest design preview (on page load / workspace select) ───
+
+async function loadLatestDesignPreview(workspaceId) {
+  try {
+    const data = await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}/designs`);
+    const designs = data?.designs ?? [];
+    if (designs.length > 0) {
+      // Populate the prompt textarea with the latest design prompt
+      const promptInput = $('#ws-prompt-input');
+      if (promptInput && designs[0].prompt) {
+        promptInput.value = designs[0].prompt;
+      }
+      // Show workflow preview if design has result data
+      if (designs[0].result_data) {
+        const workflow = JSON.parse(designs[0].result_data);
+        showWorkflowPreview(workflow);
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load design preview:', err);
+  }
 }
 
 // ── UI: Design progress (SSE) ──────────────────────────────────────────
@@ -1036,7 +1070,13 @@ function escapeHtml(str) {
 function formatDate(iso) {
   if (!iso) return '';
   try {
-    const d = new Date(iso);
+    // Backend stores Unix epoch seconds — convert to ms if needed
+    let d;
+    if (typeof iso === 'number' && iso < 1e12) {
+      d = new Date(iso * 1000);
+    } else {
+      d = new Date(iso);
+    }
     const now = new Date();
     const diffMs = now - d;
     const diffMin = Math.floor(diffMs / 60000);

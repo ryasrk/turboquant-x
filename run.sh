@@ -41,6 +41,64 @@ for arg in "$@"; do
   esac
 done
 
+# ── Port cleanup (restart safety) ──────────────────────────────────
+find_listen_pids() {
+  local port="$1"
+
+  if command -v lsof &>/dev/null; then
+    lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | sort -u || true
+    return 0
+  fi
+
+  ss -lptn "sport = :${port}" 2>/dev/null \
+    | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' \
+    | sort -u || true
+  return 0
+}
+
+free_port_if_needed() {
+  local port="$1"
+  local service_name="$2"
+  local pids
+
+  pids="$(find_listen_pids "$port" | tr '\n' ' ')"
+  if [[ -z "${pids// }" ]]; then
+    return
+  fi
+
+  echo "◈ Port ${port} busy (${service_name}), stopping existing process(es): ${pids}"
+
+  # Graceful stop first.
+  kill ${pids} 2>/dev/null || true
+  sleep 1
+
+  # Force stop only if still listening.
+  pids="$(find_listen_pids "$port" | tr '\n' ' ')"
+  if [[ -n "${pids// }" ]]; then
+    kill -9 ${pids} 2>/dev/null || true
+  fi
+}
+
+kill_matching_processes() {
+  local pattern="$1"
+  local label="$2"
+  local pids
+
+  pids="$(pgrep -f "$pattern" 2>/dev/null | tr '\n' ' ' || true)"
+  if [[ -z "${pids// }" ]]; then
+    return
+  fi
+
+  echo "◈ Existing ${label} process(es) detected, stopping: ${pids}"
+  kill ${pids} 2>/dev/null || true
+  sleep 1
+
+  pids="$(pgrep -f "$pattern" 2>/dev/null | tr '\n' ' ' || true)"
+  if [[ -n "${pids// }" ]]; then
+    kill -9 ${pids} 2>/dev/null || true
+  fi
+}
+
 # ── Detect Python ───────────────────────────────────────────────────
 if [[ -x env/bin/python3 ]]; then
   PYTHON=env/bin/python3
@@ -68,6 +126,8 @@ trap cleanup EXIT INT TERM
 
 # ── Start n8n ───────────────────────────────────────────────────────
 if [[ "$START_N8N" == true ]]; then
+  kill_matching_processes "n8n start" "n8n"
+  free_port_if_needed "$N8N_PORT" "n8n"
   echo "◈ Starting n8n on port ${N8N_PORT}..."
 
   export N8N_PATH="/workspace/n8n/"
@@ -149,6 +209,8 @@ fi
 
 # ── Start TurboQuant-X ──────────────────────────────────────────────
 if [[ "$START_TQ" == true ]]; then
+  kill_matching_processes "src.main.*--port ${TQ_PORT}" "TurboQuant-X"
+  free_port_if_needed "$TQ_PORT" "TurboQuant-X"
   echo "◈ Starting TurboQuant-X on ${TQ_HOST}:${TQ_PORT}..."
   echo "  Config: ${TQ_CONFIG}"
 

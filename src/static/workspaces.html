@@ -161,13 +161,15 @@
 
       <!-- Execution History Panel -->
       <section id="ws-exec-section" class="ws-panel hidden" aria-label="Execution history">
-        <h3 class="ws-panel-title">◈ Executions
-          <button id="ws-exec-refresh" class="ws-icon-action" title="Refresh executions" aria-label="Refresh executions">↻</button>
-        </h3>
-        <div id="ws-exec-list" class="ws-exec-list" role="list" aria-live="polite"></div>
-        <div id="ws-exec-empty" class="ws-exec-empty hidden">
-          <span>No executions yet — run your workflow to see results here</span>
-        </div>
+        <details id="ws-exec-details">
+          <summary class="ws-panel-title">◈ Executions
+            <button id="ws-exec-refresh" class="ws-icon-action" title="Refresh executions" aria-label="Refresh executions">↻</button>
+          </summary>
+          <div id="ws-exec-list" class="ws-exec-list" role="list" aria-live="polite"></div>
+          <div id="ws-exec-empty" class="ws-exec-empty hidden">
+            <span>No executions yet — run your workflow to see results here</span>
+          </div>
+        </details>
       </section>
 
       <!-- Workspace Agent Chat -->

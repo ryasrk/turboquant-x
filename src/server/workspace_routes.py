@@ -1181,18 +1181,18 @@ async def list_available_nodes(
 
 # Keyword → skill filename mapping for context-aware skill injection
 _SKILL_KEYWORD_MAP: dict[str, list[str]] = {
-    "build": ["build-workflow-from-template"],
-    "create": ["build-workflow-from-template"],
+    "build": ["build-workflow-from-template", "n8n-workflow-patterns"],
+    "create": ["build-workflow-from-template", "n8n-workflow-patterns"],
     "template": ["build-workflow-from-template"],
     "deploy": ["build-workflow-from-template"],
-    "error": ["diagnose-fix-workflow"],
-    "fail": ["diagnose-fix-workflow"],
-    "fix": ["diagnose-fix-workflow"],
+    "error": ["diagnose-fix-workflow", "n8n-validation-expert"],
+    "fail": ["diagnose-fix-workflow", "n8n-validation-expert"],
+    "fix": ["diagnose-fix-workflow", "n8n-validation-expert"],
     "diagnose": ["diagnose-fix-workflow"],
     "debug": ["diagnose-fix-workflow"],
     "broken": ["diagnose-fix-workflow"],
     "install": ["install-discover-nodes"],
-    "node": ["install-discover-nodes"],
+    "node": ["install-discover-nodes", "n8n-node-configuration"],
     "community": ["install-discover-nodes"],
     "package": ["install-discover-nodes"],
     "credential": ["manage-credentials"],
@@ -1208,6 +1208,26 @@ _SKILL_KEYWORD_MAP: dict[str, list[str]] = {
     "improve": ["optimize-workflow"],
     "review": ["optimize-workflow"],
     "slow": ["optimize-workflow"],
+    # n8n-skills from czlonkowski/n8n-skills
+    "expression": ["n8n-expression-syntax"],
+    "{{": ["n8n-expression-syntax"],
+    "$json": ["n8n-expression-syntax"],
+    "$node": ["n8n-expression-syntax"],
+    "webhook": ["n8n-expression-syntax", "n8n-workflow-patterns"],
+    "validate": ["n8n-validation-expert", "n8n-mcp-tools-expert"],
+    "validation": ["n8n-validation-expert"],
+    "pattern": ["n8n-workflow-patterns"],
+    "workflow": ["n8n-workflow-patterns"],
+    "configure": ["n8n-node-configuration"],
+    "config": ["n8n-node-configuration"],
+    "parameter": ["n8n-node-configuration"],
+    "code node": ["n8n-code-javascript"],
+    "javascript": ["n8n-code-javascript"],
+    "python": ["n8n-code-python"],
+    "code": ["n8n-code-javascript"],
+    "mcp": ["n8n-mcp-tools-expert"],
+    "search_nodes": ["n8n-mcp-tools-expert"],
+    "get_node": ["n8n-mcp-tools-expert"],
 }
 
 
@@ -1259,92 +1279,108 @@ def _select_relevant_skills(user_message: str, max_skills: int = 2) -> str:
 
 
 _N8N_SYSTEM_PROMPT = (
-    "You are a proactive n8n workspace assistant with tools for workflows, "
-    "executions, credentials, nodes, and templates.\n\n"
-    "WORKFLOW CREATION (MANDATORY STEPS — follow IN ORDER):\n"
-    "1. Search templates: n8n_search_templates (quick look only — do NOT deploy unless it is an EXACT match).\n"
-    "2. DECIDE: If a template matches ALL the required node types (trigger + action nodes), "
-    "use n8n_get_template_detail to deploy it. "
-    "Otherwise, SKIP templates and BUILD CUSTOM — this is the common case.\n"
-    "3. For EACH node you plan to use, call n8n_get_node_params(node_type, resource, operation) "
-    "to get the REAL parameter names, types, and required fields.\n"
-    "   - TRIGGER NODE: Every workflow MUST have a trigger (e.g. scheduleTrigger, webhook, githubTrigger).\n"
-    "   - Call n8n_get_node_params for the trigger node too!\n"
-    "4. Build the workflow using ONLY the parameter names returned by n8n_get_node_params. "
-    "NEVER use param names from memory — they are often wrong.\n"
-    "5. Deploy via n8n_create_workflow.\n\n"
-    "CRITICAL: NEVER deploy an unrelated template. If no template matches, BUILD CUSTOM.\n"
-    "CRITICAL: If you skip step 3, your workflow WILL have wrong parameter names and WILL fail. "
-    "For example: Slack uses 'channelId' not 'channel', and requires resource+operation params.\n"
-    "CRITICAL: DO NOT skip calling n8n_get_node_params for ANY node — including trigger nodes.\n"
-    "CRITICAL: Every workflow MUST start with a trigger node (scheduleTrigger, webhook, etc.).\n\n"
-    "CREDENTIALS: Before activation — inspect nodes for credential refs, "
-    "n8n_list_credentials to check existing, create missing ones, "
-    "link IDs to nodes via n8n_update_workflow, THEN activate.\n"
+    "<role>Proactive n8n workspace assistant. Tools: workflows, executions, "
+    "credentials, nodes, templates, design editing. "
+    "Two tool sets: n8n_* (built-in ops) + mcp_n8n_* (docs/validation). "
+    "n8n_search_skills for domain knowledge on-demand.</role>\n\n"
+
+    "<workflow_creation>\n"
+    "MANDATORY — follow IN ORDER:\n"
+    "0. n8n_search_skills — lookup patterns/syntax before building\n"
+    "1. n8n_search_templates — quick check only. Do NOT deploy unless EXACT match.\n"
+    "2. No match → BUILD CUSTOM (common case). Skip templates.\n"
+    "3. n8n_get_node_params(node_type, resource, operation) for EVERY node incl. trigger. "
+    "Optional: mcp_n8n_get_node (docs), mcp_n8n_validate_node (validation).\n"
+    "4. Build using ONLY params from step 3. Params from memory = WRONG.\n"
+    "5. n8n_create_workflow\n"
+    "6. mcp_n8n_validate_workflow\n"
+    "</workflow_creation>\n\n"
+
+    "<rules>\n"
+    "- No template match → build custom. NEVER deploy unrelated template.\n"
+    "- Skipping step 3 → wrong params → failure. Ex: Slack='channelId' not 'channel'.\n"
+    "- Every workflow MUST start with trigger node.\n"
+    "- NEVER trust default param values. Set ALL explicitly.\n"
+    "- Webhook data: $json.body (NOT $json directly).\n"
+    "- {{ }} only in node param fields, NOT in Code nodes.\n"
+    "- Use tools FIRST — never ask for info tools can provide.\n"
+    "- Errors → n8n_list_executions(status='error') → n8n_diagnose_error.\n"
+    "- Check credentials before activating.\n"
+    "- Be concise — findings, diagnosis, fix.\n"
+    "</rules>\n\n"
+
+    "<credentials>\n"
+    "Before activation: n8n_list_credentials → check → create missing → "
+    "link IDs via n8n_update_workflow → activate.\n"
     "Types: telegramApi(accessToken), openAiApi(apiKey), slackApi(accessToken), "
-    "httpHeaderAuth(name,value), githubApi(accessToken).\n\n"
-    "RULES: 1) Use tools FIRST — never ask for info tools can look up. "
-    "2) Errors → n8n_list_executions(status='error') → n8n_diagnose_error. "
-    "3) Check credentials before activating. "
-    "4) Be concise — show findings, diagnosis, and fix. "
-    "5) ALWAYS call n8n_get_node_params for EVERY node before creating a workflow."
+    "httpHeaderAuth(name,value), githubApi(accessToken)\n"
+    "</credentials>\n\n"
+
+    "<design_editing>\n"
+    "n8n_edit_design_json: modify at JSON path (dot notation: nodes[0].name, "
+    "nodes[1].parameters.url, settings.executionOrder).\n"
+    "n8n_redeploy_workflow: push changes to n8n.\n"
+    "</design_editing>\n\n"
+
+    "<expression_syntax>\n"
+    "n8n_search_skills('expression syntax') for full reference.\n"
+    "Validate: mcp_n8n_validate_workflow before activation.\n"
+    "</expression_syntax>"
 )
 
 
 # Extra instructions for local models (small LLMs that need explicit guidance)
 _LOCAL_MODEL_SUPPLEMENT = (
-    "## CRITICAL EXECUTION RULES (MUST FOLLOW)\n"
-    "1. You MUST call tools using EXACTLY the <tool_call> format shown below.\n"
-    "2. Call ONE tool per response. After getting the result, call the NEXT tool.\n"
-    "3. NEVER explain what you will do — just output the <tool_call> tag.\n"
-    "4. NEVER say 'let me call' or 'I will call' — output the <tool_call> directly.\n"
-    "5. Every response MUST contain exactly ONE <tool_call> tag until the workflow is created.\n"
-    "6. Brief context (1-2 sentences max) before the tool call is OK.\n\n"
-    "## MANDATORY: Template Decision Rule\n"
-    "- After n8n_search_templates, check if ANY template has the EXACT node types you need.\n"
-    "- If NO template matches (common case), DO NOT search official or fetch templates.\n"
-    "- Instead, go STRAIGHT to n8n_get_node_params for each node and build CUSTOM.\n"
-    "- NEVER deploy a template that does not match the user's request.\n\n"
-    "## MANDATORY: Trigger Node + Get Params for ALL Nodes\n"
-    "- Every workflow MUST start with a trigger node (scheduleTrigger, webhook, githubTrigger, etc.).\n"
-    "- You MUST call n8n_get_node_params for EVERY node you include in the workflow:\n"
-    "  trigger, httpRequest, slack, telegram, github, etc. No exceptions.\n"
-    "- If you skip n8n_get_node_params for any node, the params WILL be wrong.\n\n"
-    "## n8n Workflow JSON Format\n"
-    "When calling n8n_create_workflow, the workflow_json MUST be a valid JSON string with this structure:\n"
-    '```\n'
-    '{"nodes":[{"parameters":{"PARAM":"VALUE"},"type":"n8n-nodes-base.TYPE","typeVersion":1,"position":[X,Y],"name":"NAME"}],'
-    '"connections":{"NodeA":{"main":[[{"node":"NodeB","type":"main","index":0}]]}}}\n'
-    '```\n\n'
-    "## When n8n_get_node_params Shows Summary Mode\n"
-    "If a node has too many params (e.g., Slack), the tool shows available resources/operations.\n"
-    "You MUST call it again with resource and operation filters:\n"
-    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.slack", "resource": "message", "operation": "post"}}</tool_call>\n\n'
-    "## One-Shot Example: Schedule → HTTP → Slack Workflow\n"
-    "NOTE: This example uses Slack. If the user asks for a DIFFERENT service "
-    "(Telegram, email, Discord, etc.), replace the Slack node with that service's node.\n"
-    "Step 1 — Search templates (quick check):\n"
-    '<tool_call>{"name": "n8n_search_templates", "arguments": {"query": "slack message schedule"}}</tool_call>\n'
-    "Step 2 — No match found → Build custom. Get TRIGGER params:\n"
-    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.scheduleTrigger"}}</tool_call>\n'
-    "Step 3 — Get HTTP params:\n"
-    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.httpRequest"}}</tool_call>\n'
-    "Step 4 — Get Slack params (with resource/operation filter):\n"
+    "<tool_format>\n"
+    "Call ONE tool per response. Output <tool_call> directly — no preamble.\n"
+    "Brief context (1-2 sentences) before tool call OK.\n"
+    "Every response = exactly ONE <tool_call> until task complete.\n"
+    "</tool_format>\n\n"
+
+    "<template_rule>\n"
+    "After n8n_search_templates: no exact match → skip → build custom.\n"
+    "NEVER deploy mismatched template.\n"
+    "</template_rule>\n\n"
+
+    "<json_format>\n"
+    "n8n_create_workflow workflow_json:\n"
+    '{"nodes":[{"parameters":{"P":"V"},"type":"n8n-nodes-base.TYPE","typeVersion":1,"position":[X,Y],"name":"N"}],'
+    '"connections":{"A":{"main":[[{"node":"B","type":"main","index":0}]]}}}\n'
+    "</json_format>\n\n"
+
+    "<summary_mode>\n"
+    "If n8n_get_node_params shows summary → re-call with resource+operation:\n"
     '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.slack", "resource": "message", "operation": "post"}}</tool_call>\n'
-    "Step 5 — Create workflow (MUST include trigger + all nodes):\n"
+    "</summary_mode>\n\n"
+
+    "<one_shot_example>\n"
+    "Task: Schedule → HTTP → Slack (replace Slack with user's actual service)\n\n"
+    "Step 0:\n"
+    '<tool_call>{"name": "n8n_search_skills", "arguments": {"query": "workflow patterns"}}</tool_call>\n'
+    "Step 1:\n"
+    '<tool_call>{"name": "n8n_search_templates", "arguments": {"query": "slack message schedule"}}</tool_call>\n'
+    "Step 2 (no match → custom). Trigger params:\n"
+    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.scheduleTrigger"}}</tool_call>\n'
+    "Step 3: HTTP params:\n"
+    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.httpRequest"}}</tool_call>\n'
+    "Step 4: Slack params:\n"
+    '<tool_call>{"name": "n8n_get_node_params", "arguments": {"node_type": "n8n-nodes-base.slack", "resource": "message", "operation": "post"}}</tool_call>\n'
+    "Step 5: Create:\n"
     '<tool_call>{"name": "n8n_create_workflow", "arguments": {"name": "Schedule HTTP to Slack", "workflow_json": '
     '"{\\"nodes\\":[{\\"parameters\\":{\\"rule\\":{\\"interval\\":[{\\"field\\":\\"minutes\\",\\"minutesInterval\\":5}]}},\\"type\\":\\"n8n-nodes-base.scheduleTrigger\\",\\"typeVersion\\":1,\\"position\\":[250,300],\\"name\\":\\"Every 5 Minutes\\"},'
     '{\\"parameters\\":{\\"url\\":\\"https://api.example.com/data\\",\\"method\\":\\"GET\\"},\\"type\\":\\"n8n-nodes-base.httpRequest\\",\\"typeVersion\\":4.2,\\"position\\":[500,300],\\"name\\":\\"Fetch Data\\"},'
     '{\\"parameters\\":{\\"authentication\\":\\"accessToken\\",\\"resource\\":\\"message\\",\\"operation\\":\\"post\\",\\"select\\":\\"channel\\",\\"channelId\\":{\\"value\\":\\"C1234567890\\",\\"mode\\":\\"id\\"},\\"text\\":\\"=Data: {{$json.data}}\\"},\\"type\\":\\"n8n-nodes-base.slack\\",\\"typeVersion\\":2.2,\\"position\\":[750,300],\\"name\\":\\"Post to Slack\\"}],'
     '\\"connections\\":{\\"Every 5 Minutes\\":{\\"main\\":[[{\\"node\\":\\"Fetch Data\\",\\"type\\":\\"main\\",\\"index\\":0}]]},'
     '\\"Fetch Data\\":{\\"main\\":[[{\\"node\\":\\"Post to Slack\\",\\"type\\":\\"main\\",\\"index\\":0}]]}}}"'
-    "}}</tool_call>\n\n"
-    "## IMPORTANT: Node Type Matching\n"
-    "- ALWAYS use the EXACT node type the user asks for.\n"
-    "- If user says 'Telegram' → use n8n-nodes-base.telegram (NOT slack)\n"
-    "- If user says 'email' → use n8n-nodes-base.emailSend (NOT slack)\n"
-    "- If user says 'Discord' → use n8n-nodes-base.discord (NOT slack)\n"
-    "- The example above uses Slack only as a TEMPLATE PATTERN. Replace nodes as needed.\n"
+    "}}</tool_call>\n"
+    "</one_shot_example>\n\n"
+
+    "<node_matching>\n"
+    "Use EXACT node type user requests:\n"
+    "Telegram→n8n-nodes-base.telegram | email→n8n-nodes-base.emailSend | "
+    "Discord→n8n-nodes-base.discord\n"
+    "Example uses Slack as pattern only. Replace as needed.\n"
+    "</node_matching>"
 )
 
 
@@ -1375,10 +1411,19 @@ async def workspace_agent_chat(
 
     system_msg = _N8N_SYSTEM_PROMPT + context_note
 
-    # Inject ONLY relevant skills based on user message (saves context)
-    skills_text = _select_relevant_skills(body.message)
-    if skills_text:
-        system_msg += "\n\n## Relevant Skills\n\n" + skills_text
+    # n8n health pre-check — tell agent if n8n backend is unavailable
+    from src.server.n8n_setup import _n8n_ready
+    if not _n8n_ready:
+        system_msg += (
+            "\n\n⚠️ n8n BACKEND IS CURRENTLY OFFLINE. "
+            "Built-in n8n_* tools that call the n8n API will fail. "
+            "You can still use: n8n_search_skills, mcp_n8n_* documentation/validation tools, "
+            "and n8n_edit_design_json (local design editing). "
+            "Inform the user that n8n is offline if they request operations that need it."
+        )
+
+    # Skills are now pulled on-demand via n8n_search_skills tool (Option C)
+    # No upfront injection — saves 2-4K tokens per message
 
     # Dynamic history cap — fewer messages = more room for tool results
     history_cap = 10
@@ -1404,16 +1449,28 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None,
     config — so workspace chat works regardless of inference mode.
     """
     from src.agent.cloud_loop import CloudAgentLoop
-    from src.server.app import get_agent_registry
+    from src.server.app import get_full_agent_registry
 
-    registry = get_agent_registry()
+    registry = get_full_agent_registry()
     if registry is None:
         yield {"data": json.dumps({"type": "error", "message": "Agent tools not initialized"})}
         yield {"data": "[DONE]"}
         return
 
-    # Filter to n8n tools only
-    n8n_registry = registry.subset("n8n_")
+    # Filter to n8n tools — includes both built-in n8n_* and MCP mcp_n8n_* tools
+    n8n_builtin = registry.subset("n8n_")
+    n8n_mcp = registry.subset("mcp_n8n_")
+    # Merge both registries + add search_skills tool
+    from src.agent.registry import ToolRegistry
+    from src.agent.tools.n8n_tools import N8nSearchSkillsTool
+    n8n_registry = ToolRegistry()
+    for name in n8n_builtin.list_tools():
+        n8n_registry._tools[name] = n8n_builtin.get(name)
+    for name in n8n_mcp.list_tools():
+        n8n_registry._tools[name] = n8n_mcp.get(name)
+    # On-demand skill search tool (Option C: pull model)
+    _skills_tool = N8nSearchSkillsTool()
+    n8n_registry._tools[_skills_tool.name] = _skills_tool
 
     if not n8n_registry.list_tools():
         yield {"data": json.dumps({"type": "error", "message": "No n8n tools available"})}
@@ -1460,8 +1517,8 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None,
             yield {"data": "[DONE]"}
         return
 
-    cloud_engine, is_temporary = _create_engine_for_provider(provider, model)
-    if cloud_engine is None:
+    engine_to_use, is_temporary = _create_engine_for_provider(provider, model)
+    if engine_to_use is None:
         yield {"data": json.dumps({
             "type": "error",
             "message": (
@@ -1474,14 +1531,43 @@ async def _workspace_chat_stream(messages: list[dict], model: str | None = None,
         yield {"data": "[DONE]"}
         return
 
-    engine_to_use = cloud_engine
     dispose_engine = is_temporary
 
+    # Check if we got a local InferenceEngine (e.g. cloud fallback returned local).
+    # Local engines don't support native tool calling kwargs — use AgentLoop instead.
+    from src.engine.inference import InferenceEngine as _LocalEngine
+    if isinstance(engine_to_use, _LocalEngine):
+        from src.agent.loop import AgentLoop, _build_system_prompt
+
+        agent_tool_prompt = _build_system_prompt(n8n_registry)
+        local_supplement = _LOCAL_MODEL_SUPPLEMENT
+        for i, m in enumerate(messages):
+            if m.get("role") == "system":
+                messages[i] = {
+                    "role": "system",
+                    "content": agent_tool_prompt + "\n\n" + local_supplement + "\n\n" + m["content"],
+                }
+                break
+
+        try:
+            loop = AgentLoop(n8n_registry, max_tool_result_chars=4000, content_only=True)
+            async for event in loop.run(engine_to_use, messages, max_tokens=4096, temperature=0.3, top_p=0.85):
+                yield {"data": json.dumps(event)}
+            yield {"data": "[DONE]"}
+        except Exception as exc:
+            logger.exception("Local agent chat error (cloud fallback)")
+            yield {"data": json.dumps({"type": "error", "message": str(exc)})}
+            yield {"data": "[DONE]"}
+        return
+
     try:
-        # Use a compact tool result limit to avoid context overflow
+        # Cloud engine — use CloudAgentLoop with native tool calling
         loop = CloudAgentLoop(n8n_registry, max_tool_result_chars=4000)
 
-        async for event in loop.run(engine_to_use, messages, max_tokens=4096):
+        # Read max_tokens from provider config (reasoning models need higher budget)
+        cloud_max_tokens = getattr(getattr(engine_to_use, '_config', None), 'max_tokens', 4096)
+
+        async for event in loop.run(engine_to_use, messages, max_tokens=cloud_max_tokens):
             yield {"data": json.dumps(event)}
 
         yield {"data": "[DONE]"}

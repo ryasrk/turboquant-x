@@ -26,6 +26,7 @@ SERVER_PORT="${TURBOQUANT_PORT:-8000}"
 NGROK_AUTH="${NGROK_AUTHTOKEN:-}"
 NGROK_DOMAIN="${NGROK_DOMAIN:-}"
 VENV_PYTHON="env/bin/python3"
+RUN_SCRIPT="./run.sh"
 
 # ── Theme ────────────────────────────────────────────────────────────
 DIM='\033[2m'
@@ -91,6 +92,13 @@ check_deps() {
   fi
   ok "Python venv"
 
+  if [[ ! -x "$RUN_SCRIPT" ]]; then
+    err "run.sh not found or not executable at $RUN_SCRIPT"
+    err "Run: chmod +x run.sh"
+    exit 1
+  fi
+  ok "run.sh launcher"
+
   if ! command -v ngrok &>/dev/null; then
     err "ngrok not installed"
     step "Install: curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok-v3-stable-linux-amd64.tgz | tar xz -C /usr/local/bin"
@@ -112,7 +120,8 @@ start_server() {
   log "Initializing inference engine..."
   step "Binding ${SERVER_HOST}:${SERVER_PORT}"
 
-  $VENV_PYTHON -m src.main --host "$SERVER_HOST" --port "$SERVER_PORT" &
+  # Use the combined launcher so n8n and TurboQuant-X start together.
+  TQ_HOST="$SERVER_HOST" TQ_PORT="$SERVER_PORT" "$RUN_SCRIPT" &
   SERVER_PID=$!
 
   # Wait for server to be ready
@@ -140,7 +149,7 @@ start_ngrok() {
   local ngrok_args="http ${SERVER_PORT}"
 
   if [[ -n "$NGROK_DOMAIN" ]]; then
-    ngrok_args="http --domain=${NGROK_DOMAIN} ${SERVER_PORT}"
+    ngrok_args="http --url=${NGROK_DOMAIN} ${SERVER_PORT}"
     step "Domain: ${NGROK_DOMAIN}"
   else
     step "Mode: random URL"

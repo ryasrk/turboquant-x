@@ -1249,6 +1249,21 @@ body {
 .ws-icon-action:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ── Execution history panel ──────────────────────────────────────── */
+#ws-exec-details > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+#ws-exec-details > summary::-webkit-details-marker { display: none; }
+#ws-exec-details > summary::before {
+  content: '▸ ';
+  display: inline;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+#ws-exec-details[open] > summary::before {
+  content: '▾ ';
+}
 .ws-exec-list {
   display: flex;
   flex-direction: column;

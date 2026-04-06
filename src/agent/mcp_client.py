@@ -50,6 +50,7 @@ class McpStdioTransport:
             stderr=asyncio.subprocess.PIPE,
             env=self._env,
             cwd=self._cwd,
+            limit=1024 * 1024,  # 1 MB buffer for large MCP responses
         )
         self._reader_task = asyncio.create_task(self._read_loop())
         logger.info("MCP stdio transport started: %s (pid=%d)", self._command, self._process.pid)

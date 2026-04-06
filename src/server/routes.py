@@ -209,9 +209,9 @@ async def approve_tool(request: Request):
 @router.get("/v1/agent/tools")
 async def list_agent_tools():
     """List all registered agent tools (built-in + MCP)."""
-    from src.server.app import get_agent_registry
+    from src.server.app import get_full_agent_registry
 
-    registry = get_agent_registry()
+    registry = get_full_agent_registry()
     if registry is None:
         return {"tools": []}
 
@@ -232,9 +232,9 @@ async def list_agent_tools():
 async def reload_mcp_servers():
     """Disconnect all MCP servers and reconnect from config."""
     from src.agent.mcp_loader import shutdown_mcp_servers, connect_mcp_servers
-    from src.server.app import get_agent_registry
+    from src.server.app import get_full_agent_registry
 
-    registry = get_agent_registry()
+    registry = get_full_agent_registry()
     if registry is None:
         raise HTTPException(status_code=503, detail="Agent registry not initialized")
 
@@ -652,6 +652,9 @@ def _cloud_agent_response(cloud_engine, messages: list[dict], request: ChatReque
             yield {"data": "[DONE]"}
             return
 
+        # Exclude n8n tools from main chat — they are only for workspace agent chat
+        registry = registry.exclude("n8n_").exclude("mcp_n8n_")
+
         loop = CloudAgentLoop(registry)
 
         async for event in loop.run(
@@ -679,6 +682,9 @@ def _agent_response(messages: list[dict], request: ChatRequest) -> EventSourceRe
             yield {"data": json.dumps({"type": "error", "message": "Agent tools not initialized"})}
             yield {"data": "[DONE]"}
             return
+
+        # Exclude n8n tools from main chat — they are only for workspace agent chat
+        registry = registry.exclude("n8n_").exclude("mcp_n8n_")
 
         loop = AgentLoop(registry)
         engine = get_engine()
