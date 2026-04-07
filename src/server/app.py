@@ -331,6 +331,11 @@ def _unload_engines() -> None:
         _engine.unload()
     _engine = None
 
+    # Force garbage collection so the Llama C++ destructor runs immediately
+    # and frees GPU VRAM before the next engine load.
+    import gc
+    gc.collect()
+
 
 def _create_and_load_engine(app: FastAPI, mode: InferenceMode) -> None:
     """Create an engine for *mode* using configs from app.state, then load it."""
@@ -490,15 +495,30 @@ def switch_model(app: FastAPI, model_path: str) -> dict:
         logger.info("Switching model: %s → %s", current_config.model_path, new_path_str)
         _unload_engines()
 
-        # Build new ModelConfig preserving user settings except path/name
+        # Build new ModelConfig preserving user settings except path/name/layers
         stem = resolved.stem.lower()
         new_size_gb = resolved.stat().st_size / (1024**3)
+
+        # Recalculate GPU layers for the new model size
+        try:
+            from src.utils.gpu_layers import compute_optimal_gpu_layers
+            n_gpu_layers = compute_optimal_gpu_layers(
+                new_path_str,
+                n_ctx=current_config.n_ctx,
+                safety_margin=0.92,
+            )
+            logger.info("Auto GPU layers for new model: %d", n_gpu_layers)
+        except Exception as exc:
+            logger.warning("GPU layer auto-detection failed: %s. Defaulting to 0.", exc)
+            n_gpu_layers = 0
+
         from dataclasses import replace as _replace
         new_config = _replace(
             current_config,
             model_path=new_path_str,
             model_name=stem,
             weight_size_gb=round(new_size_gb, 2),
+            n_gpu_layers=n_gpu_layers,
         )
         app.state.model_config = new_config
 
