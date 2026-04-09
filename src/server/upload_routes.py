@@ -102,8 +102,14 @@ def _check_rate_limit(user_id: str) -> bool:
 
 def _verify_session_ownership(session_id: str, user_id: str) -> bool:
     """Verify that the session belongs to the requesting user."""
-    session = database.get_session(session_id)
-    return session is not None and session.get('user_id') == user_id
+    conn = database.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT user_id FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        return row is not None and row["user_id"] == user_id
+    finally:
+        conn.close()
 
 
 def _verify_attachment_ownership(attachment_id: str, user_id: str) -> bool:
@@ -167,22 +173,16 @@ async def upload_file(
     # Validate file
     try:
         validation_result = validate_file(content, file.filename or "unknown", file.content_type)
-        if not validation_result.get("valid", False):
+        if not validation_result.valid:
             raise HTTPException(
                 status_code=415, 
-                detail=f"File validation failed: {validation_result.get('error', 'Invalid file')}"
+                detail=f"File validation failed: {validation_result.error or 'Invalid file'}"
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"File validation error: {e}")
         raise HTTPException(status_code=422, detail="File validation failed")
-    
-    # Extract text content (optional)
-    extracted_text = None
-    try:
-        extracted_text = extract_text(content, file.content_type or "application/octet-stream")
-    except Exception as e:
-        logger.warning(f"Text extraction failed for {file.filename}: {e}")
-        # Continue without extracted text - it's optional
     
     # Generate unique attachment ID and file path
     attachment_id = uuid.uuid4().hex
@@ -217,6 +217,14 @@ async def upload_file(
     except Exception as e:
         logger.error(f"Failed to save file {file_path}: {e}")
         raise HTTPException(status_code=500, detail="Failed to save file")
+    
+    # Extract text content after file is saved (extract_text expects a file path)
+    extracted_text = None
+    try:
+        extracted_text = extract_text(file_path, mime_type)
+    except Exception as e:
+        logger.warning(f"Text extraction failed for {file.filename}: {e}")
+        # Continue without extracted text - it's optional
     
     # Save attachment metadata to database
     try:

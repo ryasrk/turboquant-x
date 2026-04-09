@@ -27,6 +27,7 @@ dependencies = [
     "chardet>=5.0",
     "Pillow>=10.0",
     "httpx>=0.27",
+    "python-multipart"
 ]
 
 [project.optional-dependencies]

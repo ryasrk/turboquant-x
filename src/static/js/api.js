@@ -79,6 +79,31 @@ export async function switchCloudModel(model) {
 }
 
 /**
+ * Upload a file to the server.
+ * @param {File} file - The file to upload
+ * @param {string} sessionId - Current session ID
+ * @param {string} token - JWT auth token
+ * @returns {Promise<{id: string, original_name: string, mime_type: string, size_bytes: number, type: string}>}
+ */
+export async function uploadFile(file, sessionId, token) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('session_id', sessionId);
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const r = await fetch('/v1/upload', {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || r.statusText);
+  }
+  return r.json();
+}
+
+/**
  * Start a streaming chat completion. Returns the ReadableStream reader.
  * @param {Array} messages - Chat messages
  * @param {Object} opts - { maxTokens, temperature, topP, thinking }

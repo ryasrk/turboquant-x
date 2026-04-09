@@ -22,12 +22,16 @@ import {
   createAgentSummary,
   createToolApprovalCard,
 } from './agent.js';
+import { waitForUploads } from './upload.js';
 
 const inputEl = document.getElementById('user-input');
 
 /** Build the messages array for the API, including attachments if present. */
+const TEXT_MIMES = ['text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/x-yaml', 'text/x-python'];
+
 function buildUserContent(text, attachments) {
   if (!attachments || attachments.length === 0) return text;
+
   const parts = [{ type: 'text', text }];
   for (const att of attachments) {
     if (att.type === 'image') {
@@ -35,20 +39,47 @@ function buildUserContent(text, attachments) {
         type: 'image_url',
         image_url: { url: att.dataUrl },
       });
+    } else if (att.id) {
+      // Document with server ID: resolved server-side via attachment refs
+      // (content injected by _resolve_attachments on server)
+    } else if (att.dataUrl && TEXT_MIMES.includes(att.mimeType)) {
+      // Fallback: decode text content from dataUrl for text-based files
+      try {
+        const base64 = att.dataUrl.split(',')[1];
+        const decoded = atob(base64);
+        parts.push({
+          type: 'text',
+          text: `\n[Document: ${att.name}]\n${decoded}`,
+        });
+      } catch {
+        parts.push({ type: 'text', text: `\n[Attached: ${att.name}]` });
+      }
     } else {
-      // Document: include as text reference with server ID
       parts.push({
         type: 'text',
-        text: `\n[Attached: ${att.name} (${att.mimeType})]`,
+        text: `\n[Attached: ${att.name} (${att.mimeType}) — login required for document reading]`,
       });
     }
   }
   return parts;
 }
 
+/** Build attachment refs for server-side resolution. */
+function buildAttachmentRefs(attachments) {
+  return attachments
+    .filter(a => a.id)
+    .map(a => ({ id: a.id, type: a.type }));
+}
+
 export async function sendMessage() {
   const text = inputEl.value.trim();
   if (!text && state.pendingAttachments.length === 0) return;
+
+  // Wait for any in-flight uploads to complete before sending
+  if (state.pendingAttachments.some(a => a._uploadPromise && !a.id && !a._uploadFailed)) {
+    showToast('Uploading files…');
+    await waitForUploads();
+  }
 
   inputEl.value = '';
   inputEl.style.height = 'auto';
@@ -60,10 +91,10 @@ export async function sendMessage() {
   document.dispatchEvent(new CustomEvent('tq:attachments-consumed'));
 
   const userContent = buildUserContent(text, attachments);
-  state.history.push({ role: 'user', content: userContent });
-
-  // Include attachment metadata for session persistence
-  const attachmentIds = attachments.filter(a => a.id).map(a => a.id);
+  const attachmentRefs = buildAttachmentRefs(attachments);
+  const historyEntry = { role: 'user', content: userContent };
+  if (attachmentRefs.length > 0) historyEntry.attachments = attachmentRefs;
+  state.history.push(historyEntry);
 
   // Persist user message
   const textContent = typeof userContent === 'string' ? userContent : text;
@@ -72,6 +103,25 @@ export async function sendMessage() {
   // Render user bubble (with optional attachment thumbnails)
   const { wrapper: userWrapper } = appendMessage('user', text || '[attachment]');
   if (attachments.length > 0) {
+    const bubble = userWrapper.querySelector('.msg-bubble');
+
+    // Attachment summary badge
+    const badge = document.createElement('div');
+    badge.className = 'msg-attach-badge';
+    const fileCount = attachments.length;
+    const docCount = attachments.filter(a => a.type === 'document').length;
+    const imgCount = attachments.filter(a => a.type === 'image').length;
+    let badgeText = `📎 ${fileCount} file${fileCount !== 1 ? 's' : ''} attached`;
+    if (imgCount > 0 && docCount > 0) {
+      badgeText = `📎 ${imgCount} image${imgCount !== 1 ? 's' : ''}, ${docCount} document${docCount !== 1 ? 's' : ''}`;
+    }
+    badge.innerHTML = `<span class="badge-text">${badgeText}</span><button class="badge-toggle" title="Toggle attachments">▼</button>`;
+    bubble.prepend(badge);
+
+    // Collapsible attachment detail container
+    const detailContainer = document.createElement('div');
+    detailContainer.className = 'msg-attach-detail';
+
     // Render images
     const images = attachments.filter(a => a.type === 'image');
     if (images.length > 0) {
@@ -82,7 +132,7 @@ export async function sendMessage() {
         el.src = img.dataUrl;
         imgBar.appendChild(el);
       }
-      userWrapper.querySelector('.msg-bubble').prepend(imgBar);
+      detailContainer.appendChild(imgBar);
     }
     
     // Render documents
@@ -92,11 +142,20 @@ export async function sendMessage() {
       for (const att of attachments.filter(a => a.type === 'document')) {
         const chip = document.createElement('div');
         chip.className = 'attachment-chip';
-        chip.innerHTML = `<span class="chip-icon">${getDocIcon(att.mimeType)}</span><span class="chip-name">${escapeHtml(att.name)}</span>`;
+        const sizeStr = att.size ? ` · ${formatSize(att.size)}` : '';
+        chip.innerHTML = `<span class="chip-icon">${getDocIcon(att.mimeType)}</span><span class="chip-name">${escapeHtml(att.name)}</span><span class="chip-size">${sizeStr}</span>`;
         attBar.appendChild(chip);
       }
-      userWrapper.querySelector('.msg-bubble').prepend(attBar);
+      detailContainer.appendChild(attBar);
     }
+
+    bubble.insertBefore(detailContainer, badge.nextSibling);
+
+    // Toggle expand/collapse
+    badge.querySelector('.badge-toggle').addEventListener('click', () => {
+      const isOpen = detailContainer.classList.toggle('open');
+      badge.querySelector('.badge-toggle').textContent = isOpen ? '▲' : '▼';
+    });
   }
 
   setStreaming(true);
@@ -333,6 +392,12 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function clearSession() {

@@ -1,7 +1,10 @@
 /** File upload — pick files, preview thumbnails & document chips, attach to messages. */
 
 import { state } from './state.js';
-// import { uploadFile } from './api.js';
+import { uploadFile } from './api.js';
+import { getToken } from './auth.js';
+import { getCurrentSessionId, createSession } from './sessions.js';
+import { isLoggedIn } from './auth.js';
 
 const uploadBtn    = document.getElementById('upload-btn');
 const fileInput    = document.getElementById('file-input');
@@ -29,6 +32,14 @@ export function setUploadCapabilities(vision, attachments) {
 /** Backward compatibility alias */
 export function setVisionEnabled(enabled) {
   setUploadCapabilities(enabled, true);
+}
+
+/** Wait for all pending attachment uploads to complete. */
+export async function waitForUploads() {
+  const promises = state.pendingAttachments
+    .filter(a => a._uploadPromise)
+    .map(a => a._uploadPromise);
+  if (promises.length > 0) await Promise.allSettled(promises);
 }
 
 export function initUpload() {
@@ -75,12 +86,38 @@ function readAndAdd(file) {
     state.pendingAttachments.push(attachment);
     renderPreviews();
     
-    // Auto-upload to server (placeholder - requires actual uploadFile implementation)
-    // uploadFile(file, window.tqSessionId).then(response => {
-    //   attachment.id = response.id;
-    // }).catch(error => {
-    //   showToast(`Upload failed: ${error.message}`);
-    // });
+    // Upload to server to get persistent attachment ID
+    attachment._uploadPromise = (async () => {
+      const token = getToken();
+      if (!token || !isLoggedIn()) {
+        showToast('Log in for full document reading support');
+        return;
+      }
+
+      // Auto-create session if none exists
+      let sessionId = getCurrentSessionId();
+      if (!sessionId) {
+        try {
+          await createSession('New Chat');
+          sessionId = getCurrentSessionId();
+        } catch (e) {
+          console.warn('Failed to create session for upload:', e);
+          return;
+        }
+      }
+      if (!sessionId) return;
+
+      try {
+        const response = await uploadFile(file, sessionId, token);
+        attachment.id = response.id;
+        attachment.serverName = response.original_name;
+        renderPreviews();
+      } catch (error) {
+        console.warn(`Upload failed for ${file.name}: ${error.message}`);
+        showToast(`Upload failed: ${error.message}`);
+        attachment._uploadFailed = true;
+      }
+    })();
   };
   reader.readAsDataURL(file);
 }
@@ -106,6 +143,7 @@ function renderPreviews() {
 function renderImagePreview(attachment, index) {
   const wrap = document.createElement('div');
   wrap.className = 'image-preview';
+  if (attachment.id) wrap.classList.add('uploaded');
   const el = document.createElement('img');
   el.src = attachment.dataUrl;
   const rm = document.createElement('button');
@@ -123,10 +161,12 @@ function renderImagePreview(attachment, index) {
 function renderDocumentChip(attachment, index) {
   const chip = document.createElement('div');
   chip.className = 'attachment-chip';
+  if (attachment.id) chip.classList.add('uploaded');
+  if (attachment._uploadFailed) chip.classList.add('failed');
   
   const icon = document.createElement('span');
   icon.className = 'chip-icon';
-  icon.textContent = getFileIcon(attachment.mimeType);
+  icon.textContent = attachment.id ? '✅' : attachment._uploadFailed ? '❌' : getFileIcon(attachment.mimeType);
   
   const name = document.createElement('span');
   name.className = 'chip-name';
@@ -134,7 +174,7 @@ function renderDocumentChip(attachment, index) {
   
   const size = document.createElement('span');
   size.className = 'chip-size';
-  size.textContent = formatFileSize(attachment.size);
+  size.textContent = attachment.id ? 'uploaded' : attachment._uploadFailed ? 'failed' : formatFileSize(attachment.size);
   
   const rm = document.createElement('button');
   rm.className = 'remove-att';
