@@ -1,7 +1,7 @@
 /** Main entry — wires all modules together. */
 
 import { state } from './state.js';
-import { fetchHealth, switchMode, fetchAvailableModels, switchModel, switchProvider, fetchCloudProviders } from './api.js';
+import { fetchHealth, switchMode, fetchAvailableModels, switchModel, switchProvider, fetchCloudProviders, switchCloudModel } from './api.js';
 import { showToast, appendMessage, renderAssistantContent, getChatEl, updateContextMeter } from './ui.js';
 import { sendMessage, clearSession } from './chat.js';
 import { initSettings, openSettings, syncModeFromHealth, showModelPicker } from './settings.js';
@@ -55,6 +55,9 @@ initUpload();
 initInferenceToggle();
 initMcpPanel();
 
+// ── Persistent inference mode restore flag ───────────────────────────
+let _restoring = false; // true while auto-restoring saved cloud mode
+
 // ── Inference type toggle (header) ───────────────────────────────────
 function initInferenceToggle() {
   if (!localToggleHeader || !cloudToggleHeader) return;
@@ -73,14 +76,67 @@ function initInferenceToggle() {
   updateHeaderModelSelect(currentType);
 }
 
-function setHeaderInferenceType(type) {
+/** Switch inference type AND trigger server-side switch + persist */
+async function setHeaderInferenceType(type) {
+  const prev = state.settings.inferenceType;
   state.settings.inferenceType = type;
   updateHeaderInferenceDisplay(type);
-  
-  // Update model select based on inference type
   updateHeaderModelSelect(type);
-  
-  showToast(`Switched to ${type} inference`, 'info');
+
+  try {
+    if (type === 'cloud') {
+      const provider = state.settings.cloudProvider || 'zhipu';
+      const model = state.settings.cloudModel || 'auto';
+      await switchProvider(provider);
+      state.settings.cloudProvider = provider;
+      // Switch to saved model (default: auto)
+      try { await switchCloudModel(model); } catch (_) {}
+      state.settings.cloudModel = model;
+      showToast(`Cloud: ${provider} / ${model}`, 'info');
+    } else {
+      const mode = state.settings.inferenceMode || 'standard';
+      await switchMode(mode);
+      state.settings.inferenceMode = mode;
+      showToast(`Local: ${mode}`, 'info');
+    }
+  } catch (e) {
+    showToast(`Switch failed: ${e.message}`, 'error');
+    // Revert on failure
+    state.settings.inferenceType = prev;
+    updateHeaderInferenceDisplay(prev);
+    updateHeaderModelSelect(prev);
+  }
+  import('./state.js').then(m => m.saveSettings());
+  pollHealth();
+}
+
+/** Restore saved inference mode on startup (called after auth) */
+async function restoreSavedInferenceMode() {
+  const savedType = state.settings.inferenceType;
+  if (savedType !== 'cloud') return; // local is the server default, no action needed
+
+  const provider = state.settings.cloudProvider || 'zhipu';
+  const model = state.settings.cloudModel || 'auto';
+
+  _restoring = true;
+  try {
+    await switchProvider(provider);
+    state.settings.cloudProvider = provider;
+    try { await switchCloudModel(model); } catch (_) {}
+    state.settings.cloudModel = model;
+    updateHeaderInferenceDisplay('cloud');
+    updateHeaderModelSelect('cloud');
+    showToast(`Restored: ${provider} / ${model}`, 'info');
+  } catch (e) {
+    // Cloud restore failed — fall back to local silently
+    state.settings.inferenceType = 'local';
+    updateHeaderInferenceDisplay('local');
+    updateHeaderModelSelect('local');
+    import('./state.js').then(m => m.saveSettings());
+  } finally {
+    _restoring = false;
+    pollHealth();
+  }
 }
 
 function updateHeaderInferenceDisplay(type) {
@@ -159,13 +215,13 @@ function updateThinkingUI(supports, cloudReasoning = false) {
   _isCloudReasoning = cloudReasoning;
 
   if (cloudReasoning) {
-    // Cloud reasoning models always think — not user-toggled
-    state.thinking = true;
-    thinkingBtn.textContent = '◈ Reasoning';
+    // Cloud reasoning models — default to on, but user can toggle off
     thinkingBtn.classList.remove('off', 'disabled');
     thinkingBtn.classList.add('cloud-reasoning');
-    thinkingBtn.title = 'This cloud model has built-in chain-of-thought reasoning';
-    thinkingBtn.setAttribute('aria-pressed', 'true');
+    thinkingBtn.title = 'Toggle cloud chain-of-thought reasoning';
+    thinkingBtn.textContent = state.thinking ? '◈ Reasoning' : '◈ Think OFF';
+    thinkingBtn.classList.toggle('off', !state.thinking);
+    thinkingBtn.setAttribute('aria-pressed', String(state.thinking));
   } else if (!supports) {
     state.thinking = false;
     thinkingBtn.textContent = '◈ Think N/A';
@@ -279,9 +335,10 @@ async function pollHealth() {
     syncModeFromHealth(d.inference_mode);
 
     // Sync inference type (local/cloud) from server state
+    // Skip during startup restore to avoid overriding user's saved preference
     const serverIsCloud = d.inference_mode === 'cloud';
     const clientIsCloud = state.settings.inferenceType === 'cloud';
-    if (serverIsCloud !== clientIsCloud) {
+    if (!_restoring && serverIsCloud !== clientIsCloud) {
       state.settings.inferenceType = serverIsCloud ? 'cloud' : 'local';
       updateHeaderInferenceDisplay(state.settings.inferenceType);
       updateHeaderModelSelect(state.settings.inferenceType);
@@ -289,15 +346,18 @@ async function pollHealth() {
 
     // Track cloud provider and model name; sync header dropdown
     if (serverIsCloud && d.provider) {
+      let _dirty = false;
       // Sync provider selection
       if (d.provider !== state.settings.cloudProvider) {
         state.settings.cloudProvider = d.provider;
+        _dirty = true;
         if (headerModelSelect) {
           headerModelSelect.value = d.provider;
         }
       }
       // Sync model name and update selected option text
       if (d.model_name) {
+        if (d.model_name !== state.settings.cloudModel) _dirty = true;
         state.settings.cloudModel = d.model_name;
         if (headerModelSelect) {
           const opt = headerModelSelect.querySelector(`option[value="${CSS.escape(d.provider)}"]`);
@@ -308,6 +368,7 @@ async function pollHealth() {
           }
         }
       }
+      if (_dirty) import('./state.js').then(m => m.saveSettings());
     }
 
     if (modelNameDisp) {
@@ -561,8 +622,14 @@ if (isLoggedIn()) {
   // Validate token
   apiMe().then(user => {
     if (!user) showAuthOverlay();
-    else updateAuthUI();
+    else {
+      updateAuthUI();
+      // Restore saved inference mode (e.g. cloud) after server restart
+      restoreSavedInferenceMode();
+    }
   });
 } else {
   showAuthOverlay();
+  // Even for guests, restore saved inference mode
+  restoreSavedInferenceMode();
 }

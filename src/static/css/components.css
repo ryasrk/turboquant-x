@@ -550,6 +550,48 @@ body { transition: padding-left 0.25s ease; }
   background: rgba(0,180,255,0.08);
 }
 
+/* Upload menu dropdown */
+.upload-menu {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  z-index: 500;
+}
+.upload-menu.open { display: flex; flex-direction: column; }
+.upload-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.85rem;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.upload-menu-item:hover { background: rgba(var(--accent-rgb),0.1); }
+.upload-menu-item.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.upload-menu-item.disabled:hover { background: transparent; }
+.upload-menu-icon { font-size: 1rem; }
+.upload-menu-hint {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 #image-preview-bar {
   display: none;
   padding: 8px 12px 0;
@@ -1130,6 +1172,36 @@ body { transition: padding-left 0.25s ease; }
 }
 
 /* ── Copy full message button ──────────────────────────────────── */
+
+/* ── Markdown tables in chat ──────────────────────────────────── */
+.msg-bubble table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.msg-bubble th,
+.msg-bubble td {
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  padding: 6px 10px;
+  white-space: normal;
+  word-break: break-word;
+}
+.msg-bubble th {
+  background: rgba(0,180,255,0.08);
+  color: var(--holo, #00b4ff);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.msg-bubble tbody tr:nth-child(even) {
+  background: rgba(255,255,255,0.02);
+}
+.msg-bubble tbody tr:hover {
+  background: rgba(0,180,255,0.04);
+}
+
 .copy-msg-btn {
   display: inline-flex;
   align-items: center;

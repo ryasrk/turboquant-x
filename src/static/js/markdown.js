@@ -183,6 +183,43 @@ export function renderMarkdown(text) {
       continue;
     }
 
+    // Table: | col | col | (detect header row + separator row)
+    if (/^\|(.+)\|$/.test(line.trim()) && i + 1 < lines.length && /^\|[-:\s|]+\|$/.test(lines[i + 1].trim())) {
+      closeList();
+      // Parse header
+      const headerCells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+      // Parse alignment from separator row
+      const sepCells = lines[i + 1].trim().slice(1, -1).split('|').map(c => c.trim());
+      const aligns = sepCells.map(c => {
+        if (c.startsWith(':') && c.endsWith(':')) return 'center';
+        if (c.endsWith(':')) return 'right';
+        return 'left';
+      });
+      i++; // skip separator row
+
+      let tableHtml = '<table><thead><tr>';
+      for (let h = 0; h < headerCells.length; h++) {
+        const align = aligns[h] ? ` style="text-align:${aligns[h]}"` : '';
+        tableHtml += `<th${align}>${renderInline(headerCells[h])}</th>`;
+      }
+      tableHtml += '</tr></thead><tbody>';
+
+      // Parse body rows
+      while (i + 1 < lines.length && /^\|(.+)\|$/.test(lines[i + 1].trim())) {
+        i++;
+        const cells = lines[i].trim().slice(1, -1).split('|').map(c => c.trim());
+        tableHtml += '<tr>';
+        for (let c = 0; c < cells.length; c++) {
+          const align = aligns[c] ? ` style="text-align:${aligns[c]}"` : '';
+          tableHtml += `<td${align}>${renderInline(cells[c])}</td>`;
+        }
+        tableHtml += '</tr>';
+      }
+      tableHtml += '</tbody></table>';
+      out.push(tableHtml);
+      continue;
+    }
+
     // Regular paragraph line
     closeList();
     out.push(renderInline(line));
@@ -200,7 +237,7 @@ export function renderMarkdown(text) {
   let joined = out.join('\n');
 
   // Extract block-level elements before paragraph wrapping
-  joined = joined.replace(/(<(?:pre|ul|ol|blockquote|h[1-6])[^>]*>[\s\S]*?<\/(?:pre|ul|ol|blockquote|h[1-6])>|<hr>)/g, (match) => {
+  joined = joined.replace(/(<(?:pre|ul|ol|blockquote|table|h[1-6])[^>]*>[\s\S]*?<\/(?:pre|ul|ol|blockquote|table|h[1-6])>|<hr>)/g, (match) => {
     const idx = blockElements.length;
     blockElements.push(match);
     return `\x01BLOCK${idx}\x01`;

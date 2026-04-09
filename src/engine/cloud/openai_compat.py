@@ -36,7 +36,7 @@ _DEFAULT_MODELS: dict[str, str] = {
     "openai": "gpt-4o",
     "nvidia": "openai/gpt-oss-120b",
     "moonshot": "moonshot-v1-8k",
-    "zhipu": "glm-4.5",
+    "zhipu": "glm-5.1",
     "deepseek": "deepseek-chat",
     "groq": "llama-3.3-70b-versatile",
     "together": "meta-llama/Llama-3-70b-chat-hf",
@@ -69,14 +69,27 @@ class OpenAICompatibleProvider(CloudProvider):
             "Content-Type": "application/json",
             **config.extra_headers,
         }
+        # Zhipu/BigModel API requires Accept-Language header
+        if config.provider == "zhipu":
+            self._headers.setdefault("Accept-Language", "en-US,en")
 
     # Models that use a separate reasoning/thinking budget before producing
     # visible content.  Need higher min token count so the model has room
     # for both reasoning AND the actual answer.
     _REASONING_MODELS = {
-        "glm-4.5", "glm-4.5-flash", "glm-4-plus", "deepseek-reasoner", "deepseek-chat",
+        "glm-4.5", "glm-4.5-flash", "glm-4-plus", "glm-5.1", "glm-5v-turbo",
+        "deepseek-reasoner", "deepseek-chat",
         # NVIDIA NIM reasoning models
         "moonshotai/kimi-k2.5", "nvidia/nemotron-3-super-120b-a12b", "z-ai/glm5",
+    }
+
+    # Extra models that providers' /models API may not return but are available.
+    _KNOWN_EXTRA_MODELS: dict[str, list[str]] = {
+        "zhipu": [
+            "auto",
+            "glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash",
+            "glm-4.6v-flashx", "glm-4.5v", "autoglm-phone-multilingual",
+        ],
     }
     _REASONING_MIN_TOKENS = 512  # minimum to allow visible content after reasoning
 
@@ -102,6 +115,11 @@ class OpenAICompatibleProvider(CloudProvider):
             model_lower.startswith(r) for r in self._REASONING_MODELS
         )
 
+    # GLM models that support native thinking via {"thinking": {"type": "enabled"}}
+    _GLM_THINKING_MODELS = {
+        "glm-5.1", "glm-5v-turbo",
+    }
+
     def _build_payload(
         self,
         messages: list[dict[str, str]],
@@ -126,6 +144,10 @@ class OpenAICompatibleProvider(CloudProvider):
             # Some NVIDIA reasoning models also accept reasoning_budget
             if "nvidia/nemotron" in self._model.lower():
                 payload["reasoning_budget"] = self._effective_max_tokens(max_tokens)
+        # GLM-5.1+ native thinking format
+        model_lower = self._model.lower()
+        if any(model_lower.startswith(m) for m in self._GLM_THINKING_MODELS):
+            payload["thinking"] = {"type": "enabled"}
         # Pass through any extra kwargs (e.g. tools, response_format)
         for k, v in kwargs.items():
             if v is not None:
@@ -254,7 +276,17 @@ class OpenAICompatibleProvider(CloudProvider):
                 )
                 resp.raise_for_status()
                 data = resp.json()
-            return [m["id"] for m in data.get("data", [])]
+            models = [m["id"] for m in data.get("data", [])]
         except Exception as exc:
             logger.warning("Failed to list models for %s: %s", self._config.provider, exc)
-            return []
+            models = []
+
+        # Merge known extra models that the API may not return
+        extras = self._KNOWN_EXTRA_MODELS.get(self._config.provider, [])
+        if extras:
+            existing = set(models)
+            for m in extras:
+                if m not in existing:
+                    models.append(m)
+
+        return sorted(models)

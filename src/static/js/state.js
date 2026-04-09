@@ -13,6 +13,9 @@ function loadSettings() {
     temperature: 0.7,
     topP: 0.95,
     inferenceMode: 'standard',
+    inferenceType: 'local',
+    cloudProvider: 'zhipu',
+    cloudModel: 'auto',
     debug: false,
   };
 }

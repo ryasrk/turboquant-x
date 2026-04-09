@@ -71,11 +71,15 @@ export function initSettings() {
   // Thinking toggle (only if model supports it — managed by app.js)
   thinkingBtn.addEventListener('click', () => {
     if (thinkingBtn.classList.contains('disabled')) return;
-    // Cloud reasoning models always reason — not user-toggled
-    if (thinkingBtn.classList.contains('cloud-reasoning')) return;
     state.thinking = !state.thinking;
-    thinkingBtn.textContent = state.thinking ? '◈ Think ON' : '◈ Think';
-    thinkingBtn.classList.toggle('off', !state.thinking);
+    if (thinkingBtn.classList.contains('cloud-reasoning')) {
+      // Cloud reasoning mode — toggle between reasoning on/off
+      thinkingBtn.textContent = state.thinking ? '◈ Reasoning' : '◈ Think OFF';
+      thinkingBtn.classList.toggle('off', !state.thinking);
+    } else {
+      thinkingBtn.textContent = state.thinking ? '◈ Think ON' : '◈ Think';
+      thinkingBtn.classList.toggle('off', !state.thinking);
+    }
   });
 
   // Enhanced save with inference type support
@@ -198,13 +202,17 @@ async function setInferenceType(type) {
       await switchProvider(provider);
       state.settings.cloudProvider = provider;
       if (providerSelect) providerSelect.value = provider;
+      // Default to "auto" model for zhipu so it picks reasoning/vision automatically
+      const model = state.settings.cloudModel || 'auto';
+      try { await switchCloudModel(model); } catch (_) {}
+      state.settings.cloudModel = model;
       // Cloud reasoning models need higher token budget
       if (state.settings.maxTokens < 512) {
         state.settings.maxTokens = 2048;
         if (maxTokensEl) maxTokensEl.value = 2048;
         saveSettings();
       }
-      showToast(`Cloud provider: ${provider}`, 'info');
+      showToast(`Cloud: ${provider} / ${model}`, 'info');
     } else {
       const mode = state.settings.inferenceMode || (modeSelect ? modeSelect.value : '') || 'turboquant';
       showToast(`Switching to local (${mode})…`, 'info');

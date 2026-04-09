@@ -51,11 +51,22 @@ _CLOUD_CONTEXT_WINDOWS: dict[str, int] = {
 
 # Cloud models that include built-in chain-of-thought reasoning.
 _CLOUD_REASONING_MODELS = {
-    "glm-4.5", "glm-4.5-flash", "glm-4-plus",
+    "glm-4.5", "glm-4.5-flash", "glm-4-plus", "glm-5.1", "glm-5v-turbo",
     "deepseek-reasoner", "deepseek-chat",
     "o1", "o1-mini", "o1-preview",
     # NVIDIA NIM reasoning models
     "moonshotai/kimi-k2.5", "nvidia/nemotron-3-super-120b-a12b", "z-ai/glm5",
+}
+
+# Auto-model resolution: pick the best model based on request context.
+# Keys: (has_images, thinking_enabled) → model name
+_AUTO_MODEL_MAP: dict[str, dict[tuple[bool, bool], str]] = {
+    "zhipu": {
+        (True, True):   "glm-5v-turbo",       # vision + reasoning
+        (True, False):  "glm-4.6v-flash",      # vision, fast
+        (False, True):  "glm-5.1",             # reasoning, no vision
+        (False, False): "glm-5-turbo",          # fast text
+    },
 }
 
 
@@ -81,6 +92,7 @@ class CloudEngine:
         self._config = config
         self._provider: CloudProvider | None = None
         self._loaded = False
+        self._auto_mode = False  # True when user selected "auto" model
 
     @property
     def is_loaded(self) -> bool:
@@ -92,19 +104,34 @@ class CloudEngine:
 
     @property
     def model_name(self) -> str:
+        if self._auto_mode:
+            return "auto"
         return self._config.model or "cloud-model"
 
     @property
     def supports_vision(self) -> bool:
-        """Check if the current cloud model supports vision/image inputs."""
-        _VISION_MODELS = {
-            "gpt-4o", "gpt-4-turbo",
-            "claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
-            "claude-3.5-sonnet", "claude-4-opus",
-            "glm-4v",
-        }
+        """Check if the current cloud model supports vision/image inputs.
+        
+        Modern cloud models almost universally support vision.
+        Exceptions: legacy models, embedding models, and provider-specific text-only variants.
+        GLM/BigModel convention: vision models have 'v' in name (glm-4.6v, glm-5v-turbo).
+        """
         model = self.model_name.lower()
-        return any(v in model for v in _VISION_MODELS)
+        
+        # GLM/BigModel: only models with 'v' in name support vision
+        if "glm" in model:
+            return "v" in model.split("glm", 1)[1]
+        
+        # DeepSeek: text-only models
+        if "deepseek" in model:
+            return False
+        
+        # General text-only exclusions
+        _TEXT_ONLY_PATTERNS = {
+            "babbage", "davinci", "ada", "curie",  # Legacy OpenAI
+            "text-embedding",  # Embedding models
+        }
+        return not any(t in model for t in _TEXT_ONLY_PATTERNS)
 
     @property
     def model_config(self) -> _CloudModelConfig:
@@ -359,11 +386,47 @@ class CloudEngine:
     def switch_model(self, model: str) -> None:
         """Switch to a different cloud model at runtime."""
         from dataclasses import replace
+        if model.lower() == "auto":
+            self._auto_mode = True
+            # Keep current concrete model for API calls; auto resolves per-request
+            logger.info("Cloud model set to auto (provider: %s)", self._config.provider)
+            return
+        self._auto_mode = False
         self._config = replace(self._config, model=model)
         if self._provider is not None:
             # Recreate provider with new config
             self._provider = create_provider(self._config)
             logger.info("Switched cloud model to: %s", model)
+
+    @property
+    def is_auto_model(self) -> bool:
+        """Whether the user selected 'auto' (dynamic per-request)."""
+        return self._auto_mode
+
+    def resolve_auto_model(self, has_images: bool = False, thinking: bool = False) -> str:
+        """Resolve 'auto' to a concrete model based on request context.
+
+        Returns the resolved model name, or the current model if not auto.
+        """
+        if not self._auto_mode:
+            return self.model_name
+        provider = self._config.provider
+        mapping = _AUTO_MODEL_MAP.get(provider)
+        if mapping is None:
+            return self.model_name
+        return mapping.get((has_images, thinking), mapping.get((False, False), self.model_name))
+
+    def _apply_resolved_model(self, model: str) -> None:
+        """Temporarily switch to a resolved model for the current request.
+
+        Used internally by auto-model routing. Does NOT change auto mode flag.
+        """
+        from dataclasses import replace
+        if model != self._config.model:
+            self._config = replace(self._config, model=model)
+            if self._provider is not None:
+                self._provider = create_provider(self._config)
+                logger.info("Auto-resolved model: %s", model)
 
 
 class _CloudModelConfig:

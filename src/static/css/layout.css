@@ -294,7 +294,7 @@ header::after {
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 #input-box:focus-within {

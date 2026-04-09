@@ -297,6 +297,22 @@ async def chat_completions(request: ChatRequest):
                 status_code=503,
                 detail="Cloud engine not loaded. Check provider configuration.",
             )
+
+        # Auto-model resolution: pick the best model dynamically
+        if cloud_engine.is_auto_model:
+            has_images = any(
+                isinstance(p, dict) and p.get("type") == "image_url"
+                for m in resolved_messages
+                if isinstance(m.content, list)
+                for p in m.content
+            )
+            resolved_model = cloud_engine.resolve_auto_model(
+                has_images=has_images, thinking=request.thinking,
+            )
+            logger.info("Auto-model resolved: %s (images=%s, thinking=%s)",
+                        resolved_model, has_images, request.thinking)
+            cloud_engine._apply_resolved_model(resolved_model)
+
         return await _cloud_chat(cloud_engine, request, resolved_messages)
 
     engine = get_engine()
@@ -490,13 +506,17 @@ async def _cloud_chat(cloud_engine, request: ChatRequest, resolved_messages=None
     messages = []
     for m in msgs:
         if isinstance(m.content, list):
-            if cloud_supports_vision:
-                # Keep multimodal format for vision-capable cloud models
+            has_images = any(
+                isinstance(p, dict) and p.get("type") == "image_url"
+                for p in m.content
+            )
+            if has_images and cloud_supports_vision:
+                # Keep multimodal format only when there are actual images
                 content = m.content
             else:
-                # Flatten to text for non-vision cloud models
+                # Flatten to text — no images or model doesn't support vision
                 text_parts = [p.get("text", "") for p in m.content if isinstance(p, dict) and p.get("type") == "text"]
-                content = " ".join(text_parts) if text_parts else ""
+                content = "\n".join(text_parts) if text_parts else ""
         else:
             content = m.content
         msg = {"role": m.role, "content": content}
@@ -777,7 +797,12 @@ async def health_check():
     supports_vision = False
     if mode == InferenceMode.CLOUD and cloud is not None and cloud.is_loaded:
         cloud_provider_name = cloud.provider_name
-        supports_vision = cloud.supports_vision
+        if cloud.is_auto_model:
+            # Auto mode supports everything — model is resolved per-request
+            supports_vision = True
+            supports_thinking = True
+        else:
+            supports_vision = cloud.supports_vision
 
     return HealthResponse(
         status=status,

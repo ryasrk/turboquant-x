@@ -21,12 +21,30 @@ const ALLOWED_TYPES = [
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
 /** Enable or disable upload capabilities based on model support. */
+let _visionEnabled = false;
+
 export function setUploadCapabilities(vision, attachments) {
+  _visionEnabled = !!vision;
+  window.tqVisionEnabled = _visionEnabled;
   if (!uploadBtn) return;
   uploadBtn.disabled = !attachments;
   uploadBtn.style.opacity = attachments ? '' : '0.3';
   uploadBtn.style.pointerEvents = attachments ? '' : 'none';
-  uploadBtn.title = vision ? 'Attach files' : 'Attach documents (images unsupported by current model)';
+  uploadBtn.title = 'Attach files';
+  // Update image option in menu if it exists
+  const imgOpt = document.getElementById('upload-menu-image');
+  if (imgOpt) {
+    imgOpt.classList.toggle('disabled', !_visionEnabled);
+    imgOpt.title = _visionEnabled ? 'Upload images' : 'Image upload requires cloud model with vision support';
+    const hint = imgOpt.querySelector('.upload-menu-hint');
+    if (hint && _visionEnabled) hint.remove();
+    if (!hint && !_visionEnabled) {
+      const span = document.createElement('span');
+      span.className = 'upload-menu-hint';
+      span.textContent = '(cloud only)';
+      imgOpt.appendChild(span);
+    }
+  }
 }
 
 /** Backward compatibility alias */
@@ -42,10 +60,69 @@ export async function waitForUploads() {
   if (promises.length > 0) await Promise.allSettled(promises);
 }
 
+function _createUploadMenu() {
+  const menu = document.createElement('div');
+  menu.id = 'upload-menu';
+  menu.className = 'upload-menu';
+  menu.innerHTML = `
+    <button id="upload-menu-image" class="upload-menu-item${_visionEnabled ? '' : ' disabled'}" type="button"
+      title="${_visionEnabled ? 'Upload images' : 'Image upload requires cloud model with vision support'}">
+      <span class="upload-menu-icon">🖼️</span>
+      <span class="upload-menu-label">Upload Image</span>
+      ${_visionEnabled ? '' : '<span class="upload-menu-hint">(cloud only)</span>'}
+    </button>
+    <button id="upload-menu-doc" class="upload-menu-item" type="button" title="Upload documents">
+      <span class="upload-menu-icon">📄</span>
+      <span class="upload-menu-label">Upload Document</span>
+    </button>
+  `;
+  uploadBtn.parentElement.style.position = 'relative';
+  uploadBtn.parentElement.appendChild(menu);
+  return menu;
+}
+
 export function initUpload() {
   if (!uploadBtn || !fileInput) return;
 
-  uploadBtn.addEventListener('click', () => fileInput.click());
+  const menu = _createUploadMenu();
+  let menuOpen = false;
+
+  function toggleMenu() {
+    menuOpen = !menuOpen;
+    menu.classList.toggle('open', menuOpen);
+  }
+  function closeMenu() {
+    menuOpen = false;
+    menu.classList.remove('open');
+  }
+
+  uploadBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMenu();
+  });
+
+  // Close menu when clicking outside
+  document.addEventListener('click', (e) => {
+    if (menuOpen && !menu.contains(e.target) && e.target !== uploadBtn) closeMenu();
+  });
+
+  // Image option
+  menu.querySelector('#upload-menu-image').addEventListener('click', () => {
+    if (!_visionEnabled) {
+      showToast('Image upload requires a cloud model with vision support');
+      return;
+    }
+    fileInput.accept = IMAGE_TYPES.map(t => '.' + t.split('/')[1]).join(',');
+    fileInput.click();
+    closeMenu();
+  });
+
+  // Document option
+  menu.querySelector('#upload-menu-doc').addEventListener('click', () => {
+    fileInput.accept = '.pdf,.txt,.md,.json,.csv,.yaml,.yml,.py,.docx';
+    fileInput.click();
+    closeMenu();
+  });
 
   fileInput.addEventListener('change', () => {
     const files = Array.from(fileInput.files);
@@ -54,8 +131,7 @@ export function initUpload() {
       if (state.pendingAttachments.length >= MAX_ATTACHMENTS) break;
       if (!ALLOWED_TYPES.includes(file.type)) continue;
       if (file.size > MAX_SIZE_MB * 1024 * 1024) continue;
-      // Check if image type but vision not supported
-      if (IMAGE_TYPES.includes(file.type) && !window.tqVisionEnabled) {
+      if (IMAGE_TYPES.includes(file.type) && !_visionEnabled) {
         showToast('Images not supported by current model');
         continue;
       }
