@@ -1121,7 +1121,7 @@ async function openTemplateBrowser() {
     // Load categories + templates in parallel
     const [catData, tplData] = await Promise.all([
       apiFetch('/v1/workspaces/templates/categories'),
-      apiFetch('/v1/workspaces/templates?limit=300'),
+      apiFetch('/v1/workspaces/templates?limit=2000'),
     ]);
 
     templateCategories = catData?.categories ?? [];

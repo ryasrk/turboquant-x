@@ -565,7 +565,9 @@ async def list_templates(
             results = [t for t in all_tpl if t["category"].lower() == category.lower()][:limit]
     else:
         from src.server.n8n_templates import get_template_index
-        results = get_template_index()[:limit]
+        results = get_template_index()
+        if limit > 0:
+            results = results[:limit]
     return {"templates": results, "total": len(results)}
 
 
