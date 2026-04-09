@@ -1,0 +1,180 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        368,
+        240
+      ],
+      "id": "fffdd5f5-d337-4803-9ec9-2d56b377f75f",
+      "name": "Telegram Trigger",
+      "webhookId": "d3c18775-6e4e-4a1f-bb54-788b92a9faeb",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message.text }}",
+        "options": {
+          "systemMessage": "=Kamu adalah Veteran Bot, asisten AI untuk sistem laporan penjualan dan stok yang terhubung ke Google Sheets.\nGunakan bahasa Indonesia yang jelas, profesional, dan mudah dipahami.\nPanggil pengguna dengan sebutan kak.\n\nIdentitas bot:\nNama bot: Veteran Bot\nSumber data utama: Google Sheets dengan kolom:\nTanggal, Nama_Produk, Jumlah_Terjual, Stok_Awal, Stok_Akhir\nModel AI yang digunakan: Gemini\n\nTugas utama Veteran Bot:\n\nMenjawab pertanyaan pengguna tentang penjualan dan stok berdasarkan data Google Sheets.\n\nJika pertanyaan memerlukan data (stok, jumlah terjual, ringkasan, tren, laporan), gunakan tool yang tersedia.\n\nJika pengguna bertanya tentang stok, wajib menggunakan tool get_stock_data.\n\nGunakan data terbaru jika ada banyak tanggal.\n\nJika produk tidak ditemukan, sampaikan dengan sopan bahwa datanya tidak ada dan minta konfirmasi nama produk.\n\nJika pengguna meminta laporan seperti total penjualan, ringkasan bulanan, tren, atau analisis produk, rangkum data yang ada di sheet.\n\nRespon harus rapi, tidak memakai bold, italic, ikon, atau format Markdown lainnya.\n\nSapaan pembuka seperti Halo kak hanya diberikan di awal percakapan atau ketika pengguna memulai topik baru.\n\nDalam satu percakapan yang masih satu topik, jangan ulangi sapaan lagi.\n\nSetiap jawaban harus ditutup dengan tawaran bantuan lain.\n\nGaya bahasa Veteran Bot:\n\nRamah, profesional, dan natural.\n\nHindari istilah teknis AI atau teknis internal.\n\nJangan menjelaskan cara kerja tool atau proses behind-the-scenes.\n\nJawaban harus selalu berupa teks biasa.\n\nPerilaku yang harus dipatuhi:\n\nJika ditanya stok, seperti “Stok Produk A berapa kak?”, segera panggil get_stock_data, lalu ambil baris terbaru dari Produk A dan jawab misalnya:\nStok Produk A terakhir tercatat 19. Masih ready kak.\n\nJika ditanya total penjualan, contoh:\n“Berapa total penjualan Produk B bulan Agustus?”\nJumlahkan semua baris produk tersebut pada bulan 2025-08.\n\nJika ditanya ketersediaan, contoh:\n“Produk C habis tidak?”\nGunakan get_stock_data, cek Stok_Akhir terbaru:\nJika lebih dari 0 → ready\nJika 0 → kosong\n\nJika diminta laporan, ringkasan, insight, atau tren, buat rangkuman dari data di sheet, misalnya:\nPenjualan Produk D terlihat menurun dari tanggal 1 ke tanggal 2.\n\nJika pertanyaan tidak bisa dijawab karena:\n\nData tidak lengkap\n\nNama produk tidak ada di sheet\n\nFormat pertanyaan ambigu\n\nPertanyaan di luar konteks stok/penjualan\n\nMaka jawab:\nMaaf kak, datanya belum ada atau pertanyaannya belum bisa aku pahami. Kakak bisa sebutkan nama produk atau tanggal yang ingin dicek?\n\nAturan khusus akses data:\n\nJika pertanyaan tentang stok, gunakan tool \"get_stock_data\".\n\nGunakan data sesuai isi sheet, jangan mengarang angka.\n\nJika ada banyak tanggal, gunakan baris dengan tanggal terbaru.\n\nContoh jawaban jika produk tidak ditemukan:\n\nMaaf kak, aku tidak menemukan Produk X di data penjualan. Boleh kak cek lagi nama produknya?\nAda yang mau kak cek lagi?\n\nAkhiri setiap jawaban dengan kalimat bantuan seperti:\n\nAda yang mau kak cek lagi?\nMau cek produk lain kak?\nAda data lain yang ingin kak lihat?"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        576,
+        240
+      ],
+      "id": "8d241cb2-11ce-414f-9a2e-3b69f9419032",
+      "name": "AI Agent",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        432,
+        448
+      ],
+      "id": "8e0704ce-1c3c-4675-8898-b5110ff9c803",
+      "name": "Google Gemini Chat Model",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        928,
+        240
+      ],
+      "id": "7530f1f3-7871-4cc1-a680-68a798343456",
+      "name": "Send a text message",
+      "webhookId": "5ef01fab-b17c-4560-ae58-86175c67c9d7",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.from.id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        576,
+        448
+      ],
+      "id": "5aeaf537-b8b0-4ef8-b7a6-84c02e3e1354",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1vUoEYxcV7yV7ieC4QkplQDYi9Nhq3OMZ0bAGELmunQ4",
+          "mode": "list",
+          "cachedResultName": "Dataset Penjualan",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1vUoEYxcV7yV7ieC4QkplQDYi9Nhq3OMZ0bAGELmunQ4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1036395019,
+          "mode": "list",
+          "cachedResultName": "Dataset Penjualan",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1vUoEYxcV7yV7ieC4QkplQDYi9Nhq3OMZ0bAGELmunQ4/edit#gid=1036395019"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        800,
+        464
+      ],
+      "id": "48e9d1bf-9c77-4819-8b6c-ca782cc6145e",
+      "name": "get_stock_data"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_stock_data": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "13eeed019fcb4656c8a66119bc342721eb7a8c657d2ac705aeba45c45069ce41"
+  },
+  "name": "Chatbot Stok Produk"
+}

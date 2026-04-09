@@ -1,0 +1,657 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        368,
+        240
+      ],
+      "id": "1f11b1f0-6e50-41d3-a0c8-29f4f753c81a",
+      "name": "Telegram Trigger",
+      "webhookId": "a546816d-85c8-4801-8dc8-3348fa8d10b1",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Code in JavaScript').item.json.prompt }}",
+        "options": {
+          "systemMessage": "=# PROMPT AGENT: RENA (FINANCIAL ASSISTANT)\n\n**Persona:** Rena, asisten keuangan pribadi yang santai (Gen Z style) dan akurat.\n**Tugas:** Khusus mengelola dan menganalisis data pengeluaran.\n\n---\n\n### 1. GREETING & INITIAL CONTACT\nJika user menyapa tanpa instruksi spesifik, balas dengan ramah dan tawarkan:\n- \"Catat pengeluaran\"\n- \"Cek / analisa pengeluaran\"\n\n---\n\n### 2. CORE TOOLS & LOGIC\n- **Image OCR:** Gunakan **HANYA** untuk input gambar struk/bukti bayar.\n- **Get Current Date and Time:** Wajib dipanggil untuk mendapatkan waktu saat ini ketika ingin menambahkan transaction\n- **Add Transaction:** **WAJIB** dipanggil saat menyimpan data baru.\n- **Get Transaction:** **WAJIB** dipanggil sebelum memberikan analisis/laporan.\n\n---\n\n### 3. INTENT: TAMBAH TRANSAKSI\nEkstrak data: (Keterangan, Tanggal, Item, Kategori, Akun, Total).\n- **Kategori Tersedia:** Sembako, Makanan & Minuman, Listrik, Buku, Internet, Belajar, Topup AI, Server, Lain-lain.\n- **Default Value:** Tanggal hari ini (2026-01-19), Akun: `cash`.\n- **Validasi:** Jika data tidak lengkap, balas: *\"Berikan format yang benar seperti nama transaksi, tanggal, item, akun pembayaran, dan total\"*.\n\n**Format Output Berhasil:**\nHai transaksi kamu sudah rena catat berikut detailnya:\n1. Keterangan: [Nama]\n2. Tanggal: [YYYY-MM-DD]\n3. Items: [List Item]\n4. Kategori: [Kategori]\n5. Akun Pembayaran: [Akun]\n6. Total: [Nominal Rupiah contoh: Rp100.000]\n\n---\n\n### 4. INTENT: ANALISIS & FILTER (STRICT)\nGunakan data dari **Get Transaction** dengan logika filter:\n- **Minggu ini:** Filter data mulai hari **Senin** minggu berjalan s/d hari ini (Abaikan data sebelum Senin).\n- **Bulan ini:** Filter mulai tanggal 01 bulan berjalan s/d hari ini.\n- **Output:** Tampilkan hasil akhir saja (Ringkas). Jangan tampilkan list rincian kecuali user meminta \"rincian\".\n\n---\n\n### 5. RULES & RESTRICTIONS\n- **No Hallucination:** Dilarang mengarang angka. Data wajib dari tool.\n- **Context Only:** Jangan melayani pertanyaan di luar keuangan.\n- **Constraint:** Satu permintaan, satu hasil ringkas.\n- Jangan menampilkan response error atau semacamnya ke output user.\n- Jika tidak mengetahui sampaikan bahwa anda tidak mengetahuinya."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1120,
+        240
+      ],
+      "id": "f82569b4-dc3c-4885-9040-b585c61dc170",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $('AI Agent').item.json.output }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1856,
+        240
+      ],
+      "id": "4fbab3d4-2053-4a64-a02a-0f79244f1906",
+      "name": "Telegram3",
+      "webhookId": "78512bac-d1ad-418a-870d-7ec90d327af7",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Telegram Trigger').first().json.message\nlet prompt = '';\n\nif (data.text) {\n  prompt = \"type:text, question: \"+data.text;\n} else if (data?.photo && data?.caption) {\n  prompt = \"type:photo & caption, question: catat pengeluaran: \" + data.caption;\n} else if (data?.photo) {\n  prompt = 'type:photo only, question: Analisa foto tersebut & catat ke jurnal keuangan';\n}\n\nreturn [\n  {\n    json: {\n      prompt\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        240
+      ],
+      "id": "dd5c51f4-99bf-45e8-8fc5-cab3bea12e1b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "description": "Call this tool for extract the image to text",
+        "workflowId": {
+          "__rl": true,
+          "value": "sgm8UEGVwhVzbsCgmqSU6",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/sgm8UEGVwhVzbsCgmqSU6",
+          "cachedResultName": "Image Processing"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "message": "={{ $json.prompt }}",
+            "id": "={{ $('Telegram Trigger').item.json.message.photo[3].file_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1136,
+        496
+      ],
+      "id": "abb22a1f-b551-473d-86d5-f0cc1534b0d4",
+      "name": "Call 'Image Processing'"
+    },
+    {
+      "parameters": {
+        "operation": "sendChatAction",
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}"
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        832,
+        240
+      ],
+      "id": "7da7a906-eefc-4129-903b-229c94aca925",
+      "name": "Send a chat action",
+      "webhookId": "d54bb5fa-caa4-4c70-a587-97a4ed01438f",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        240
+      ],
+      "id": "963dd2ca-13b7-49a2-be4c-b14d074d44b3",
+      "name": "Wait",
+      "webhookId": "081e92db-09d2-40db-986f-cf14dede8534"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13hR6MfQiGAlOgETqKyTp-BTbPgxTqQdnUSOBEUIOt-4",
+          "mode": "list",
+          "cachedResultName": "Expenses Bot Rena",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13hR6MfQiGAlOgETqKyTp-BTbPgxTqQdnUSOBEUIOt-4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "main",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13hR6MfQiGAlOgETqKyTp-BTbPgxTqQdnUSOBEUIOt-4/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Date', ``, 'string') }}",
+            "Account": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Account', ``, 'string') }}",
+            "Items": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Items', ``, 'string') }}",
+            "Total": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Total', ``, 'string') }}",
+            "Notes": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Notes', `Keterangan transaksi`, 'string') }}",
+            "Category": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Category', `Kategori transaksi seperti makanan, sembako, pulsa dlll`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Category",
+              "displayName": "Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Account",
+              "displayName": "Account",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Items",
+              "displayName": "Items",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total",
+              "displayName": "Total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1680,
+        496
+      ],
+      "id": "2a0ace05-79eb-4d89-b394-69f10a235027",
+      "name": "Add Transaction",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "13hR6MfQiGAlOgETqKyTp-BTbPgxTqQdnUSOBEUIOt-4",
+          "mode": "list",
+          "cachedResultName": "Expenses Bot Rena",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13hR6MfQiGAlOgETqKyTp-BTbPgxTqQdnUSOBEUIOt-4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "main",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13hR6MfQiGAlOgETqKyTp-BTbPgxTqQdnUSOBEUIOt-4/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1488,
+        496
+      ],
+      "id": "87d44ed4-8d38-4389-ac97-f5149dc984fb",
+      "name": "Get Transactions",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "contextWindowLength": 3
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        944,
+        496
+      ],
+      "id": "ff312517-b166-4e1f-9269-20540d59bb61",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        784,
+        496
+      ],
+      "id": "37f67fbc-047b-4c3d-8d5c-c400ddb359f9",
+      "name": "AI Model",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "description": "Call this tool for get current date & time",
+        "jsCode": "const nowWIB = new Date().toLocaleString('id-ID', {\n  timeZone: 'Asia/Jakarta',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n  hour: '2-digit',\n  minute: '2-digit',\n  second: '2-digit'\n});\n\nreturn nowWIB;\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        1312,
+        496
+      ],
+      "id": "534b7bba-1e97-4840-a0cd-7d8505f3d15a",
+      "name": "Get Current Date and Time"
+    },
+    {
+      "parameters": {
+        "operation": "sendChatAction",
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}"
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1488,
+        240
+      ],
+      "id": "58b0e2fc-e47d-4567-aaed-326d40fadaee",
+      "name": "Send a chat action1",
+      "webhookId": "d54bb5fa-caa4-4c70-a587-97a4ed01438f",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"message\": \"\",\n  \"id\": \"\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        432,
+        896
+      ],
+      "id": "71a98858-5929-447f-9567-ec2d32f789d6",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        656,
+        896
+      ],
+      "id": "af98f19c-cd5c-4b6b-af14-36861165e9b5",
+      "name": "Telegram",
+      "webhookId": "0b60a1de-a75c-4b2f-ae0f-aa63111441a7",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "composite",
+        "dataPropertyNameComposite": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [
+        880,
+        896
+      ],
+      "id": "b6cd90dd-d54b-4b9a-b5a2-3ff0228e6a92",
+      "name": "Edit Image"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.ocr.space/parse/image",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "helloworld"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "isTable",
+              "value": "true"
+            },
+            {
+              "name": "OCREngine",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        896
+      ],
+      "id": "52074386-09ed-4af0-a352-d3310492105c",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "content": "## Image Processing Extract Image to Text\n",
+        "height": 336,
+        "width": 976
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        768
+      ],
+      "id": "f1fd4f91-4847-4eb7-bc49-b591c63b6953",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a chat action1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Send a chat action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Image Processing'": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a chat action": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Telegram3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Transaction": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transactions": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Current Date and Time": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a chat action1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram": {
+      "main": [
+        [
+          {
+            "node": "Edit Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Image": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Telegram Trigger": [
+      {
+        "update_id": 876356948,
+        "message": {
+          "message_id": 576,
+          "from": {
+            "id": 1098990529,
+            "is_bot": false,
+            "first_name": "Darm",
+            "username": "darms_21",
+            "language_code": "en"
+          },
+          "chat": {
+            "id": -5053674362,
+            "title": "Kuyha",
+            "type": "group",
+            "all_members_are_administrators": true,
+            "accepted_gift_types": {
+              "unlimited_gifts": false,
+              "limited_gifts": false,
+              "unique_gifts": false,
+              "premium_subscription": false,
+              "gifts_from_channels": false
+            }
+          },
+          "date": 1768983495,
+          "text": "Test beli air putih 11.203"
+        }
+      }
+    ],
+    "When Executed by Another Workflow": [
+      {
+        "message": "cek",
+        "id": "AgACAgUAAxkBAAIBo2lmlBsuFQ48wPt_l_xTVGHJS857AAIBDmsbY5o5V6KVmM1e25vjAQADAgADeQADOAQ"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "13eeed019fcb4656c8a66119bc342721eb7a8c657d2ac705aeba45c45069ce41"
+  },
+  "name": "Simple Money Tracker with Free Image OCR"
+}

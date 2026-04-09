@@ -1,0 +1,375 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        368,
+        240
+      ],
+      "id": "b313bc77-b519-4943-a205-758c9b17632c",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1vUoEYxcV7yV7ieC4QkplQDYi9Nhq3OMZ0bAGELmunQ4",
+          "mode": "list",
+          "cachedResultName": "Dataset Penjualan",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1vUoEYxcV7yV7ieC4QkplQDYi9Nhq3OMZ0bAGELmunQ4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1036395019,
+          "mode": "list",
+          "cachedResultName": "Dataset Penjualan",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1vUoEYxcV7yV7ieC4QkplQDYi9Nhq3OMZ0bAGELmunQ4/edit#gid=1036395019"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        576,
+        240
+      ],
+      "id": "60f19e3f-4bc2-42ab-bc7c-90aae9a8365d",
+      "name": "Get row(s) in sheet"
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.0-flash-lite",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.0-flash-lite"
+        },
+        "text": "Anda adalah analis produksi. Berdasarkan data berikut:\n{{JSON.stringify($json)}}\n\nTUGAS:\n1. Ambil semua produk dan buat daftar PRODUK UNIK.\n2. Untuk setiap produk unik, hitung total permintaan per BULAN dari data historis.\n3. Buat prediksi permintaan 7 hari KE DEPAN berdasarkan rata-rata bulanan.\n4. Berikan saran jumlah produksi agar stok akhir tetap > 150 unit.\n\nATURAN FORMAT OUTPUT:\n- Output HARUS tetap Key=Value\n- Tidak boleh ada teks lain\n- Tidak boleh ada markdown\n- Tidak boleh ada backtick\n- Tidak boleh dalam JSON\n- Gunakan format per produk unik\n\nFORMAT WAJIB UNTUK SETIAP PRODUK:\nNama_Produk=<nama>\nBulan=<YYYY-MM>\nPrediksi_Permintaan=<angka>\nSaran_Produksi=<angka>\n\nPisahkan setiap produk dengan baris kosong.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        784,
+        240
+      ],
+      "id": "30f4b980-36f5-4ade-9855-516c68f9e25b",
+      "name": "Analyze document",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 3000,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6d8669ef-82f8-493b-97e4-d7de1c564da1",
+              "name": "Nama_Produk",
+              "value": "={{ $json.content.parts[0].text.match(/Nama_Produk=([^\\n]+)/)[1] }}",
+              "type": "string"
+            },
+            {
+              "id": "e5c88e9f-4b97-48f8-9cdf-d3b5c63a8e31",
+              "name": "Bulan",
+              "value": "={{ $json.content.parts[0].text.match(/Bulan=([0-9\\-]+)/)[1] }}",
+              "type": "string"
+            },
+            {
+              "id": "4a5c15a1-f038-4aa8-932b-10a2b116a5ee",
+              "name": "Prediksi_Permintaan",
+              "value": "={{ $json.content.parts[0].text.match(/Prediksi_Permintaan=(\\d+)/)[1] }}",
+              "type": "number"
+            },
+            {
+              "id": "3b58cbdc-618d-4de0-8b08-96b6c39f6951",
+              "name": "Saran_Produksi",
+              "value": "={{ $json.content.parts[0].text.match(/Saran_Produksi=(\\d+)/)[1] }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        992,
+        240
+      ],
+      "id": "f104bd70-557c-4d39-9e62-26e4c114fbb9",
+      "name": "JSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items.map(i => i.json);\n\nconst grouped = {};\n\nfor (const row of data) {\n  const key = `${row.Nama_Produk}-${row.Bulan}`;\n  \n  if (!grouped[key]) {\n    grouped[key] = {\n      Nama_Produk: row.Nama_Produk,\n      Bulan: row.Bulan,\n      Prediksi_Permintaan: 0,\n      Saran_Produksi: 0\n    };\n  }\n\n  grouped[key].Prediksi_Permintaan += Number(row.Prediksi_Permintaan);\n  grouped[key].Saran_Produksi += Number(row.Saran_Produksi);\n}\n\n// Convert to n8n items\nreturn Object.values(grouped).map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        240
+      ],
+      "id": "a413e1d1-1c64-4666-a113-a21cea401dd8",
+      "name": "Format Data"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "82f85bf7-4ce5-45f1-8b87-85c8348d89e3",
+              "name": "Nama_Produk",
+              "value": "={{ $json.Nama_Produk }}",
+              "type": "string"
+            },
+            {
+              "id": "7a6257b8-b736-432d-85fa-81513ea8906c",
+              "name": "Bulan",
+              "value": "={{ $json.Bulan }}",
+              "type": "string"
+            },
+            {
+              "id": "0c459b41-0899-46ad-a1b8-0a1b43a384e4",
+              "name": "Prediksi_Permintaan",
+              "value": "={{ $json.Prediksi_Permintaan }}",
+              "type": "number"
+            },
+            {
+              "id": "c2f433a7-fdf9-4caa-958d-54661db0d7c6",
+              "name": "Saran_Produksi",
+              "value": "={{ $json.Saran_Produksi }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1408,
+        240
+      ],
+      "id": "31b6db43-3f07-440e-9e8a-5fb54365ff23",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "2ac6e2bf-2b95-8029-9b9f-d7e4cee9574f",
+          "mode": "list",
+          "cachedResultName": "Dashboard Stok Barang",
+          "cachedResultUrl": "https://www.notion.so/2ac6e2bf2b9580299b9fd7e4cee9574f"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Nama|title",
+              "title": "={{ $json.Nama_Produk }}"
+            },
+            {
+              "key": "Bulan|date",
+              "date": "={{ $json.Bulan }}-01"
+            },
+            {
+              "key": "Prediksi|number",
+              "numberValue": "={{ $json.Prediksi_Permintaan }}"
+            },
+            {
+              "key": "Saran|number",
+              "numberValue": "={{ $json.Saran_Produksi }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1616,
+        240
+      ],
+      "id": "5ba82a72-a648-4c21-a982-095f2268d900",
+      "name": "Create a database page",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "// items = data dari input (array)\nconst data = items.map(item => item.json);\n\nlet message = `*LAPORAN PRODUK BULAN 2025-08*\\n\\n`;\n\nfor (const row of data) {\n  message += `*${row.Nama_Produk}*\\n`;\n  message += `• Prediksi Permintaan: *${row.Prediksi_Permintaan}*\\n`;\n  message += `• Saran Produksi: *${row.Saran_Produksi}*\\n\\n`;\n}\n\nreturn [{\n  json: {\n    text: message.trim()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        448
+      ],
+      "id": "641426cc-705e-4cff-a1b7-dbbcc8463b69",
+      "name": "Format Telegram"
+    },
+    {
+      "parameters": {
+        "chatId": "601447657",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1840,
+        448
+      ],
+      "id": "0e8c3553-d867-4c98-9f88-a72735412ed7",
+      "name": "Send a text message",
+      "webhookId": "e59e650f-1cc1-4477-86d1-c73c1d40250c",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "// items = data dari input (array)\nconst data = items.map(item => item.json);\n\nlet message = `\n<h2 style=\"font-family:Arial; color:#1a73e8;\">Laporan Produk Bulan 2025-08</h2>\n<table style=\"border-collapse:collapse; width:100%; font-family:Arial; margin-top:10px;\">\n  <tr style=\"background:#f1f3f4;\">\n    <th style=\"border:1px solid #ccc; padding:8px; text-align:left;\">Nama Produk</th>\n    <th style=\"border:1px solid #ccc; padding:8px; text-align:left;\">Prediksi Permintaan</th>\n    <th style=\"border:1px solid #ccc; padding:8px; text-align:left;\">Saran Produksi</th>\n  </tr>\n`;\n\nfor (const row of data) {\n  message += `\n  <tr>\n    <td style=\"border:1px solid #ccc; padding:8px;\">${row.Nama_Produk}</td>\n    <td style=\"border:1px solid #ccc; padding:8px;\">${row.Prediksi_Permintaan}</td>\n    <td style=\"border:1px solid #ccc; padding:8px;\">${row.Saran_Produksi}</td>\n  </tr>\n  `;\n}\n\nmessage += `</table>`;\n\nreturn [{\n  json: {\n    html: message.trim()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        624
+      ],
+      "id": "fa7619ab-4855-4236-acd1-6b6ed40ac986",
+      "name": "Format GMAIL"
+    },
+    {
+      "parameters": {
+        "sendTo": "nocturnailed.team@gmail.com",
+        "subject": "Laporan Data Barang",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1840,
+        624
+      ],
+      "id": "c51adc6c-1b12-423e-adb3-4e67742d5f65",
+      "name": "Send a message",
+      "webhookId": "0b3edbaa-057f-4dc9-a2d7-bd52f3e15799"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Analyze document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze document": {
+      "main": [
+        [
+          {
+            "node": "JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON": {
+      "main": [
+        [
+          {
+            "node": "Format Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Data": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Create a database page",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format GMAIL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        []
+      ]
+    },
+    "Format GMAIL": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "13eeed019fcb4656c8a66119bc342721eb7a8c657d2ac705aeba45c45069ce41"
+  },
+  "name": "PPIC Product Prediction Stock"
+}

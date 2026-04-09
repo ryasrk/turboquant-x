@@ -1,0 +1,1005 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Information Extractor1').item.json.output['Nomor WA'] \n    }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1744,
+        624
+      ],
+      "id": "8ec8f7dc-5c45-4092-a670-c25a9b37bb7d",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "readMessage",
+        "phoneOrGroupId": "={{ $('Information Extractor1').item.json.output['Nomor WA'] }}",
+        "messageId": "={{ $('Webhook').item.json.body.message.id }}"
+      },
+      "type": "@aldinokemal2104/n8n-nodes-gowa.gowa",
+      "typeVersion": 1,
+      "position": [
+        816,
+        464
+      ],
+      "id": "5f29b82e-7488-41f1-b594-7ff7f764e548",
+      "name": "tandai dibaca",
+      "notesInFlow": true,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "sendChatPresence",
+        "phoneNumber": "={{ $('Information Extractor1').item.json.output['Nomor WA'] }}"
+      },
+      "type": "@aldinokemal2104/n8n-nodes-gowa.gowa",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        464
+      ],
+      "id": "d6bd0d55-e1a4-4735-a8a1-bf19134235b9",
+      "name": "munculkan sedang mengetik",
+      "notesInFlow": true,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1488,
+        624
+      ],
+      "id": "c688acce-0077-4b46-ae1a-875f279584a9",
+      "name": "Google Gemini Chat Model",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "documentURL": "masukkan url"
+      },
+      "type": "n8n-nodes-base.googleDocsTool",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        624
+      ],
+      "id": "74e98191-8fbf-47d4-aed2-7b3af587f48b",
+      "name": "Knowledge"
+    },
+    {
+      "parameters": {
+        "phoneNumber": "={{ $('Information Extractor1').item.json.output['Nomor WA'] }}",
+        "message": "={{$('AI Agent').item.json.output}}"
+      },
+      "type": "@aldinokemal2104/n8n-nodes-gowa.gowa",
+      "typeVersion": 1,
+      "position": [
+        3232,
+        784
+      ],
+      "id": "a6b4e026-51ac-4af7-ad7b-0362f1a9180e",
+      "name": "Send a text message1",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e4fee182-6893-4b5b-b355-713ef4facb56",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1104,
+        544
+      ],
+      "id": "3f383d67-7dd3-4a0d-9bcd-39daa53a5b61",
+      "name": "Webhook",
+      "webhookId": "e4fee182-6893-4b5b-b355-713ef4facb56"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3-pro-preview",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3-pro-preview"
+        },
+        "text": "=extract text dan analisa keluhan user, outputnya cukup keluhan saja",
+        "imageUrls": "=https://loclahost:3000/{{ $('Webhook').item.json.body.image.media_path }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        592,
+        272
+      ],
+      "id": "78c0d8fd-6f78-432d-97bd-21e5992b4770",
+      "name": "Analyze an image",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bcc42531-1a38-4d46-a6f6-f9667291c4ba",
+              "name": "data",
+              "value": "={{ $('Analyze an image').item.json.content.parts[0].text }}\nCaption {{ $('Webhook').item.json.body.image.caption }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1264,
+        272
+      ],
+      "id": "e508e0dd-c63e-4f2e-a087-a11eba9f7076",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bcc42531-1a38-4d46-a6f6-f9667291c4ba",
+              "name": "data",
+              "value": "={{ $('Webhook').item.json.body.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1264,
+        464
+      ],
+      "id": "adbcb3ed-364c-49d4-b2b2-ef62132840c2",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "readMessage",
+        "phoneOrGroupId": "={{ $('Webhook').item.json.body.from }}",
+        "messageId": "={{ $('Webhook').item.json.body.message.id }}"
+      },
+      "type": "@aldinokemal2104/n8n-nodes-gowa.gowa",
+      "typeVersion": 1,
+      "position": [
+        816,
+        272
+      ],
+      "id": "d9022dd3-31dc-4ac7-9a73-b23422af520c",
+      "name": "tandai dibaca1",
+      "notesInFlow": true,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "sendChatPresence",
+        "phoneNumber": "={{ $('Webhook').item.json.body.from }}"
+      },
+      "type": "@aldinokemal2104/n8n-nodes-gowa.gowa",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        272
+      ],
+      "id": "dba1351c-3fc2-4fba-b76d-594f68231b81",
+      "name": "munculkan sedang mengetik1",
+      "notesInFlow": true,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6175cb56-86d5-4dcb-978a-3fec4a27eefe",
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "message_revoked",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "79abf9ce-638e-4a25-b7ab-bede7eb85e87",
+                    "leftValue": "={{ $json.body.reaction }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0faf328b-adc2-4585-915b-d9819de0463e",
+                    "leftValue": "={{ $json.body.from }}",
+                    "rightValue": "g.us",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "308d33a5-0564-4fe1-b220-3415d1636c89",
+                    "leftValue": "={{ $json.body.from }}",
+                    "rightValue": "nomor hp bot",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.message }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "id": "fff5de7d-bf43-4f3f-8a07-b235851f8eb3"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -880,
+        496
+      ],
+      "id": "4cd5c6db-b929-4a68-8703-c12697f028fc",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Webhook').item.json.body.from.replaceAll(\"ganti nomor hp botnya\",\"\") }}",
+        "attributes": {
+          "attributes": [
+            {
+              "name": "Nomor WA",
+              "description": "Nomor Handphone gunakan format '628145383319'",
+              "required": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        -656,
+        528
+      ],
+      "id": "6c7edd63-24b2-47aa-bd3f-856328a2d206",
+      "name": "Information Extractor1",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -592,
+        752
+      ],
+      "id": "49698bac-60eb-40cb-a5aa-860f022383a7",
+      "name": "Google Gemini Chat Model3",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e212ef9f-7ce9-4d46-a657-8c64dccd38af",
+                    "leftValue": "={{ $('Webhook').item.json.body.audio }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0e9c2a49-c835-4038-b652-b61a80068dd4",
+                    "leftValue": "={{ $('Webhook').item.json.body.video }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.image }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "id": "6fc0effd-b389-4231-97bc-0195c1a49ab3"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "fe01f498-cceb-45dc-a4ed-ed0320a1d1cd",
+                    "leftValue": "={{ $('Webhook').item.json.body.message }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        368,
+        240
+      ],
+      "id": "cb9609f0-f9da-4362-8f6d-0d9017baf4c3",
+      "name": "Switch2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bcc42531-1a38-4d46-a6f6-f9667291c4ba",
+              "name": "data",
+              "value": "=simpan pesan saya ke simple memory .\nberikut pesan saya :{{ $('Webhook').item.json.body.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1264,
+        656
+      ],
+      "id": "d3eeedec-8af3-46bc-96ea-8d34b58ce770",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "44e08450-1f8f-4289-8cf5-efaf053779f8",
+              "leftValue": "={{ $('Webhook').item.json.body.from }}",
+              "rightValue": "nomor hp bot",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -304,
+        640
+      ],
+      "id": "f3b72d57-8756-4692-85fd-c0744521ca18",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "10uWAtG3ZoARXxhB",
+          "mode": "list",
+          "cachedResultName": "HUMAN",
+          "cachedResultUrl": "/projects/BT4jCKEa6GiII6yz/datatables/10uWAtG3ZoARXxhB"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "NOMORWA",
+              "keyValue": "={{ $('Webhook').item.json.body.chat_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        272
+      ],
+      "id": "39369599-f10e-4e46-96d7-1e77ab449a44",
+      "name": "Get row(s)",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0fecd112-d7fc-46c5-82cf-dbc8b40c4e72",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        144,
+        272
+      ],
+      "id": "0bdb4f2a-0d0b-4d26-bd97-cee9c5d4dc2f",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "value": "10uWAtG3ZoARXxhB",
+          "mode": "list",
+          "cachedResultName": "HUMAN",
+          "cachedResultUrl": "/projects/BT4jCKEa6GiII6yz/datatables/10uWAtG3ZoARXxhB"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "NOMORWA",
+              "keyValue": "={{ $('Webhook').item.json.body.chat_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -592,
+        336
+      ],
+      "id": "a28fe225-515f-4e4f-bd63-39063a7b920e",
+      "name": "Delete row(s)"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "10uWAtG3ZoARXxhB",
+          "mode": "list",
+          "cachedResultName": "HUMAN",
+          "cachedResultUrl": "/projects/BT4jCKEa6GiII6yz/datatables/10uWAtG3ZoARXxhB"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "NOMORWA",
+              "keyValue": "={{ $('Webhook').item.json.body.chat_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "NOMORWA": "={{ $('Webhook').item.json.body.chat_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "NOMORWA",
+              "displayName": "NOMORWA",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        800
+      ],
+      "id": "7ad71dbd-5b38-40d1-8afc-78104745f702",
+      "name": "Upsert row(s)"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.data }}",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "=\nANDA ADALAH ASISTEN \"..........\" YANG HANDAL DAN HUMORIS\n\nWaktu Hari ini :{{ $now }}\n## 1. BATASAN LAYANAN YANG JELAS\n\n**Saya DAPAT membantu:**\n\".........\"\n\n\n**Saya TIDAK DAPAT membantu:**\n\"........\"\n\n## 2. Tugas Utama\n\"........\"\n\n##3. Alur Tugas\n\".......\"\n\n\n\n\n\n\n\n## 4. FORMAT RESPON\n\n### RESPON NORMAL:\n- Gunakan bahasa Indonesia yang jelas\n- Tetap profesional namun humoris\n- Sertakan emoji yang sesuai (maksimal 2-3 per pesan)\n\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1920,
+        400
+      ],
+      "id": "75e32130-2dbe-4c99-ae51-64b61227ec75",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        624
+      ],
+      "id": "811c75fc-32af-453a-b15c-0c2183d447b4",
+      "name": "DeepSeek Chat Model",
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tandai dibaca": {
+      "main": [
+        [
+          {
+            "node": "munculkan sedang mengetik",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "munculkan sedang mengetik": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Knowledge": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze an image": {
+      "main": [
+        [
+          {
+            "node": "tandai dibaca1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tandai dibaca1": {
+      "main": [
+        [
+          {
+            "node": "munculkan sedang mengetik1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "munculkan sedang mengetik1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Delete row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [],
+        [
+          {
+            "node": "Information Extractor1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Information Extractor1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Information Extractor1": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Information Extractor1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch2": {
+      "main": [
+        [],
+        [],
+        [
+          {
+            "node": "Analyze an image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tandai dibaca",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upsert row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s)": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Switch2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "13eeed019fcb4656c8a66119bc342721eb7a8c657d2ac705aeba45c45069ce41"
+  },
+  "name": "CS Basic With GOWA - WhatsApp AI Customer Service"
+}

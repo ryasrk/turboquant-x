@@ -1,0 +1,223 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert AI Technology Analyst. Your task is to process scraped articles from two distinct news sources: \"AI Tech Suite News\" and \"AI-News\". Your goal is to synthesize this information into a single, concise, and insightful daily intelligence briefing.\n\nAnalyze the content from both sources to identify the most significant news, find common themes, and highlight unique stories from each. The final output must be a well-structured report formatted using ONLY the following Telegram-supported HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>, and <a>. For lists, DO NOT use <ul>, <ol>, or <li> tags. Instead, create lists by starting each item on a new line with a hyphen character (-).\n\n\n**Input Data:**\n\n* **Data from AI-News:**\n    `\nTitle : {{ $json.title }}\nContent : {{ $json.content }}\nPublished : {{ $json.publishedTime }}\n`\n\n**Required Output Structure:**\n\n---\n\n**Today's AI Intelligence Briefing**\n**Date:** {{ new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) }}\n\n**Top Headlines**\n*(Identify the 3-4 most critical and impactful news items from across both sources. Present them as concise, single-sentence bullet points.)*\n* * * **Deep Dive: Major Developments & Common Themes**\n*(Analyze stories covered by both sources. For each major theme or event, provide a 2-3 sentence summary explaining the key points, the companies involved, and why it's significant. Use bold subheadings for each theme.)*\n\n**Theme/Story 1:**\n...\n\n**Theme/Story 2:**\n...\n\n\n**IMPORTANT** : Generate Text that can be sent to telegram chat as text message.",
+        "batching": {}
+      },
+      "id": "0977ff6e-f60d-4ace-aa2f-97b26c624703",
+      "name": "Generate Report",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "position": [
+        1408,
+        352
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "feedUrl": "https://www.artificialintelligence-news.com/feed/"
+      },
+      "id": "9583e193-69f6-45e5-a346-9afc4bcc3e28",
+      "name": "AI-News Feed",
+      "type": "n8n-nodes-base.rssFeedReadTrigger",
+      "position": [
+        752,
+        432
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.link }}",
+        "options": {},
+        "requestOptions": {}
+      },
+      "id": "c6bc8303-859f-4f94-8610-d68cb02ab9c6",
+      "name": "Read News from AI News Website",
+      "type": "n8n-nodes-base.jinaAi",
+      "position": [
+        1056,
+        432
+      ],
+      "typeVersion": 1,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "content": "## **`AI-News Feed`**\n\nIni adalah titik awal alur kerja.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n* **Tindakan:** Dipicu secara otomatis setiap menit.\n* **Sumber:** Mengambil artikel baru dari umpan RSS di `https://www.artificialintelligence-news.com/feed/`.\n* **Keluaran:** Mengirim judul artikel baru, tautan, dan metadata lainnya ke node berikutnya.",
+        "height": 576,
+        "width": 288
+      },
+      "id": "3e84bc24-1aab-4d23-b34b-a76edd077111",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        672,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## **`Baca Berita dari Situs Web Berita AI`**\n\nNode ini mendapatkan konten lengkap artikel berita.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n* **Tindakan:** Mengambil `tautan` dari node Umpan RSS.\n* **Layanan:** Menggunakan Jina AI untuk \"mengambil\" atau membaca teks lengkap dari tautan tersebut.\n* **Keluaran:** Memberikan konten artikel yang bersih ke node pembuat laporan.",
+        "height": 576,
+        "width": 288,
+        "color": 7
+      },
+      "id": "a517cd26-0a88-4441-8e67-550fdb111c5b",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        976,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## **`Buat Laporan`**\n\nIni adalah *`otak`* dari alur kerja.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n* **Tindakan:** Menggunakan model OpenAI untuk membuat ringkasan berdasarkan prompt dan konten artikel yang di-scraping.\n* **Fungsi:** Menggunakan prompt terperinci dan model OpenAI untuk menganalisis input dan menghasilkan laporan berita terstruktur.\n* **Keluaran:** Mengirimkan teks laporan final yang telah diformat ke node WhatsApp.",
+        "height": 576,
+        "width": 464,
+        "color": 2
+      },
+      "id": "41df0193-7200-46b1-a8c1-d82d975aa2ab",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1280,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## **`Kirim pesan teks di WhatsApp`**\n\nIni adalah langkah terakhir yang mengirimkan hasilnya.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n* **Tindakan:** Mengambil laporan akhir (keluaran `teks`) dari node \"Buat Laporan\".\n* **Tujuan:** Mengirim laporan ini sebagai pesan ke chat ID Obrolan WhatsApp yang Anda tentukan.\n* **Hasil:** Anda menerima berita singkat yang dihasilkan AI di WhatsApp.",
+        "height": 576,
+        "width": 320,
+        "color": 6
+      },
+      "id": "d38ce4da-0ccc-4eb6-a6c1-01b15b873535",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1760,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "### Ringkasan Alur Kerja: AI News ke WhastApp\n\nAlur kerja ini mengotomatiskan proses pembuatan dan penyampaian ringkasan berita bertenaga AI.\n\n**Proses End-to-End:**\n1. **Pemicu:** Alur kerja dimulai ketika artikel baru dipublikasikan di umpan RSS **AI-News**.\n2. **Scrape:** Alur kerja ini menggunakan **Jina AI** untuk membaca seluruh konten artikel tersebut dari tautannya.\n3. **Analyze:** Teks hasil scrape dikirim ke **ChatGPT-5 Mini**.\n4. **Generate:** AI menghasilkan ringkasan terstruktur berdasarkan prompt analis khusus.\n5. **Deliver:** Laporan akhir yang telah diformat dikirim sebagai pesan ke obrolan tertentu di **WhatsApp**.\n\n**Tujuan:** Untuk menyediakan ringkasan otomatis dan ringkas tentang artikel terbaru dari AI-News langsung ke WhatsApp.",
+        "height": 576,
+        "width": 288,
+        "color": 3
+      },
+      "id": "6ba04be9-4cd6-4a06-b35d-eb9ecd56a2e0",
+      "name": "Sticky Note4",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        368,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1488,
+        512
+      ],
+      "id": "9496e231-f142-4a03-97a3-8599ec735697",
+      "name": "Generate Report Model",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "textBody": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        1872,
+        432
+      ],
+      "id": "5bbdaa2b-3911-4229-8709-ea89e19ddc1c",
+      "name": "Send message",
+      "webhookId": "294ad3fd-0ea4-4551-bbbb-ccecc680e825"
+    }
+  ],
+  "connections": {
+    "Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Send message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-News Feed": {
+      "main": [
+        [
+          {
+            "node": "Read News from AI News Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read News from AI News Website": {
+      "main": [
+        [
+          {
+            "node": "Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Report Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Report",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateId": "6095",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "13eeed019fcb4656c8a66119bc342721eb7a8c657d2ac705aeba45c45069ce41"
+  },
+  "name": "Daily AI News Summaries with Jina AI+ChatGPT-5 Mini to WhatsApp"
+}

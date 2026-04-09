@@ -1,0 +1,352 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        368,
+        240
+      ],
+      "id": "3cff4c6f-18d2-4d28-9d46-b8d1c90b3dfe",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1KBqfOMdfnM7KcB3mhdF2wz16KXzgaIRl2CSNfWZD71E",
+          "mode": "list",
+          "cachedResultName": "Online Sales Data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1KBqfOMdfnM7KcB3mhdF2wz16KXzgaIRl2CSNfWZD71E/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 37723377,
+          "mode": "list",
+          "cachedResultName": "Online Sales Data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1KBqfOMdfnM7KcB3mhdF2wz16KXzgaIRl2CSNfWZD71E/edit#gid=37723377"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        576,
+        240
+      ],
+      "id": "1362b135-5276-482c-a755-841bdb01a2dd",
+      "name": "Get row(s) in sheet"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ambil semua data dari node sebelumnya\nconst rows = $input.all();\n\n// Object untuk menyimpan hasil merge\nconst hasil = {};\n\nfor (const r of rows) {\n\n  // Ambil data yang diperlukan\n  const nama = r.json[\"Product Name\"];\n  const qty = Number(r.json[\"Units Sold\"]);\n  const harga = Number(r.json[\"Unit Price\"]);\n\n  // Jika belum ada entri, buat entri baru\n  if (!hasil[nama]) {\n    hasil[nama] = {\n      product: nama,\n      total_qty: qty,\n      total_revenue: qty * harga,\n      // Opsional: simpan harga awal (kalau mau)\n      average_price: harga \n    };\n  } \n  else {\n    // Jika sudah ada → merge\n    hasil[nama].total_qty += qty;\n    hasil[nama].total_revenue += qty * harga;\n\n    // Update average price berdasarkan total revenue & total qty\n    hasil[nama].average_price =\n      hasil[nama].total_revenue / hasil[nama].total_qty;\n  }\n}\n\n// Kembalikan hasil dalam format n8n\nreturn Object.values(hasil).map(x => ({ json: x }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        240
+      ],
+      "id": "d9e21ee4-0f96-43ab-93ed-ed71d80e2077",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "sortFieldsUi": {
+          "sortField": [
+            {
+              "fieldName": "total_qty",
+              "order": "descending"
+            },
+            {
+              "fieldName": "total_revenue",
+              "order": "descending"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.sort",
+      "typeVersion": 1,
+      "position": [
+        992,
+        240
+      ],
+      "id": "0adc8a3f-70c5-4492-b3bf-d5ded2cf05f9",
+      "name": "Sort"
+    },
+    {
+      "parameters": {
+        "maxItems": 3
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        240
+      ],
+      "id": "125f9e5e-6d43-4d5b-9476-62b04b0d23a9",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        240
+      ],
+      "id": "364c92c2-5215-49ed-b815-dde5988c6c7a",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "text": "=Anda adalah seorang analis bisnis. Berdasarkan data penjualan produk berikut: {{ JSON.stringify($json.data) }}, buatkan laporan penjualan harian yang sangat ringkas dan langsung.\n\n**Instruksi Pemrosesan:**\n1. **Konversi Mata Uang:** Asumsikan kurs 1 USD = 15.500 IDR. Konversi semua nilai \"total_revenue\" ke Rupiah.\n2. **Format Angka:** Gunakan format mata uang Rupiah yang sesuai (RpX.XXX.XXX,XX) termasuk 2 digit desimal.\n3. **Gunakan SELURUH data persis dari input** — jangan mengarang, mengganti produk, atau membuat angka baru.\n\n**Struktur Output Laporan (WAJIB IKUTI PERSIS):**\n\n**Laporan Penjualan Harian**\n\n**Analisis Utama:**  \n1. Sebutkan total pendapatan keseluruhan (dalam Rupiah) dan total kuantitas keseluruhan.  \n2. Tampilkan daftar lengkap semua produk dalam format:\n- **Nama Produk:** RpX.XXX.XXX,XX  \n(dengan nilai pendapatan hasil konversi USD → IDR)  \n3. Identifikasi produk **teratas** dan **terlemah** berdasarkan pendapatan Rupiah.\n\n**Rekomendasi Cepat:**  \nBerikan **2 rekomendasi strategis spesifik**:\n- 1 untuk produk terlaris  \n- 1 untuk produk terlemah\n\n**Aturan WAJIB:**  \n- Tidak boleh menggunakan data selain dari input.  \n- Tidak boleh mengubah nama produk.  \n- Tidak boleh membuat asumsi produk lain.  \n- Jawaban harus langsung laporan — tanpa kata pembuka/penutup.",
+        "simplify": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        240
+      ],
+      "id": "fb59b4d2-c68b-40a6-8adf-7000e208320e",
+      "name": "Analyze document",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "sendTo": "nocturnailed.team@gmail.com",
+        "subject": "Laporan Produk Laris",
+        "message": "={{ $json.data }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        176
+      ],
+      "id": "f7838724-4fb9-40f5-b8d5-b0bd69c77c3a",
+      "name": "Send a message",
+      "webhookId": "7da0bb5e-e04c-4d39-a79a-cc7d8e1a1159"
+    },
+    {
+      "parameters": {
+        "mode": "markdownToHtml",
+        "markdown": "={{ $json.candidates[0].content.parts[0].text }}",
+        "destinationKey": "=data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [
+        1824,
+        240
+      ],
+      "id": "b3c31445-cc48-4746-b4fc-36ed561ee13c",
+      "name": "Markdown"
+    },
+    {
+      "parameters": {
+        "chatId": "601447657",
+        "text": "={{ $json.clean_text_for_telegram }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2160,
+        672
+      ],
+      "id": "794a3aa6-8e2f-4c72-94d4-6435dae14a73",
+      "name": "Send a text message",
+      "webhookId": "20a2e216-b04f-472f-891a-4125d60b4a67",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "2c56e2bf-2b95-80b8-817b-c962ff36dbab",
+          "mode": "list",
+          "cachedResultName": "List Produk Laris",
+          "cachedResultUrl": "https://www.notion.so/2c56e2bf2b9580b8817bc962ff36dbab"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Produk|title",
+              "title": "={{ $json.product }}"
+            },
+            {
+              "key": "Jumlah|number",
+              "numberValue": "={{ $json.total_qty }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        464
+      ],
+      "id": "76507ef4-31e8-48f3-94db-86c311942996",
+      "name": "Create a database page",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ganti 'html_content' dengan nama key yang berisi konten HTML Anda.\nconst html = $input.first().json.data;\n\n// Ekspresi reguler untuk menghapus SEMUA tag HTML,\n// tetapi menjaga teks di dalamnya.\nconst text = html.replace(/<[^>]*>/g, '');\n\n// Opsional: Hapus baris kosong berlebihan atau spasi berlebihan\nconst cleanText = text.replace(/(\\r\\n|\\n|\\r){2,}/gm, '\\n\\n').trim();\n\n// Kembalikan objek baru dengan konten teks yang sudah bersih\nreturn [\n  {\n    json: {\n      clean_text_for_telegram: cleanText\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        496
+      ],
+      "id": "af17ef05-e986-47d5-8de9-9aaadc147f48",
+      "name": "Code in JavaScript1"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Sort",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create a database page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Analyze document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze document": {
+      "main": [
+        [
+          {
+            "node": "Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11b43c84634d4179bb31eed3ad351d18fdb8b2da0c515776699729cc1ec5b611"
+  },
+  "name": "Produk Laris"
+}

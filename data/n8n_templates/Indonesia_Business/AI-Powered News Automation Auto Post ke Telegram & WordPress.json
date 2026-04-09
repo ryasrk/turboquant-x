@@ -1,0 +1,925 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://www.cnnindonesia.com/",
+        "options": {}
+      },
+      "id": "ce9d0960-7272-4dd8-9fa8-2fb9d3cc5556",
+      "name": "Fetch Essay List",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        576,
+        240
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "cnn",
+              "cssSelector": ".border-cnn_light_grey a",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8b06e3fa-4aad-428d-bdfd-d9ec0b940758",
+      "name": "Extract essay names",
+      "type": "n8n-nodes-base.html",
+      "position": [
+        768,
+        240
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "cnn",
+        "options": {}
+      },
+      "id": "d95f4c15-390d-4a98-9133-5b05b0c41ab7",
+      "name": "Split out into items",
+      "type": "n8n-nodes-base.splitOut",
+      "position": [
+        976,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "id": "f694335e-ce4d-4fd0-a97a-4e7a73a1944b",
+      "name": "Fetch essay texts",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        400,
+        608
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": ".text-cnn_black"
+            },
+            {
+              "key": "category",
+              "cssSelector": ".text-cnn_black_light2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e4769561-1779-4ce8-ae05-23492082f0f4",
+      "name": "Extract title",
+      "type": "n8n-nodes-base.html",
+      "position": [
+        832,
+        464
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7b337b47-a1c6-470e-881f-0c038b4917e5",
+              "name": "title",
+              "type": "string",
+              "value": "={{ $('Basic LLM Chain2').item.json.text }}"
+            },
+            {
+              "id": "c001875d-88c8-47a6-a344-560195d9481f",
+              "name": "category",
+              "value": "={{ $('Extract title').item.json.category }}",
+              "type": "string"
+            },
+            {
+              "id": "ca820521-4fff-4971-84b5-e6e2dbd8bb7a",
+              "name": "summary",
+              "type": "string",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bc8da527-8b4f-40d0-87b1-3312da57cf1f",
+      "name": "Clean up",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        400,
+        848
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "715a7123-16f1-44eb-a556-18eba02c46d1",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        1632,
+        592
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {},
+      "id": "2732ac05-24b2-481f-a766-af8a0122e2d0",
+      "name": "Limit to first 3",
+      "type": "n8n-nodes-base.limit",
+      "position": [
+        1392,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "data",
+              "cssSelector": "body",
+              "skipSelectors": "img,nav"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "275ac619-9076-47b3-b81b-bceaf5bf9f62",
+      "name": "Extract Text Only",
+      "type": "n8n-nodes-base.html",
+      "position": [
+        720,
+        608
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Saya ingin Anda merangkum artikel berita dibawah ini. Ringkasan harus terdiri dari 150 kata, menggunakan bahasa netral dan bergaya jurnalistik. Pastikan informasi penting seperti tokoh, kejadian utama, waktu, dan dampaknya tetap ada. Harap tetap menjaga pesan utama dari artikel aslinya. tuliskan dalam bahasa indonesia yang baik dan benar dan mudah dipahami juga harus human article.\n\n\"{{ $json.data }}\"\n\njangan berikan kata pengantar apapun, dan langsung berikan output hasilnya\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        960,
+        608
+      ],
+      "id": "263b162f-a98c-47d5-842d-7178132c66bf",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite-preview-06-17",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        896,
+        720
+      ],
+      "id": "db8ab79c-047b-45cd-97f7-c7096ec9291a",
+      "name": "Google Gemini Chat Model",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"url\": \"{{ $json.cnn }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        240
+      ],
+      "id": "9d0fed92-22ac-4fbc-8285-ff6ab936d368",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            },
+            {
+              "triggerAtHour": 11
+            },
+            {
+              "triggerAtHour": 17
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        368,
+        240
+      ],
+      "id": "e796f8f6-f77c-497d-afe8-33b6712d53a1",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.imageUrl.replace(\"*\", \"\") }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        1312
+      ],
+      "id": "64bb03bd-cea6-49e5-848a-54a165678c1f",
+      "name": "get-image"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot7869712760:AAGvXJaQgJnh6YFtIP_ognkMWYunYojKM0g/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "@newslikemedia"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1152,
+        1280
+      ],
+      "id": "71f7b3d4-17dd-422d-8949-65b97e3b5555",
+      "name": "send-title-to-tele"
+    },
+    {
+      "parameters": {
+        "jsCode": "const randomSeed = Math.floor(Math.random() * 100000);\nconst width = 1280;\nconst height = 720;\n\nconst finalPrompt = $json.summary;\nconst output = $json.output\nconst imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(output)}.jpg??width=${width}&height=${height}&seed=${randomSeed}&model=flux&nologo=true`;\n\nconst title = $json.title\nconst category = $json.category\nreturn [\n  {\n    json: {\n      title,\n      category,\n      text: finalPrompt,\n      imageUrl\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        864
+      ],
+      "id": "c1c3a18c-d51c-4f6b-b92c-2757c24f7906",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.summary }}",
+        "options": {
+          "systemMessage": "=Berika 5 keyword atau tags yang relevan dengan artikel {{ $json.summary }} dan yang bagus untuk seo.\n\nOutput-kan tanpa tambahan kata, markdown, atau pembungkus lain. Jangan beri penjelasan apa pun."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        800,
+        912
+      ],
+      "id": "171cb766-bc77-430d-9a1e-d709bd578b90",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite-preview-06-17",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        752,
+        1040
+      ],
+      "id": "b519a0a1-97b7-4502-911c-2e7f4a4ebc86",
+      "name": "Google Gemini Chat Model2",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "specifyInputSchema": true,
+        "jsonSchemaExample": "{\n  \"title\": \"string (max 60 characters)\",\n  \"post_caption\": \"string (max 250 characters)\",\n  \"prompt\": \"string (full Veo 3 generation prompt starting with 'Create a cinematic handheld selfie-style video...')\"\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.2,
+      "position": [
+        912,
+        1072
+      ],
+      "id": "df77bd9f-7642-4fe4-aaae-d6e4224ca4ff",
+      "name": "Code Tool"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        1488,
+        864
+      ],
+      "id": "93b80429-37ac-42ba-b05d-8d68a0a83b96",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "@newslikemedia",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "Foto Hanya Ilustration"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1216,
+        1184
+      ],
+      "id": "2fb394ee-0429-4685-900f-c3c67ec8119e",
+      "name": "Telegram",
+      "webhookId": "e14d32b6-a7d5-4441-8d5b-de96014a83c7",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "title": "={{ $('Code3').item.json.title }}",
+        "additionalFields": {
+          "content": "={{ $json.text }}",
+          "status": "publish",
+          "categories": "={{ $json.categoryId || $json.category }}",
+          "postTemplate": {
+            "values": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.wordpress",
+      "typeVersion": 1,
+      "position": [
+        1392,
+        1504
+      ],
+      "id": "a4b1d723-5825-4f7b-b498-ffa1b8ac2d80",
+      "name": "Wordpress",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const categoryMap = {\n  \"Internasional\": 35,\n  \"Nasional\": 36,\n  \"Ekonomi\": 37,\n  \"Olahraga\": 38,\n  \"Teknologi\": 39,\n  \"Otomotif\": 40,\n  \"Hiburan\": 41,\n  \"Gaya Hidup\": 42,\n};\n\nconst categoryName = $json.category;\nconst categoryId = Number(categoryMap[categoryName]) || 1; // 1 = default jika tidak ditemukan\n\nreturn [\n  {\n    json: {\n      ...$json,\n      categoryId\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        1408
+      ],
+      "id": "a0f5ab46-fbea-4833-80ba-0a3e0a04693b",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://fahmi22-001-site1.jtempurl.com/wp-json/wp/v2/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "={{ $binary.data.mimeType }}"
+            },
+            {
+              "name": "Content-Disposition",
+              "value": "={{ 'attachment; filename=\\\"' + $binary.data.fileName + '\\\"' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        1520
+      ],
+      "id": "4fd7908d-87e3-4075-88ea-06c9eb3bdd59",
+      "name": "HTTP Request",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        1232,
+        1504
+      ],
+      "id": "9f10e304-86c7-429d-ac66-83e79d9ee260",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://fahmi22-001-site1.jtempurl.com/wp-json/wp/v2/posts/{{ $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "wordpressApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "featured_media",
+              "value": "={{ $('HTTP Request').item.json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1552,
+        1504
+      ],
+      "id": "426b76e8-63cc-436d-a6d4-a8c2c518096a",
+      "name": "HTTP Request1",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1B1sEnIme1-oIPEUMfbDs0A6HH3u68cjQny88jDk2KfU",
+          "mode": "list",
+          "cachedResultName": "post-auto-telegram-and-wordpress",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1B1sEnIme1-oIPEUMfbDs0A6HH3u68cjQny88jDk2KfU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "auto-post",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1B1sEnIme1-oIPEUMfbDs0A6HH3u68cjQny88jDk2KfU/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Title": "={{ $json.title }}",
+            "Category": "={{ $json.category }}",
+            "Text": "={{ $json.text }}",
+            "Image Url": "={{ $json.imageUrl }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Category",
+              "displayName": "Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Text",
+              "displayName": "Text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Image Url",
+              "displayName": "Image Url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1296,
+        1088
+      ],
+      "id": "a5f9197f-815e-43c9-8669-36ffad784ad3",
+      "name": "Google Sheets"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.title }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=Tolong paraphrase judul dibawah ini. hasil yang di pawaphrase harus tetap mempertahankan maknanya. harus tetap human article, dengan gaya bahasa jurnalistik yang bersifat informatif, objektif, dan lugas. Uahakan memiliki gaya bahasa yang sama seperti judul aslinya. Berikut judulnya\n\n{{ $json.title }}\n\nberikan 1 judul saja dan jangan ada kata pengantar apapun, langsung berikan output judul yang berhasil di paraphrase."
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        1280,
+        464
+      ],
+      "id": "d08a8bdf-7ee3-4fb2-9ab4-50eaa2605240",
+      "name": "Basic LLM Chain2"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite-preview-06-17",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        688
+      ],
+      "id": "6c670c06-4031-474a-ae9b-2d5ba74c85fe",
+      "name": "Google Gemini Chat Model3",
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "Fetch Essay List": {
+      "main": [
+        [
+          {
+            "node": "Extract essay names",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract essay names": {
+      "main": [
+        [
+          {
+            "node": "Split out into items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split out into items": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch essay texts": {
+      "main": [
+        [
+          {
+            "node": "Extract title",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract Text Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract title": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean up": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Clean up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit to first 3": {
+      "main": [
+        [
+          {
+            "node": "Fetch essay texts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text Only": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Limit to first 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Essay List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get-image": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "send-title-to-tele",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send-title-to-tele": {
+      "main": [
+        []
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "get-image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model2": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "Code Tool": {
+      "ai_tool": [
+        []
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wordpress": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Wordpress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        []
+      ]
+    },
+    "Basic LLM Chain2": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "13eeed019fcb4656c8a66119bc342721eb7a8c657d2ac705aeba45c45069ce41"
+  },
+  "name": "AI-Powered News Automation: Auto Post ke Telegram & WordPress"
+}

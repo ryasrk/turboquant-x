@@ -1,0 +1,300 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://wa.devotetolove.com/send/{{ $('When Executed by Another Workflow').item.json.chat_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer SAVnDRPmruAduGveHmt7EKMYB65ZF7n2"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $('When Executed by Another Workflow').item.json.send_id }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('When Executed by Another Workflow').item.json.prompt }}\n\nhttps://s3proxy.talentabangsa.com/ai_agent/{{ $('When Executed by Another Workflow').item.json.fileName }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "video",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "223773f6-04c3-4cd6-989e-a43fb077086e",
+      "name": "Send video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        368,
+        240
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "=AIzaSyBsP5OMaSFMYyD4DKTlhkh4yIB3h4pvtYI"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const p    = $json.prompt;\n  const ar   = String($json.aspectRatio || '16:9').replace(/\\s+/g, '');\n  const b64  = $node['Extract from File'].json.data;\n  const mime = 'image/webp';\n\n  return {\n    instances: [\n      {\n        prompt: p,\n        image: {\n          bytesBase64Encoded: b64,\n          mimeType: mime\n        }\n      }\n    ],\n    parameters: {\n      aspectRatio: ar\n    }\n  };\n})() }}",
+        "options": {}
+      },
+      "id": "e10f9519-3f55-4b54-aedf-1c0db2c88960",
+      "name": "Gemini Veo3.1 Generate (LRO)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -592,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.imageUrl }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1040,
+        256
+      ],
+      "id": "ed552313-181c-43df-92d8-74e73362bea2",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        256
+      ],
+      "id": "abf38510-d71e-4219-bf6e-231ab6ed6782",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "url": "=https://generativelanguage.googleapis.com/v1beta/{{ $json.name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "AIzaSyBsP5OMaSFMYyD4DKTlhkh4yIB3h4pvtYI"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -96,
+        256
+      ],
+      "id": "13f3aa86-ef93-4b3b-a03f-ea1bbca449ce",
+      "name": "Get status"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.response.generateVideoResponse.generatedSamples[0].video.uri }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "AIzaSyBsP5OMaSFMYyD4DKTlhkh4yIB3h4pvtYI"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        256
+      ],
+      "id": "aa8db98b-ea2b-4a55-afc2-f0df6ee95dac",
+      "name": "Download video",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "prompt"
+            },
+            {
+              "name": "imageUrl"
+            },
+            {
+              "name": "chat_id"
+            },
+            {
+              "name": "send_id"
+            },
+            {
+              "name": "fileName"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1264,
+        256
+      ],
+      "id": "9bcaf70a-b710-4b26-870a-a6286727934b",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -384,
+        256
+      ],
+      "id": "d4996756-0f92-4161-ac50-ae3fce2c28ae",
+      "name": "Wait",
+      "webhookId": "af0d5817-c989-442a-ab86-ec69d67c7995"
+    }
+  ],
+  "connections": {
+    "Gemini Veo3.1 Generate (LRO)": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Gemini Veo3.1 Generate (LRO)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get status": {
+      "main": [
+        [
+          {
+            "node": "Download video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download video": {
+      "main": [
+        [
+          {
+            "node": "Send video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Get status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "prompt": "Buatkan saya video dengan wanita asia cantik dengan memegang botol parfum 30ml aoraki MORNING RITUAL EXTRAIT DE PARFUM seperti digambar",
+        "imageUrl": "https://storage.googleapis.com/n8n-devotetolove/wa/acosedoyuqebalurewoh.jpg?alt=media",
+        "chat_id": "6281336460250",
+        "send_id": "6283837020220",
+        "fileName": "parfume aoraki"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "13eeed019fcb4656c8a66119bc342721eb7a8c657d2ac705aeba45c45069ce41"
+  },
+  "name": "Create video from image refrence"
+}

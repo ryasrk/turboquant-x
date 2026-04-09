@@ -1,0 +1,593 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "all",
+        "operation": "all",
+        "simplify": true
+      },
+      "type": "n8n-nodes-berita-indonesia.beritaIndonesia",
+      "typeVersion": 1,
+      "position": [
+        608,
+        384
+      ],
+      "id": "4d4baeac-db40-4b8d-8dd2-7f41742fe6f9",
+      "name": "All all"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1728,
+        384
+      ],
+      "id": "af1873aa-4166-408c-ae70-1dc2e8de2cd7",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1728,
+        544
+      ],
+      "id": "297934d6-5484-46c8-bb60-08b4054dc062",
+      "name": "Wait",
+      "webhookId": "6007b4f5-0100-44c0-89e9-b1e9f06fb969"
+    },
+    {
+      "parameters": {
+        "chatId": "2047148935",
+        "text": "={{ $json.judul }}\n\n{{ $json.draft_post }}\n\n{{ $json.rencana_posting }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1728,
+        688
+      ],
+      "id": "6e27d411-aed4-4f46-b151-58aadf4c2e07",
+      "name": "Send a text message1",
+      "webhookId": "0a5bbb8d-2e47-42f4-85ee-8cd3a39e6aa5",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        432,
+        384
+      ],
+      "id": "4243d2d4-4d7e-4081-82d9-3806c6b0a0a1",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "content": "# 🤖 Otomasi n8n: Auto Post Berita ke Multi-Platform\n\nWorkflow ini digunakan untuk mengambil rangkuman berita harian, memisahkan thumbnail dan teks, membersihkan markdown, lalu memformat ulang konten sesuai kebutuhan platform seperti Telegram dan Facebook. Sistem berjalan otomatis terjadwal sehingga proses publikasi menjadi cepat, konsisten, dan efisien.",
+        "height": 816,
+        "width": 1604
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        368,
+        240
+      ],
+      "typeVersion": 1,
+      "id": "803ee8c3-ce56-46be-a7e9-a82fa025dc7a",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ambil semua berita dari node sebelumnya\nconst items = $input.all();\nconst grouped = {};\n\nitems.forEach(item => {\n    const news = item.json;\n    \n    // Ambil identifier (Gunakan fallback jika data kosong)\n    const source = news.source || \"umum\";\n    const category = news.category || \"terbaru\";\n\n    // Inisialisasi struktur jika belum ada\n    if (!grouped[source]) {\n        grouped[source] = {};\n    }\n    if (!grouped[source][category]) {\n        grouped[source][category] = [];\n    }\n\n    // SANITASI: Hapus thumbnail dan hanya ambil data teks penting\n    const { thumbnail, ...cleanData } = news;\n\n    grouped[source][category].push(cleanData);\n});\n\n// SORTING: Urutkan setiap list berita per kategori berdasarkan waktu terbaru\nfor (const s in grouped) {\n  for (const c in grouped[s]) {\n    grouped[s][c].sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));\n  }\n}\n\n// Kembalikan sebagai SATU buah object JSON besar untuk dianalisis AI sekaligus\nreturn { \n  json: {\n    total_berita: items.length,\n    waktu_analisis: new Date().toLocaleString('id-ID'),\n    data: grouped \n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        384
+      ],
+      "id": "3f9ceaa8-6799-4c38-9396-bbb59b05c575",
+      "name": "berita"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sources = Object.values($json.data);\n\nlet titles = [];\n\nfor (const src of sources) {\n  for (const berita of src.terbaru) {\n    titles.push(berita.title);\n  }\n}\n\nreturn [\n  {\n    json: {\n      titles,\n      original: $json.data\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        384
+      ],
+      "id": "2d490833-ee6d-4ae8-9d6e-7c3e4bfef564",
+      "name": "judul"
+    },
+    {
+      "parameters": {
+        "jsCode": "// parse hasil AI\nlet text = $json.text.trim();\nconst hotTitles = JSON.parse(text);\n\n// ambil data berita asli dari node sebelumnya\nconst originalData = $(\"berita\").first().json.data;\n\nlet results = [];\n\nfor (const source of Object.values(originalData)) {\n  for (const berita of source.terbaru) {\n\n    if (hotTitles.includes(berita.title)) {\n      results.push(berita);\n    }\n\n  }\n}\n\nreturn results.map(b => ({ json: b }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        528
+      ],
+      "id": "9a5f74a5-7820-48c0-9f46-3dfb2b895da4",
+      "name": "hotnews"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Berikut daftar judul berita.\n\nPilih 5 yang paling viral dan menarik.\n\nKembalikan hanya JSON array berisi judul.\n\nRULES:\nReturn ONLY raw JSON array.\nDo not use markdown.\nDo not wrap with ```json\n\nTITLES:\n{{JSON.stringify($json.titles)}}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        608,
+        528
+      ],
+      "id": "71b97e47-d2c6-4208-866a-2a00b1762951",
+      "name": "analisis hot news"
+    },
+    {
+      "parameters": {
+        "jsCode": "function formatTelegramHTML(text) {\n\n  // Bold judul utama\n  text = text.replace(/^💥(.+)/m, '<b>💥$1</b>');\n\n  // Bold judul berita (1. Judul)\n  text = text.replace(/^(\\d+\\.\\s.+)$/gm, '<b>$1</b>');\n\n  // Convert semua URL menjadi HTML link\n  text = text.replace(\n    /(https?:\\/\\/[^\\s]+)/g,\n    '<a href=\"$1\">$1</a>'\n  );\n\n  return text;\n}\n\nconst html = formatTelegramHTML($json.text);\n\nreturn [\n  {\n    html: html\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        528
+      ],
+      "id": "013cc1da-fc3a-408b-8675-63850dcc21c1",
+      "name": "to html telegram"
+    },
+    {
+      "parameters": {
+        "jsCode": "function formatFacebook(text) {\n\n  let lines = text.split(\"\\n\");\n  let result = [];\n\n  for (let line of lines) {\n\n    // hapus emoji link\n    line = line.replace(\"🔗 \", \"\");\n\n    // beri jarak sebelum nomor berita\n    if (/^\\d+\\.\\s/.test(line)) {\n      result.push(\"\");\n      result.push(line);\n      continue;\n    }\n\n    // jika URL\n    if (/https?:\\/\\/\\S+/.test(line)) {\n      result.push(line);\n      result.push(\"\");\n      continue;\n    }\n\n    result.push(line);\n  }\n\n  return result.join(\"\\n\").trim();\n}\n\nconst fbText = formatFacebook($json.text);\n\nreturn [\n  {\n    facebook: fbText\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        384
+      ],
+      "id": "b0c65b45-b6b1-400d-a4b6-fa9f91dba6ed",
+      "name": "to facebook text"
+    },
+    {
+      "parameters": {
+        "resource": "schedule",
+        "operation": "create",
+        "accountId": "69a903be4a85f113faa061a8",
+        "description": "={{ $json.facebook }}",
+        "scheduleAt": "={{ $now }}",
+        "additionalOptions": {},
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-repliz-otomation.repliz",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        384
+      ],
+      "id": "6a9baab5-6b1e-438d-bf32-a8224b1f4f86",
+      "name": "post facebook",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "chatId": "2047148935",
+        "text": "={{ $json.html }}",
+        "additionalFields": {
+          "appendAttribution": "={{ false }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1440,
+        528
+      ],
+      "id": "54c43b91-c46d-4681-bdcd-66a70ca07148",
+      "name": "send telegram",
+      "webhookId": "972f5ad3-75cc-4cbb-86ff-55fe7f087070",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Kamu adalah social media editor untuk portal berita viral.\n\nTugasmu:\nBuat satu postingan berita viral dari daftar berita berikut.\n\nTujuan:\n- Membuat orang penasaran\n- Memancing klik\n- Tetap informatif\n- Gaya bahasa media online Indonesia\n\nStruktur output WAJIB:\n\nJudul utama (1 kalimat kuat, emosional, memancing klik)\n\nParagraf pembuka:\nRingkasan situasi berita hari ini yang menarik perhatian publik.\n\nDaftar berita:\nTulis 5 berita dengan format:\n\n1. Judul berita\nRingkasan singkat 1 kalimat\n🔗 link\n\n2. Judul berita\nRingkasan singkat 1 kalimat\n🔗 link\n\ndan seterusnya sampai 5 berita.\n\nPenutup:\n1 kalimat call-to-action agar pembaca klik berita.\n\nAturan penting:\n- Gunakan bahasa Indonesia\n- Gaya jurnalistik ringan dan viral\n- Hindari terlalu panjang\n- Maksimal 3500 karakter (agar aman untuk Telegram)\n- Jangan menambahkan markdown\n- gunakan emoji (maksimal 3)\n- buat alam format markdown untuk bold italic link dll\n- Gunakan format teks biasa yang rapi\n- Link HARUS tetap utuh\n\nDATA BERITA:\n{{ JSON.stringify($json) }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        608,
+        784
+      ],
+      "id": "e3e70577-94c6-4dfe-9ca3-1db12d5fff88",
+      "name": "copywriter facebook"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "seed-2-0-mini-free",
+          "mode": "list",
+          "cachedResultName": "seed-2-0-mini-free"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1296,
+        848
+      ],
+      "id": "8a542564-e3f2-4d80-8262-869d7e7ebb5b",
+      "name": "seed-2-0-mini 3",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "seed-2-0-mini-free",
+          "mode": "list",
+          "cachedResultName": "seed-2-0-mini-free"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        608,
+        944
+      ],
+      "id": "88b42355-fea8-4d8b-84d6-3ed5cb234621",
+      "name": "seed-2-0-mini 2",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "seed-2-0-mini-free",
+          "mode": "list",
+          "cachedResultName": "seed-2-0-mini-free"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        608,
+        672
+      ],
+      "id": "d02154e1-953a-42e7-b9d0-b75b3091022b",
+      "name": "seed-2-0-mini 1",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=### ROLE\nAnda adalah Social Media Strategist ahli engagement untuk Threads.\n\n### INSTRUKSI UTAMA\nBuat 1 draft postingan untuk SETIAP berita yang diberikan.\n\n### ATURAN KETAT\n- Maksimal 500 karakter termasuk spasi dan link.\n- 1 berita = 1 object JSON.\n- Sertakan link di akhir kalimat.\n- Gunakan gaya engaging, natural, memancing diskusi.\n- Maksimal 2 emoji.\n- Jangan gunakan hashtag lebih dari 2.\n- Jangan gunakan markdown atau HTML.\n- Jangan menambahkan teks apa pun di luar JSON.\n\n### FORMAT TANGGAL\n- Gunakan format tepat: YYYY-MM-DD HH:MM\n- Tanpa huruf T\n- Tanpa timezone\n- Zona waktu Asia/Jakarta\n- antara jam 7 pagi - jam 12 siang random\n\n### FORMAT OUTPUT (WAJIB PERSIS)\n\n[\n  {\n    \"judul\": \"string\",\n    \"draft_post\": \"string maksimal 500 karakter termasuk link\",\n    \"rencana_posting\": \"2026-03-05 07:00\"\n  }\n]\n\n### PENTING\n- Output HARUS array JSON valid.\n- Tidak boleh ada teks sebelum atau sesudah JSON.\n- Jika tidak valid JSON, perbaiki terlebih dahulu sebelum mengirim.\n\nDATA:\n{{ JSON.stringify($json.news) }}",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1296,
+        672
+      ],
+      "id": "bd04c65e-4f9e-4056-a202-29f4c419a44e",
+      "name": "copywriter threads"
+    },
+    {
+      "parameters": {
+        "jsCode": "const news = $input.all().map(i => i.json);\n\nreturn [\n  {\n    json: {\n      news\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        672
+      ],
+      "id": "1a4d97d0-e01b-4c01-8839-c9c4ff59b571",
+      "name": "all hot news"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  const rawText = items[0].json.text.trim();\n  const parsed = JSON.parse(rawText);\n\n  return parsed.map(item => ({\n    json: item\n  }));\n} catch (err) {\n  throw new Error(\"JSON tidak valid: \" + err.message);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        832
+      ],
+      "id": "ff5d5dbe-6195-46dd-97c4-16065cff3e5f",
+      "name": "item news thread"
+    },
+    {
+      "parameters": {
+        "resource": "schedule",
+        "operation": "create",
+        "accountId": "69a595ff4c63adf08374e010",
+        "title": "=",
+        "description": "={{ $('Loop Over Items').item.json.draft_post }}",
+        "scheduleAt": "={{ new Date($('Loop Over Items').item.json.rencana_posting + ':00+07:00').toISOString() }}",
+        "additionalOptions": {
+          "templateId": "=69a7a06b4c63adf08383db82"
+        },
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-repliz-otomation.repliz",
+      "typeVersion": 1,
+      "position": [
+        1728,
+        832
+      ],
+      "id": "708789df-4f02-454b-ae27-519e716085cf",
+      "name": "post threads",
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "All all": {
+      "main": [
+        [
+          {
+            "node": "berita",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message1": {
+      "main": [
+        [
+          {
+            "node": "post threads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "All all",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "berita": {
+      "main": [
+        [
+          {
+            "node": "judul",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "judul": {
+      "main": [
+        [
+          {
+            "node": "analisis hot news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "hotnews": {
+      "main": [
+        [
+          {
+            "node": "all hot news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "analisis hot news": {
+      "main": [
+        [
+          {
+            "node": "hotnews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "to html telegram": {
+      "main": [
+        [
+          {
+            "node": "send telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "to facebook text": {
+      "main": [
+        [
+          {
+            "node": "post facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send telegram": {
+      "main": [
+        []
+      ]
+    },
+    "copywriter facebook": {
+      "main": [
+        [
+          {
+            "node": "to html telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "to facebook text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "seed-2-0-mini 3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "copywriter threads",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "seed-2-0-mini 2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "copywriter facebook",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "seed-2-0-mini 1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "analisis hot news",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "copywriter threads": {
+      "main": [
+        [
+          {
+            "node": "item news thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "all hot news": {
+      "main": [
+        [
+          {
+            "node": "copywriter facebook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "copywriter threads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "item news thread": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "post threads": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11b43c84634d4179bb31eed3ad351d18fdb8b2da0c515776699729cc1ec5b611"
+  },
+  "name": "Auto Post Berita multiplatform"
+}
