@@ -1,0 +1,317 @@
+{
+  "name": "Flash Sale Countdown and Notification System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Sale Check Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Flash Sales" },
+        "options": {}
+      },
+      "name": "Read Flash Sale Schedule",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sales = $input.all();\nconst now = new Date();\nconst upcoming = [];\n\nfor (const sale of sales) {\n  const startDate = new Date(sale.json['Start Date']);\n  const hoursUntil = (startDate - now) / (1000 * 60 * 60);\n  \n  if (hoursUntil > 0 && hoursUntil <= 48) {\n    upcoming.push({\n      ...sale.json,\n      hoursUntil: Math.round(hoursUntil),\n      countdownPhase: hoursUntil <= 1 ? 'imminent' : hoursUntil <= 6 ? 'soon' : hoursUntil <= 24 ? 'tomorrow' : 'upcoming',\n      startDate: startDate.toISOString()\n    });\n  }\n}\n\nreturn upcoming.map(s => ({ json: s }));"
+      },
+      "name": "Check Upcoming Sales",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.countdownPhase }}",
+              "operation": "equal",
+              "value2": "tomorrow"
+            }
+          ]
+        }
+      },
+      "name": "Is 24h Before?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "⏰ *Flash Sale Countdown - 24 Hours!*\n\n🏷️ *{{ $json['Sale Name'] }}*\n💰 Discount: {{ $json.Discount }}\n📅 Starts: {{ $json['Start Date'] }}\n⏳ Ends: {{ $json['End Date'] }}\n\n_Get ready! Sale starts in ~{{ $json.hoursUntil }} hours._",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram 24h Countdown",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1130, 120],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Subscribers" },
+        "options": {}
+      },
+      "name": "Get Subscriber Emails",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1130, 260],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.Email }}",
+        "subject": "⏳ Flash Sale starts TOMORROW: {{ $('Check Upcoming Sales').first().json['Sale Name'] }}",
+        "emailType": "html",
+        "message": "<h2>🔥 Flash Sale Alert!</h2><p><strong>{{ $('Check Upcoming Sales').first().json['Sale Name'] }}</strong> starts in 24 hours!</p><p>Discount: <strong>{{ $('Check Upcoming Sales').first().json.Discount }}</strong></p><p>Mark your calendar and be ready to grab the best deals!</p><p><a href=\"#\" style=\"background:#FF5722;color:white;padding:14px 28px;text-decoration:none;border-radius:6px;font-size:16px;\">Set Reminder →</a></p>",
+        "options": {
+          "senderName": "Flash Sale Alerts"
+        }
+      },
+      "name": "Email 24h Countdown",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 260],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.countdownPhase }}",
+              "operation": "equal",
+              "value2": "imminent"
+            }
+          ]
+        }
+      },
+      "name": "Is Imminent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 480]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🚨 *FLASH SALE STARTING NOW!*\n\n🏷️ *{{ $json['Sale Name'] }}*\n💰 {{ $json.Discount }}\n⏳ Hurry! Limited time only!\n\n🛒 Shop now before it's gone!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Sale LIVE Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1130, 440],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json['Activate Webhook URL'] }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "sale_name", "value": "={{ $json['Sale Name'] }}" },
+            { "name": "discount", "value": "={{ $json.Discount }}" },
+            { "name": "action", "value": "activate" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Activate Sale Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1130, 580]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sale-ended",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "name": "Sale Ended Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const saleData = $input.first().json.body;\nconst summary = {\n  saleName: saleData.sale_name,\n  totalOrders: saleData.total_orders || 0,\n  totalRevenue: saleData.total_revenue || 0,\n  topProducts: saleData.top_products || 'N/A',\n  duration: saleData.duration_hours || 'N/A',\n  averageOrderValue: saleData.total_orders > 0 \n    ? (saleData.total_revenue / saleData.total_orders).toFixed(2) \n    : 0,\n  generatedAt: new Date().toISOString()\n};\n\nreturn [{ json: summary }];"
+      },
+      "name": "Generate Post-Sale Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 700]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Sale Reports" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Sale Name": "={{ $json.saleName }}",
+            "Total Orders": "={{ $json.totalOrders }}",
+            "Total Revenue": "={{ $json.totalRevenue }}",
+            "Avg Order Value": "={{ $json.averageOrderValue }}",
+            "Top Products": "={{ $json.topProducts }}",
+            "Duration (hours)": "={{ $json.duration }}",
+            "Report Date": "={{ $json.generatedAt }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save Report to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [690, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "📊 *Flash Sale Report*\n\n🏷️ *{{ $json.saleName }}*\n📦 Orders: {{ $json.totalOrders }}\n💰 Revenue: ${{ $json.totalRevenue }}\n📈 Avg Order: ${{ $json.averageOrderValue }}\n🏆 Top Products: {{ $json.topProducts }}\n⏱️ Duration: {{ $json.duration }}h",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Post-Sale Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [910, 700],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Flash Sale Countdown and Notification System\n\n**How to use:**\n1. Create Google Sheets with these tabs:\n   - 'Flash Sales': Sale Name, Discount, Start Date, End Date, Activate Webhook URL\n   - 'Subscribers': Name, Email\n   - 'Sale Reports': auto-populated after sale\n2. Configure Telegram Bot credentials and set Chat IDs\n3. Set up Gmail OAuth2 for email notifications\n4. Configure 'Activate Sale Webhook' URL to enable discounts on your store\n\n**Countdown Phases:**\n- 48-24h before: 'upcoming' (no notification)\n- 24-6h before: 'tomorrow' → Telegram + Email countdown\n- 6-1h before: 'soon' (optional additional reminder)\n- <1h before: 'imminent' → LIVE alert + activate sale webhook\n\n**Post-Sale:** Send POST to /sale-ended with order/revenue data for summary report.",
+        "width": 440,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -120]
+    }
+  ],
+  "connections": {
+    "Daily Sale Check Trigger": {
+      "main": [
+        [{ "node": "Read Flash Sale Schedule", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Flash Sale Schedule": {
+      "main": [
+        [{ "node": "Check Upcoming Sales", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Upcoming Sales": {
+      "main": [
+        [
+          { "node": "Is 24h Before?", "type": "main", "index": 0 },
+          { "node": "Is Imminent?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Is 24h Before?": {
+      "main": [
+        [
+          { "node": "Telegram 24h Countdown", "type": "main", "index": 0 },
+          { "node": "Get Subscriber Emails", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Get Subscriber Emails": {
+      "main": [
+        [{ "node": "Email 24h Countdown", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Imminent?": {
+      "main": [
+        [
+          { "node": "Telegram Sale LIVE Alert", "type": "main", "index": 0 },
+          { "node": "Activate Sale Webhook", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Sale Ended Webhook": {
+      "main": [
+        [{ "node": "Generate Post-Sale Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Post-Sale Summary": {
+      "main": [
+        [{ "node": "Save Report to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Report to Sheets": {
+      "main": [
+        [{ "node": "Telegram Post-Sale Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

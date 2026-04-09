@@ -1,0 +1,241 @@
+{
+  "name": "Smart Email Categorizer",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "labelIds": ["INBOX"]
+        },
+        "options": {}
+      },
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nconst categoryRules = {\n  invoice: ['invoice', 'payment', 'billing', 'receipt', 'due', 'amount', 'pay'],\n  meeting: ['meeting', 'calendar', 'invite', 'schedule', 'agenda', 'zoom', 'teams', 'call'],\n  task: ['task', 'action required', 'todo', 'deadline', 'assign', 'urgent', 'asap', 'please do'],\n  newsletter: ['unsubscribe', 'newsletter', 'digest', 'weekly', 'update', 'subscribe', 'mailing list']\n};\n\nfor (const item of items) {\n  const subject = (item.json.subject || '').toLowerCase();\n  const body = (item.json.snippet || item.json.textPlain || '').toLowerCase();\n  const combined = subject + ' ' + body;\n  const from = item.json.from || '';\n  \n  let bestCategory = 'uncategorized';\n  let bestScore = 0;\n  \n  for (const [category, keywords] of Object.entries(categoryRules)) {\n    let score = 0;\n    for (const kw of keywords) {\n      if (combined.includes(kw)) score++;\n    }\n    // Subject keywords count double\n    for (const kw of keywords) {\n      if (subject.includes(kw)) score++;\n    }\n    if (score > bestScore) {\n      bestScore = score;\n      bestCategory = category;\n    }\n  }\n  \n  results.push({\n    json: {\n      emailId: item.json.id,\n      from: from,\n      subject: item.json.subject,\n      category: bestCategory,\n      confidence: bestScore,\n      suggestedLabel: bestCategory.charAt(0).toUpperCase() + bestCategory.slice(1),\n      categorizedAt: new Date().toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Classify by Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "outputKey": "invoice", "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "invoice", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "meeting", "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "meeting", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "task", "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "task", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "newsletter", "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "newsletter", "operator": { "type": "string", "operation": "equals" } }] } }
+          ],
+          "fallbackOutput": "extra"
+        }
+      },
+      "name": "Switch Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Invoices" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "name": "Sheets - Invoices",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 100],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Meetings" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "name": "Sheets - Meetings",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 250],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Tasks" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "name": "Sheets - Tasks",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 400],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Newsletters" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "name": "Sheets - Newsletters",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 550],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } }
+    },
+    {
+      "parameters": {
+        "sendTo": "me",
+        "subject": "Label Suggestion: {{ $json.suggestedLabel }} for '{{ $json.subject }}'",
+        "message": "Email categorized:\n\n- **From:** {{ $json.from }}\n- **Subject:** {{ $json.subject }}\n- **Category:** {{ $json.category }}\n- **Confidence Score:** {{ $json.confidence }}\n- **Suggested Label:** {{ $json.suggestedLabel }}",
+        "options": {}
+      },
+      "name": "Gmail Label Suggestion",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Smart Email Categorizer\n\nAutomatically classifies incoming emails into categories.\n\n**Flow:**\n1. Gmail trigger on new inbox email\n2. Code classifies by keyword matching (invoice/meeting/task/newsletter)\n3. Switch routes to category-specific Sheets\n4. Gmail sends label suggestion\n\n**Categories:** invoice, meeting, task, newsletter, uncategorized\n\n**Setup:**\n- Connect Gmail and Sheets credentials\n- Create spreadsheet with sheets: Invoices, Meetings, Tasks, Newsletters\n- Customize keyword rules in the Code node",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Classify by Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify by Keywords": {
+      "main": [
+        [
+          {
+            "node": "Switch Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Category": {
+      "main": [
+        [
+          {
+            "node": "Sheets - Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets - Meetings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets - Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets - Newsletters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets - Invoices": {
+      "main": [
+        [
+          {
+            "node": "Gmail Label Suggestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets - Meetings": {
+      "main": [
+        [
+          {
+            "node": "Gmail Label Suggestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets - Tasks": {
+      "main": [
+        [
+          {
+            "node": "Gmail Label Suggestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets - Newsletters": {
+      "main": [
+        [
+          {
+            "node": "Gmail Label Suggestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,210 @@
+{
+  "name": "Product Review Collector and Sentiment Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "product-review",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "name": "New Review Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "reviewerName", "value": "={{ $json.body.reviewer_name }}" },
+            { "name": "reviewerEmail", "value": "={{ $json.body.reviewer_email }}" },
+            { "name": "productName", "value": "={{ $json.body.product_name }}" },
+            { "name": "rating", "value": "={{ $json.body.rating }}" },
+            { "name": "reviewText", "value": "={{ $json.body.review_text }}" },
+            { "name": "reviewDate", "value": "={{ $now.toISO() }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract Review Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "Analyze the sentiment of this product review and respond with ONLY a JSON object: {\"sentiment\": \"positive|neutral|negative\", \"score\": 0.0-1.0, \"key_themes\": [\"theme1\", \"theme2\"], \"summary\": \"one-line summary\"}\n\nReview: {{ $json.reviewText }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "name": "OpenAI Sentiment Analysis",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const review = $input.first().json;\nconst aiResponse = JSON.parse(review.message?.content || review.text || '{}');\nreturn [{\n  json: {\n    ...items[0].json,\n    sentiment: aiResponse.sentiment || 'unknown',\n    sentimentScore: aiResponse.score || 0,\n    keyThemes: (aiResponse.key_themes || []).join(', '),\n    aiSummary: aiResponse.summary || ''\n  }\n}];"
+      },
+      "name": "Parse Sentiment Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Reviews" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.reviewDate }}",
+            "Reviewer": "={{ $json.reviewerName }}",
+            "Product": "={{ $json.productName }}",
+            "Rating": "={{ $json.rating }}",
+            "Review": "={{ $json.reviewText }}",
+            "Sentiment": "={{ $json.sentiment }}",
+            "Sentiment Score": "={{ $json.sentimentScore }}",
+            "Key Themes": "={{ $json.keyThemes }}",
+            "AI Summary": "={{ $json.aiSummary }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1130, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.rating }}",
+              "operation": "smallerEqual",
+              "value2": 2
+            }
+          ]
+        }
+      },
+      "name": "Is Low Rating?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.reviewerEmail }}",
+        "subject": "We're sorry about your experience with {{ $json.productName }}",
+        "emailType": "html",
+        "message": "<h2>Dear {{ $json.reviewerName }},</h2><p>Thank you for taking the time to share your feedback about <strong>{{ $json.productName }}</strong>.</p><p>We're sorry to hear that your experience didn't meet your expectations. Your feedback is incredibly valuable to us.</p><p>A member of our customer support team will reach out to you within 24 hours to address your concerns.</p><p>In the meantime, if there's anything we can do, please don't hesitate to reply to this email.</p><p>Best regards,<br>Customer Experience Team</p>",
+        "options": {
+          "senderName": "Customer Support"
+        }
+      },
+      "name": "Auto-Reply to Negative Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1570, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "⚠️ *Low Rating Alert*\n\n*Product:* {{ $json.productName }}\n*Reviewer:* {{ $json.reviewerName }}\n*Rating:* {{ $json.rating }}/5\n*Sentiment:* {{ $json.sentiment }} ({{ $json.sentimentScore }})\n\n*Review:* {{ $json.reviewText }}\n\n*AI Summary:* {{ $json.aiSummary }}\n*Key Themes:* {{ $json.keyThemes }}\n\n_Auto-reply sent to customer._",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Low Rating Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1790, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Product Review Collector and Sentiment Analysis\n\n**How to use:**\n1. Configure the Webhook URL in your review platform\n2. Set up OpenAI API credentials for sentiment analysis\n3. Connect Google Sheets for review logging\n4. Set up Gmail OAuth2 for auto-replies\n5. Configure Telegram Bot for low-rating alerts\n6. Set the Telegram Chat ID for notifications\n\n**Webhook payload expected:**\n```json\n{\n  \"reviewer_name\": \"Jane Smith\",\n  \"reviewer_email\": \"jane@example.com\",\n  \"product_name\": \"Widget Pro\",\n  \"rating\": 4,\n  \"review_text\": \"Great product but shipping was slow.\"\n}\n```\n\n**Behavior:**\n- All reviews logged to Sheets with AI sentiment\n- Ratings ≤ 2 trigger auto-reply + Telegram alert\n- Ratings > 2 only logged (no alert)",
+        "width": 420,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -120]
+    }
+  ],
+  "connections": {
+    "New Review Webhook": {
+      "main": [
+        [{ "node": "Extract Review Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Review Data": {
+      "main": [
+        [{ "node": "OpenAI Sentiment Analysis", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Sentiment Analysis": {
+      "main": [
+        [{ "node": "Parse Sentiment Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Sentiment Result": {
+      "main": [
+        [{ "node": "Log to Google Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [{ "node": "Is Low Rating?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Low Rating?": {
+      "main": [
+        [{ "node": "Auto-Reply to Negative Review", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Auto-Reply to Negative Review": {
+      "main": [
+        [{ "node": "Telegram Low Rating Alert", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

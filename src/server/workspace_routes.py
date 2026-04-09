@@ -34,6 +34,13 @@ from src.server.n8n_auth import (
     verify_n8n_access,
 )
 from src.server.n8n_setup import ensure_n8n_ready
+from src.server.n8n_templates import (
+    build_template_index,
+    get_categories,
+    get_template_by_id,
+    search_templates,
+    strip_credentials,
+)
 from src.server.workflow_designer import (
     generate_workflow_via_llm,
     n8n_import_workflow,
@@ -524,6 +531,125 @@ async def list_workspace_models_endpoint():
         })
 
     return {"groups": groups}
+
+
+# ── Template routes ──────────────────────────────────────────────────
+
+class LoadTemplateRequest(BaseModel):
+    template_id: int = Field(..., description="Template index ID to load")
+
+
+@router.get("/templates")
+async def list_templates(
+    q: str | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    _user: dict = Depends(get_current_user),
+):
+    """List or search available workflow templates.
+
+    Query params:
+      - q: keyword search (name, node types, category)
+      - category: filter by category name
+      - limit: max results (default 50)
+    """
+    build_template_index()
+    if q:
+        results = search_templates(q, category=category, limit=limit)
+    elif category:
+        results = search_templates("", category=category, limit=limit)
+        if not results:
+            # Fallback: filter index by category directly
+            from src.server.n8n_templates import get_template_index
+            all_tpl = get_template_index()
+            results = [t for t in all_tpl if t["category"].lower() == category.lower()][:limit]
+    else:
+        from src.server.n8n_templates import get_template_index
+        results = get_template_index()[:limit]
+    return {"templates": results, "total": len(results)}
+
+
+@router.get("/templates/categories")
+async def list_template_categories(_user: dict = Depends(get_current_user)):
+    """List all available template categories."""
+    build_template_index()
+    return {"categories": get_categories()}
+
+
+@router.get("/templates/{template_id}")
+async def get_template_detail(template_id: int, _user: dict = Depends(get_current_user)):
+    """Get a single template's full details including workflow JSON."""
+    tpl = get_template_by_id(template_id)
+    if tpl is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return tpl
+
+
+@router.post("/{workspace_id}/load-template")
+async def load_template_into_workspace(
+    workspace_id: str,
+    body: LoadTemplateRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Load a template workflow into a workspace.
+
+    Fetches the template, strips credentials, stores it as a design,
+    and optionally imports into n8n if available.
+    """
+    ws = _get_user_workspace(workspace_id, user)
+
+    if ws["status"] not in ("draft", "designed", "rejected", "approved", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot load template in state '{ws['status']}'.",
+        )
+
+    tpl = get_template_by_id(body.template_id)
+    if tpl is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    workflow_json = strip_credentials(tpl["workflow"])
+    template_name = tpl.get("name", "Untitled Template")
+
+    # Store as a design record
+    prompt = f"[Template] {template_name}"
+    design = create_workspace_design(workspace_id, prompt)
+    update_workspace_design(
+        design["id"],
+        status="designed",
+        result_data=json.dumps(workflow_json),
+    )
+
+    # Try to import to n8n
+    workflow_id: str | None = None
+    n8n_ready = await ensure_n8n_ready()
+    if n8n_ready:
+        try:
+            n8n_base = os.environ.get("N8N_BACKEND_URL", "http://localhost:5678")
+            n8n_key = os.environ.get("N8N_API_KEY", "")
+            import_result = await n8n_import_workflow(workflow_json, n8n_base, n8n_key)
+            workflow_id = import_result.get("id")
+            if workflow_id:
+                update_workspace_design(design["id"], n8n_workflow_id=workflow_id)
+                update_workspace(workspace_id, user["user_id"], status="designed", n8n_workflow_id=workflow_id)
+        except Exception as exc:
+            logger.warning("Could not import template to n8n: %s", exc)
+
+    if not workflow_id:
+        update_workspace(workspace_id, user["user_id"], status="designed")
+
+    # Check for missing credentials
+    cred_check = await _check_missing_credentials(workflow_json)
+
+    return {
+        "ok": True,
+        "design_id": design["id"],
+        "workflow_id": workflow_id,
+        "template_name": template_name,
+        "node_count": len(workflow_json.get("nodes", [])),
+        "status": "designed",
+        "missing_credentials": cred_check.get("missing", []),
+    }
 
 
 @router.get("")

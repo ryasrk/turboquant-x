@@ -1,0 +1,141 @@
+{
+  "name": "Gmail to Notion Task Creator",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Gmail to Notion Task Creator\nAutomatically creates Notion tasks from incoming Gmail messages.\n\n**Setup:**\n1. Configure Gmail trigger with label filter\n2. Set Notion tasks database ID\n3. Adjust parsing logic in Code node as needed"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute" }]
+        },
+        "filters": {
+          "labelIds": ["INBOX"]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Parse Email",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const subject = item.json.subject || 'Untitled Task';\n  const body = item.json.snippet || item.json.textPlain || '';\n  const from = item.json.from?.value?.[0]?.address || item.json.from || 'Unknown';\n  const date = item.json.date || new Date().toISOString();\n\n  // Extract priority from subject\n  let priority = 'Medium';\n  const subjectLower = subject.toLowerCase();\n  if (subjectLower.includes('[urgent]') || subjectLower.includes('[high]')) priority = 'High';\n  if (subjectLower.includes('[low]')) priority = 'Low';\n\n  // Clean subject\n  const cleanSubject = subject.replace(/\\[(urgent|high|low|task)\\]/gi, '').trim();\n\n  return {\n    json: {\n      taskName: cleanSubject,\n      description: body.substring(0, 2000),\n      sender: from,\n      receivedDate: date,\n      priority: priority,\n      originalSubject: subject\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Task",
+      "type": "n8n-nodes-base.notion",
+      "position": [680, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.taskName }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "To Do"
+            },
+            {
+              "name": "Priority",
+              "type": "select",
+              "select": "={{ $json.priority }}"
+            },
+            {
+              "name": "Source",
+              "type": "rich_text",
+              "richText": "=Email from {{ $json.sender }}"
+            },
+            {
+              "name": "Date",
+              "type": "date",
+              "date": "={{ $json.receivedDate }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "={{ $json.description }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Gmail Reply Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "position": [900, 400],
+      "parameters": {
+        "sendTo": "={{ $('Parse Email').item.json.sender }}",
+        "subject": "=Re: {{ $('Parse Email').item.json.originalSubject }}",
+        "message": "=Your email has been converted to a Notion task.\n\nTask: {{ $('Parse Email').item.json.taskName }}\nPriority: {{ $('Parse Email').item.json.priority }}\nStatus: To Do\n\nThis is an automated confirmation.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [{ "node": "Parse Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Email": {
+      "main": [
+        [{ "node": "Notion Create Task", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Task": {
+      "main": [
+        [{ "node": "Gmail Reply Confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

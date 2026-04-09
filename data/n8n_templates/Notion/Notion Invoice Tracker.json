@@ -1,0 +1,218 @@
+{
+  "name": "Notion Invoice Tracker",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Invoice Tracker\nTrack invoices in Notion, set due dates, and send email reminders for overdue invoices.\n\n**Setup:**\n1. Configure webhook for invoice creation\n2. Set Notion invoices database ID\n3. Adjust overdue check schedule\n4. Set email recipients for reminders"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook New Invoice",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "new-invoice",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Invoice",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "=Invoice #{{ $json.body.invoiceNumber || $json.invoiceNumber || 'N/A' }}"
+            },
+            {
+              "name": "Client",
+              "type": "rich_text",
+              "richText": "={{ $json.body.client || $json.client || '' }}"
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "number": "={{ $json.body.amount || $json.amount || 0 }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "Unpaid"
+            },
+            {
+              "name": "Issue Date",
+              "type": "date",
+              "date": "={{ $now.toISO() }}"
+            },
+            {
+              "name": "Due Date",
+              "type": "date",
+              "date": "={{ $now.plus({ days: Number($json.body.netDays || $json.netDays || 30) }).toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Schedule Check Overdue",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 640],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query Overdue",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 640],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Due Date|date",
+              "condition": "before",
+              "returnType": "date",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            },
+            {
+              "key": "Status|select",
+              "condition": "equals",
+              "returnType": "string",
+              "value": "Unpaid"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Format Overdue List",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 640],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (items.length === 0) return [{ json: { hasOverdue: false } }];\n\nconst overdueList = items.map(item => {\n  const props = item.json.properties || {};\n  const name = props['Name']?.title?.map(t => t.plain_text).join('') || 'Unknown';\n  const client = props['Client']?.rich_text?.map(t => t.plain_text).join('') || '';\n  const amount = props['Amount']?.number || 0;\n  const dueDate = props['Due Date']?.date?.start || '';\n  const daysPastDue = dueDate ? Math.floor((Date.now() - new Date(dueDate).getTime()) / (1000 * 60 * 60 * 24)) : 0;\n\n  return { name, client, amount, dueDate, daysPastDue };\n});\n\nconst totalOverdue = overdueList.reduce((sum, inv) => sum + inv.amount, 0);\nconst summary = overdueList.map(inv =>\n  `• ${inv.name} — ${inv.client} — $${inv.amount.toFixed(2)} — ${inv.daysPastDue} days overdue`\n).join('\\n');\n\nreturn [{\n  json: {\n    hasOverdue: true,\n    count: overdueList.length,\n    totalOverdue,\n    summary,\n    overdueList\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Check Has Overdue",
+      "type": "n8n-nodes-base.if",
+      "position": [900, 640],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasOverdue }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Email Overdue Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1120, 580],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=⚠️ {{ $json.count }} Overdue Invoice(s) — Total ${{ $json.totalOverdue.toFixed(2) }}",
+        "message": "=Overdue Invoice Report\n\nYou have {{ $json.count }} overdue invoice(s) totaling ${{ $json.totalOverdue.toFixed(2) }}:\n\n{{ $json.summary }}\n\nPlease follow up with these clients.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Webhook New Invoice": {
+      "main": [
+        [{ "node": "Notion Create Invoice", "type": "main", "index": 0 }]
+      ]
+    },
+    "Schedule Check Overdue": {
+      "main": [
+        [{ "node": "Notion Query Overdue", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query Overdue": {
+      "main": [
+        [{ "node": "Format Overdue List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Overdue List": {
+      "main": [
+        [{ "node": "Check Has Overdue", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Has Overdue": {
+      "main": [
+        [{ "node": "Email Overdue Reminder", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

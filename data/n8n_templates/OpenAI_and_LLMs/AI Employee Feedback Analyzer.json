@@ -1,0 +1,168 @@
+{
+  "name": "AI Employee Feedback Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "months", "monthsInterval": 1 }] }
+      },
+      "name": "Schedule - Monthly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "options": { "range": "" }
+      },
+      "name": "Google Sheets - Read Survey",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst responses = items.map((item, i) => {\n  const d = item.json;\n  return `[${i+1}] Department: ${d.Department || d.department || 'N/A'} | Rating: ${d.Rating || d.rating || d.Score || 'N/A'} | Feedback: ${d.Feedback || d.feedback || d.Comments || d.comments || ''}`;\n}).join('\\n');\nreturn [{ json: { surveyData: responses, responseCount: items.length, month: new Date().toISOString().substring(0, 7) } }];"
+      },
+      "name": "Code - Prepare Survey Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an HR analytics expert. Analyze {{ $json.responseCount }} employee survey responses and provide insights.\n\nExtract:\n1. Major themes (positive and negative)\n2. Sentiment breakdown by department (if data available)\n3. Key action items for management\n4. Employee satisfaction trends\n5. Risk areas requiring immediate attention\n\nReturn JSON:\n{\n  \"overall_sentiment\": \"positive/negative/mixed\",\n  \"satisfaction_score\": 7.5,\n  \"themes\": [\n    {\"theme\": \"...\", \"sentiment\": \"positive/negative\", \"frequency\": \"high/medium/low\", \"sample_quotes\": [\"...\"]}\n  ],\n  \"department_insights\": [\n    {\"department\": \"...\", \"sentiment\": \"...\", \"key_issues\": [\"...\"]}\n  ],\n  \"action_items\": [\n    {\"priority\": \"high/medium/low\", \"action\": \"...\", \"department\": \"all/specific\", \"timeline\": \"immediate/30days/90days\"}\n  ],\n  \"risk_areas\": [\"...\"],\n  \"positive_highlights\": [\"...\"],\n  \"executive_summary\": \"3-4 sentence summary for leadership\"\n}\n\nSurvey Responses:\n{{ $json.surveyData }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 3000
+        }
+      },
+      "name": "OpenAI - Analyze Feedback",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { executive_summary: aiResponse, satisfaction_score: 0, themes: [], action_items: [], risk_areas: [] };\n}\n\nconst themesSummary = (parsed.themes || []).map(t => `[${t.sentiment}] ${t.theme} (${t.frequency} frequency)`).join('\\n');\nconst actionsSummary = (parsed.action_items || []).map(a => `[${a.priority}] ${a.action} — ${a.department} (${a.timeline})`).join('\\n');\n\nreturn [{\n  json: {\n    month: items[0].json.month || new Date().toISOString().substring(0, 7),\n    responseCount: items[0].json.responseCount || 0,\n    overallSentiment: parsed.overall_sentiment || '',\n    satisfactionScore: parsed.satisfaction_score || 0,\n    themes: themesSummary,\n    actionItems: actionsSummary,\n    riskAreas: Array.isArray(parsed.risk_areas) ? parsed.risk_areas.join('; ') : '',\n    positiveHighlights: Array.isArray(parsed.positive_highlights) ? parsed.positive_highlights.join('; ') : '',\n    executiveSummary: parsed.executive_summary || ''\n  }\n}];"
+      },
+      "name": "Code - Format Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Month": "={{ $json.month }}",
+            "Responses": "={{ $json.responseCount }}",
+            "Overall Sentiment": "={{ $json.overallSentiment }}",
+            "Satisfaction Score": "={{ $json.satisfactionScore }}",
+            "Key Themes": "={{ $json.themes }}",
+            "Action Items": "={{ $json.actionItems }}",
+            "Risk Areas": "={{ $json.riskAreas }}",
+            "Executive Summary": "={{ $json.executiveSummary }}"
+          },
+          "schema": [
+            { "id": "Month", "type": "string", "display": true },
+            { "id": "Responses", "type": "string", "display": true },
+            { "id": "Overall Sentiment", "type": "string", "display": true },
+            { "id": "Satisfaction Score", "type": "string", "display": true },
+            { "id": "Key Themes", "type": "string", "display": true },
+            { "id": "Action Items", "type": "string", "display": true },
+            { "id": "Risk Areas", "type": "string", "display": true },
+            { "id": "Executive Summary", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Monthly Report",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "hr@example.com",
+        "subject": "=📊 Employee Feedback Report: {{ $json.month }} (Satisfaction: {{ $json.satisfactionScore }}/10)",
+        "message": "=<h1>Monthly Employee Feedback Analysis</h1>\n<p><strong>Period:</strong> {{ $json.month }} | <strong>Responses:</strong> {{ $json.responseCount }}</p>\n<p><strong>Overall Sentiment:</strong> {{ $json.overallSentiment }} | <strong>Satisfaction:</strong> {{ $json.satisfactionScore }}/10</p>\n\n<h2>Executive Summary</h2>\n<p>{{ $json.executiveSummary }}</p>\n\n<h2>🟢 Positive Highlights</h2>\n<p>{{ $json.positiveHighlights }}</p>\n\n<h2>📋 Key Themes</h2>\n<pre>{{ $json.themes }}</pre>\n\n<h2>⚡ Action Items</h2>\n<pre>{{ $json.actionItems }}</pre>\n\n<h2>⚠️ Risk Areas</h2>\n<p>{{ $json.riskAreas }}</p>",
+        "options": {}
+      },
+      "name": "Gmail - Send to HR",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1750, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 900,
+        "height": 200,
+        "content": "## AI Employee Feedback Analyzer\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set 'Read Survey' node to your employee survey responses spreadsheet (needs Department, Rating, Feedback columns)\n3. Set 'Monthly Report' node to a separate report spreadsheet\n4. Update HR email address\n\nRuns monthly: reads all survey responses, uses GPT-4o for theme extraction and sentiment analysis, generates report in Sheets, emails HR leadership."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Schedule - Monthly": {
+      "main": [[{ "node": "Google Sheets - Read Survey", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Read Survey": {
+      "main": [[{ "node": "Code - Prepare Survey Data", "type": "main", "index": 0 }]]
+    },
+    "Code - Prepare Survey Data": {
+      "main": [[{ "node": "OpenAI - Analyze Feedback", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Analyze Feedback": {
+      "main": [[{ "node": "Code - Format Report", "type": "main", "index": 0 }]]
+    },
+    "Code - Format Report": {
+      "main": [[{ "node": "Google Sheets - Monthly Report", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Monthly Report": {
+      "main": [[{ "node": "Gmail - Send to HR", "type": "main", "index": 0 }]]
+    }
+  }
+}

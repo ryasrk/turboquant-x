@@ -1,0 +1,89 @@
+{
+  "name": "Drive Large File Alert and Cleanup",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "List All Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "list",
+        "folderId": { "__rl": true, "mode": "list", "value": "" },
+        "options": {
+          "fields": ["name", "id", "size", "mimeType", "owners", "modifiedTime", "webViewLink"]
+        }
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Filter Large Files",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst threshold = 100 * 1024 * 1024; // 100MB in bytes\n\nconst largeFiles = items.filter(item => {\n  const size = Number(item.json.size || 0);\n  return size > threshold;\n}).map(item => {\n  const sizeMB = Math.round(Number(item.json.size) / (1024 * 1024) * 100) / 100;\n  return {\n    json: {\n      name: item.json.name,\n      id: item.json.id,\n      sizeMB,\n      mimeType: item.json.mimeType,\n      owner: item.json.owners?.[0]?.emailAddress || 'Unknown',\n      lastModified: item.json.modifiedTime,\n      link: item.json.webViewLink || ''\n    }\n  };\n});\n\nreturn largeFiles.length > 0 ? largeFiles : [{ json: { noLargeFiles: true, message: 'No files over 100MB found' } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Report Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "LargeFileReport" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail to Owner",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1180, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Large Files Alert - {{ $input.all().length }} files over 100MB",
+        "message": "=Weekly Large File Report\n\nThe following files exceed 100MB and may be candidates for archival:\n\n{{ $input.all().map(i => `• ${i.json.name} (${i.json.sizeMB}MB) - Owner: ${i.json.owner}`).join('\\n') }}\n\nPlease review and consider archiving unused large files to free up storage.\n\nFull report available in the LargeFileReport sheet.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Drive Large File Alert and Cleanup\nWeekly scan of Google Drive for files over 100MB. Reports findings to a Sheet, emails the file owner with a list, and suggests archival for storage optimization."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": { "main": [[{ "node": "List All Files", "type": "main", "index": 0 }]] },
+    "List All Files": { "main": [[{ "node": "Filter Large Files", "type": "main", "index": 0 }]] },
+    "Filter Large Files": { "main": [[{ "node": "Write Report Sheet", "type": "main", "index": 0 }]] },
+    "Write Report Sheet": { "main": [[{ "node": "Gmail to Owner", "type": "main", "index": 0 }]] }
+  }
+}

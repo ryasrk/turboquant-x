@@ -1,0 +1,149 @@
+{
+  "name": "Social Media Bio Link Tracker",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 20}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Link Click Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api-ssl.bitly.com/v4/bitlinks/{{ $json.bitlink_id }}/clicks/summary",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "unit", "value": "day"},
+            {"name": "units", "value": "1"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [650, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Bio Link Analytics",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ new Date().toISOString().split('T')[0] }}",
+            "total_clicks": "={{ $json.total_clicks }}",
+            "link": "={{ $json.link || '' }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Send Telegram Stats",
+      "type": "n8n-nodes-base.telegram",
+      "position": [850, 300],
+      "parameters": {
+        "chatId": "",
+        "text": "📊 Daily Bio Link Stats\n\nClicks today: {{ $json.total_clicks }}\nDate: {{ new Date().toISOString().split('T')[0] }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Check If Sunday",
+      "type": "n8n-nodes-base.if",
+      "position": [1050, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ new Date().getDay() }}",
+              "value2": "0",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Weekly Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1250, 250],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "Weekly Bio Link Performance Report",
+        "message": "Your weekly bio link performance report is ready.\n\nCheck the Google Sheet for full click analytics and daily trends.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Social Media Bio Link Tracker\nRuns daily at 8 PM. Checks bio link click stats (via Bitly API), logs to Google Sheets, sends daily Telegram stats, and emails a weekly report on Sundays."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[{"node": "Get Link Click Stats", "type": "main", "index": 0}]]
+    },
+    "Get Link Click Stats": {
+      "main": [[{"node": "Save to Sheets", "type": "main", "index": 0}]]
+    },
+    "Save to Sheets": {
+      "main": [[{"node": "Send Telegram Stats", "type": "main", "index": 0}]]
+    },
+    "Send Telegram Stats": {
+      "main": [[{"node": "Check If Sunday", "type": "main", "index": 0}]]
+    },
+    "Check If Sunday": {
+      "main": [
+        [{"node": "Weekly Email Report", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  }
+}

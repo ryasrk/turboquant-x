@@ -1,0 +1,158 @@
+{
+  "name": "Newsletter Subscriber Welcome Sequence",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-subscriber",
+        "options": {}
+      },
+      "name": "Webhook - New Subscriber",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.email }}",
+        "subject": "Welcome to our newsletter! 🎉",
+        "message": "Hi {{ $json.body.name }},\n\nWelcome aboard! We're thrilled to have you as part of our community.\n\nHere's what you can expect:\n- Weekly insights and tips\n- Exclusive content for subscribers\n- Early access to new features\n\nIf you have any questions, just reply to this email.\n\nCheers!",
+        "options": {}
+      },
+      "name": "Gmail Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "days"
+      },
+      "name": "Wait 2 Days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook - New Subscriber').item.json.body.email }}",
+        "subject": "5 Tips to Get the Most Out of Your Subscription",
+        "message": "Hi {{ $('Webhook - New Subscriber').item.json.body.name }},\n\nHope you've been enjoying the newsletter! Here are 5 tips to get the most value:\n\n1. **Check your inbox regularly** — We send content every week\n2. **Reply to any email** — We read every response\n3. **Share with colleagues** — Great content is better shared\n4. **Bookmark favorites** — Build your knowledge library\n5. **Join our community** — Connect with other subscribers\n\nHappy reading!",
+        "options": {}
+      },
+      "name": "Gmail Tips Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "days"
+      },
+      "name": "Wait 5 Days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook - New Subscriber').item.json.body.email }}",
+        "subject": "Unlock Premium Features ✨",
+        "message": "Hi {{ $('Webhook - New Subscriber').item.json.body.name }},\n\nYou've been with us for a week now — great to have you!\n\nDid you know we offer premium features?\n\n**What's included:**\n- Advanced analytics dashboard\n- Priority support\n- Exclusive webinars and workshops\n- Custom integrations\n\n**Special offer for new subscribers:** Get 20% off your first month with code WELCOME20.\n\nReady to level up? Reply to this email and we'll get you started.\n\nBest regards",
+        "options": {}
+      },
+      "name": "Gmail Feature Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Newsletter Subscriber Welcome Sequence\n\n3-email drip campaign for new subscribers.\n\n**Flow:**\n1. Webhook receives new subscriber data\n2. Immediately send welcome email\n3. Wait 2 days → send tips email\n4. Wait 5 more days → send feature/upsell email\n\n**Setup:**\n- Connect Gmail OAuth2 credentials\n- POST to webhook: {\"email\": \"...\", \"name\": \"...\"}\n- Customize email content and timing as needed",
+        "width": 380,
+        "height": 260
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Webhook - New Subscriber": {
+      "main": [
+        [
+          {
+            "node": "Gmail Welcome Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Welcome Email": {
+      "main": [
+        [
+          {
+            "node": "Wait 2 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2 Days": {
+      "main": [
+        [
+          {
+            "node": "Gmail Tips Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Tips Email": {
+      "main": [
+        [
+          {
+            "node": "Wait 5 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 5 Days": {
+      "main": [
+        [
+          {
+            "node": "Gmail Feature Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,224 @@
+{
+  "name": "Slack Sprint Retrospective Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sprint-end",
+        "options": {}
+      },
+      "name": "Sprint End Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0].json;\nconst sprintName = data.sprintName || `Sprint ${Math.floor(Date.now() / 1000)}`;\nconst channel = data.channel || '#engineering';\nconst retroId = `retro-${Date.now()}`;\n\nreturn [{json: {\n  sprintName,\n  channel,\n  retroId,\n  startedAt: new Date().toISOString()\n}}];"
+      },
+      "name": "Prepare Retro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $json.channel }}",
+          "mode": "name"
+        },
+        "text": ":recycle: *Sprint Retrospective — {{ $json.sprintName }}*\n\nPlease share your thoughts in threads below! :point_down:\n\n*Retro ID:* {{ $json.retroId }}",
+        "otherOptions": {}
+      },
+      "name": "Post Retro Header",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $('Prepare Retro').item.json.channel }}",
+          "mode": "name"
+        },
+        "text": ":white_check_mark: *What went well?*\n\nReply in thread with things that worked great this sprint!",
+        "otherOptions": {}
+      },
+      "name": "Post Went Well",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $('Prepare Retro').item.json.channel }}",
+          "mode": "name"
+        },
+        "text": ":construction: *What could be improved?*\n\nReply in thread with areas for improvement!",
+        "otherOptions": {}
+      },
+      "name": "Post Improve",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 340],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $('Prepare Retro').item.json.channel }}",
+          "mode": "name"
+        },
+        "text": ":dart: *Action items for next sprint*\n\nReply in thread with specific actions we should take!",
+        "otherOptions": {}
+      },
+      "name": "Post Actions",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 480],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "retro-collect",
+        "options": {}
+      },
+      "name": "Collect Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 600]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Retrospectives",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Compile",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Sprint Retrospective Bot\n\nStructured sprint retro collection.\n\n**Retro Flow:**\n1. Jira/webhook triggers sprint end\n2. Post retro header message\n3. Post three category prompts:\n   - What went well\n   - What to improve\n   - Action items\n4. Collect threaded responses\n5. Compile to Google Sheets\n\n**Webhook payload:**\n```json\n{\n  \"sprintName\": \"Sprint 42\",\n  \"channel\": \"#engineering\"\n}\n```",
+        "width": 340,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 220]
+    }
+  ],
+  "connections": {
+    "Sprint End Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Retro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Retro": {
+      "main": [
+        [
+          {
+            "node": "Post Retro Header",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Retro Header": {
+      "main": [
+        [
+          {
+            "node": "Post Went Well",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post Improve",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Webhook": {
+      "main": [
+        [
+          {
+            "node": "Sheets Compile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

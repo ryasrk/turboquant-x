@@ -1,0 +1,217 @@
+{
+  "name": "Slack Incident Response Commander",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "incident-trigger",
+        "options": {}
+      },
+      "name": "Incident Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst incident = items[0].json;\nconst severity = incident.severity || 'P2';\nconst title = incident.title || 'Untitled Incident';\nconst channelName = `inc-${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20)}`;\n\nreturn [{json: {\n  channelName,\n  severity,\n  title,\n  description: incident.description || '',\n  reporter: incident.reporter || 'system',\n  service: incident.service || 'unknown',\n  timestamp: new Date().toISOString()\n}}];"
+      },
+      "name": "Prepare Incident Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "channel",
+        "operation": "create",
+        "channel": "={{ $json.channelName }}",
+        "additionalFields": {
+          "purpose": "={{ 'Incident: ' + $json.title + ' | Severity: ' + $json.severity }}"
+        }
+      },
+      "name": "Create Incident Channel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "channel",
+        "operation": "invite",
+        "channelId": "={{ $json.id }}",
+        "userIds": "={{ $('Prepare Incident Data').item.json.reporter }}"
+      },
+      "name": "Invite Response Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $('Create Incident Channel').item.json.id }}",
+          "mode": "id"
+        },
+        "text": ":rotating_light: *INCIDENT DECLARED*\n\n*Title:* {{ $('Prepare Incident Data').item.json.title }}\n*Severity:* {{ $('Prepare Incident Data').item.json.severity }}\n*Service:* {{ $('Prepare Incident Data').item.json.service }}\n*Reporter:* <@{{ $('Prepare Incident Data').item.json.reporter }}>\n*Time:* {{ $('Prepare Incident Data').item.json.timestamp }}\n\n---\n\n:book: *Runbook Steps:*\n1. Acknowledge incident and assign Incident Commander\n2. Assess impact and update severity if needed\n3. Communicate to stakeholders in #incidents\n4. Begin investigation and mitigation\n5. Post updates every 30 minutes\n6. Resolve and schedule post-mortem",
+        "otherOptions": {}
+      },
+      "name": "Post Runbook",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#incidents",
+          "mode": "name"
+        },
+        "text": ":rotating_light: *New Incident:* {{ $('Prepare Incident Data').item.json.title }}\n*Severity:* {{ $('Prepare Incident Data').item.json.severity }}\n*Channel:* #{{ $('Prepare Incident Data').item.json.channelName }}",
+        "otherOptions": {}
+      },
+      "name": "Notify Incidents Channel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1360, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Incident Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Incident Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1580, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Incident Response Commander\n\nAutomated incident response workflow.\n\n**Flow:**\n1. Receive incident via webhook\n2. Create dedicated incident channel\n3. Invite response team\n4. Post runbook and incident details\n5. Notify #incidents channel\n6. Log to Google Sheets\n\n**Webhook payload:**\n```json\n{\n  \"title\": \"DB Connection Timeout\",\n  \"severity\": \"P1\",\n  \"service\": \"api-gateway\",\n  \"description\": \"...\",\n  \"reporter\": \"U12345\"\n}\n```",
+        "width": 360,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 220]
+    }
+  ],
+  "connections": {
+    "Incident Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Incident Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Incident Data": {
+      "main": [
+        [
+          {
+            "node": "Create Incident Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Incident Channel": {
+      "main": [
+        [
+          {
+            "node": "Invite Response Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invite Response Team": {
+      "main": [
+        [
+          {
+            "node": "Post Runbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Runbook": {
+      "main": [
+        [
+          {
+            "node": "Notify Incidents Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Incidents Channel": {
+      "main": [
+        [
+          {
+            "node": "Sheets Incident Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "name": "Document Digital Signature Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "request-signature",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-doc",
+      "name": "Webhook with Doc",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.docusign.com/v2.1/envelopes",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ documents: [{ documentBase64: $binary.data?.base64 || '', name: $json.body.documentName || 'document.pdf', fileExtension: 'pdf', documentId: '1' }], recipients: { signers: [{ email: $json.body.signerEmail, name: $json.body.signerName, recipientId: '1', tabs: { signHereTabs: [{ documentId: '1', pageNumber: '1', xPosition: '100', yPosition: '700' }] } }] }, status: 'sent', emailSubject: 'Please sign: ' + ($json.body.documentName || 'Document') }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "send-esign",
+      "name": "HTTP Send for E-Sign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "signature-callback",
+        "options": {}
+      },
+      "id": "webhook-callback",
+      "name": "Webhook Callback Signed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 520]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "=signed_{{ $json.body.documentName || 'document' }}_{{ new Date().toISOString().split('T')[0] }}",
+        "options": {}
+      },
+      "id": "drive-save",
+      "name": "Drive Save Signed",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [460, 520],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "DocumentName", "value": "={{ $json.body.documentName }}" },
+              { "column": "SignerName", "value": "={{ $json.body.signerName }}" },
+              { "column": "SignerEmail", "value": "={{ $json.body.signerEmail }}" },
+              { "column": "Status", "value": "={{ $json.body.status || 'signed' }}" },
+              { "column": "SignedAt", "value": "={{ $json.body.signedAt || new Date().toISOString() }}" },
+              { "column": "EnvelopeId", "value": "={{ $json.body.envelopeId }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-audit",
+      "name": "Sheets Audit Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [680, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.requesterEmail || 'legal@company.com' }}",
+        "subject": "=Document Signed: {{ $json.body.documentName }}",
+        "message": "=The document has been signed.\n\nDocument: {{ $json.body.documentName }}\nSigner: {{ $json.body.signerName }} ({{ $json.body.signerEmail }})\nSigned at: {{ $json.body.signedAt || new Date().toISOString() }}\nEnvelope ID: {{ $json.body.envelopeId }}\n\nThe signed document has been saved to Google Drive and logged for audit.",
+        "options": {}
+      },
+      "id": "gmail-confirm",
+      "name": "Gmail Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [900, 520],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Document Digital Signature Handler\n\nTwo-phase workflow:\n1. **Request:** Webhook receives doc → HTTP sends to e-signature service (DocuSign/etc)\n2. **Callback:** Webhook receives signed status → Drive saves signed doc → Sheets audit → Gmail confirmation\n\n**Setup:**\n1. Configure e-signature API credentials (DocuSign, HelloSign, etc.)\n2. Set callback URL in e-signature service settings\n3. Set Google Drive signed documents folder\n4. Set Sheets audit log\n5. Set Gmail credentials\n6. Phase 1 POST: { documentName, signerEmail, signerName } + binary\n7. Phase 2: Automatic callback from e-signature service"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook with Doc": {
+      "main": [
+        [{ "node": "HTTP Send for E-Sign", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook Callback Signed": {
+      "main": [
+        [{ "node": "Drive Save Signed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Save Signed": {
+      "main": [
+        [{ "node": "Sheets Audit Log", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Audit Log": {
+      "main": [
+        [{ "node": "Gmail Confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

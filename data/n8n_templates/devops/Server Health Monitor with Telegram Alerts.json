@@ -1,0 +1,223 @@
+{
+  "name": "Server Health Monitor with Telegram Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 5 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "endpoints",
+              "value": "https://api.example.com/health,https://app.example.com/health,https://db.example.com/health"
+            }
+          ]
+        }
+      },
+      "name": "Set Endpoint List",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "endpoints",
+        "options": {
+          "destinationFieldName": "endpoint"
+        }
+      },
+      "name": "Split Endpoints",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.endpoint }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "name": "HTTP Ping Endpoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [920, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-status",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "name": "Check Status Code",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🚨 *Server Health Alert*\n\nEndpoint: {{ $json.endpoint }}\nStatus Code: {{ $json.statusCode }}\nResponse Time: {{ $json.headers['x-response-time'] || 'N/A' }}ms\nTimestamp: {{ $now.toISO() }}\n\n⚠️ Immediate attention required!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Alert on Failure",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1360, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "UptimeLog"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "endpoint": "={{ $json.endpoint }}",
+            "status_code": "={{ $json.statusCode }}",
+            "response_time_ms": "={{ $json.headers['x-response-time'] || 'N/A' }}",
+            "result": "={{ $json.statusCode === 200 ? 'UP' : 'DOWN' }}"
+          }
+        }
+      },
+      "name": "Google Sheets Uptime Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1360, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Server Health Monitor with Telegram Alerts\n\n**Schedule:** Every 5 minutes\n**Function:** Pings multiple server endpoints, checks HTTP status codes and response times.\n\n**Alerts:** Sends Telegram notification on any non-200 response.\n**Logging:** All results logged to Google Sheets for uptime tracking.\n\n### Setup\n1. Update endpoint URLs in 'Set Endpoint List'\n2. Configure Telegram Bot credentials and chat ID\n3. Set Google Sheets document ID\n4. Adjust schedule interval as needed",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -60]
+    }
+  ],
+  "connections": {
+    "Schedule Every 5 Min": {
+      "main": [
+        [
+          {
+            "node": "Set Endpoint List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Endpoint List": {
+      "main": [
+        [
+          {
+            "node": "Split Endpoints",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Endpoints": {
+      "main": [
+        [
+          {
+            "node": "HTTP Ping Endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Ping Endpoint": {
+      "main": [
+        [
+          {
+            "node": "Check Status Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status Code": {
+      "main": [
+        [
+          {
+            "node": "Telegram Alert on Failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets Uptime Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

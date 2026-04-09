@@ -1,0 +1,162 @@
+{
+  "name": "Notion CRM Contact Tracker",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion CRM Contact Tracker\nAdd new contacts to Notion CRM, backup to Google Sheets, and notify the sales team.\n\n**Setup:**\n1. Set webhook path and configure in your lead source\n2. Set Notion contacts database ID\n3. Set Google Sheet ID for backup\n4. Set sales team email"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook New Contact",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "new-contact",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Contact",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.body.name || $json.name || 'Unknown' }}"
+            },
+            {
+              "name": "Email",
+              "type": "email",
+              "email": "={{ $json.body.email || $json.email || '' }}"
+            },
+            {
+              "name": "Phone",
+              "type": "phone_number",
+              "phoneNumber": "={{ $json.body.phone || $json.phone || '' }}"
+            },
+            {
+              "name": "Company",
+              "type": "rich_text",
+              "richText": "={{ $json.body.company || $json.company || '' }}"
+            },
+            {
+              "name": "Source",
+              "type": "select",
+              "select": "={{ $json.body.source || $json.source || 'Website' }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "New Lead"
+            },
+            {
+              "name": "Date Added",
+              "type": "date",
+              "date": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Google Sheets Backup",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [680, 400],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Contacts"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook New Contact').item.json.body.name || $('Webhook New Contact').item.json.name }}",
+            "Email": "={{ $('Webhook New Contact').item.json.body.email || $('Webhook New Contact').item.json.email }}",
+            "Phone": "={{ $('Webhook New Contact').item.json.body.phone || $('Webhook New Contact').item.json.phone }}",
+            "Company": "={{ $('Webhook New Contact').item.json.body.company || $('Webhook New Contact').item.json.company }}",
+            "Source": "={{ $('Webhook New Contact').item.json.body.source || $('Webhook New Contact').item.json.source }}",
+            "Date Added": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "name": "Gmail Notify Sales Team",
+      "type": "n8n-nodes-base.gmail",
+      "position": [900, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=New Lead: {{ $('Webhook New Contact').item.json.body.name || $('Webhook New Contact').item.json.name }}",
+        "message": "=A new contact has been added to the CRM.\n\nName: {{ $('Webhook New Contact').item.json.body.name || $('Webhook New Contact').item.json.name }}\nEmail: {{ $('Webhook New Contact').item.json.body.email || $('Webhook New Contact').item.json.email }}\nCompany: {{ $('Webhook New Contact').item.json.body.company || $('Webhook New Contact').item.json.company }}\nSource: {{ $('Webhook New Contact').item.json.body.source || $('Webhook New Contact').item.json.source }}\n\nPlease follow up within 24 hours.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Webhook New Contact": {
+      "main": [
+        [{ "node": "Notion Create Contact", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Contact": {
+      "main": [
+        [{ "node": "Google Sheets Backup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Sheets Backup": {
+      "main": [
+        [{ "node": "Gmail Notify Sales Team", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

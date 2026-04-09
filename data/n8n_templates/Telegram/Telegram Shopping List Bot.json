@@ -1,0 +1,292 @@
+{
+  "name": "Telegram Shopping List Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = (item.json.message?.text || '').trim();\n  const chatId = item.json.message?.chat?.id;\n  const username = item.json.message?.from?.username || 'user';\n  \n  if (text.startsWith('/add ')) {\n    const itemName = text.replace('/add ', '').trim();\n    results.push({ json: { command: 'add', itemName, chatId, username, status: 'active', timestamp: new Date().toISOString() } });\n  } else if (text === '/list') {\n    results.push({ json: { command: 'list', chatId, username } });\n  } else if (text.startsWith('/done ')) {\n    const itemName = text.replace('/done ', '').trim();\n    results.push({ json: { command: 'done', itemName, chatId, username } });\n  } else if (text === '/clear') {\n    results.push({ json: { command: 'clear', chatId, username } });\n  } else {\n    results.push({ json: { command: 'help', chatId } });\n  }\n}\nreturn results;"
+      },
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "outputKey": "add", "value": "add" },
+            { "outputKey": "list", "value": "list" },
+            { "outputKey": "done", "value": "done" },
+            { "outputKey": "clear", "value": "clear" },
+            { "outputKey": "help", "value": "help" }
+          ]
+        },
+        "dataType": "string",
+        "value1": "={{$json.command}}"
+      },
+      "name": "Route Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "ShoppingList" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Add Item",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=✅ Added: {{$json.itemName}}\nUse /list to see your shopping list",
+        "additionalFields": {}
+      },
+      "name": "Confirm Add",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "ShoppingList" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 250],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst active = items.filter(i => i.json.status === 'active');\nlet text = '🛒 <b>Shopping List</b>\\n\\n';\nif (active.length === 0) {\n  text += '📭 List is empty! Use /add <item> to add items.';\n} else {\n  active.forEach((item, idx) => {\n    text += `${idx + 1}. ${item.json.itemName}\\n`;\n  });\n  text += `\\n📝 ${active.length} items`;\n  text += '\\n\\nUse /done <item> to mark done';\n}\nreturn [{ json: { text } }];"
+      },
+      "name": "Format List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 250]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Command'].json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send List",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 250],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "ShoppingList" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get Items for Done",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst targetItem = '{{$node[\"Parse Command\"].json.itemName}}'.toLowerCase();\nconst found = items.find(i => (i.json.itemName || '').toLowerCase() === targetItem && i.json.status === 'active');\nif (found) {\n  return [{ json: { ...found.json, status: 'done', message: `✅ Done: ${found.json.itemName}` } }];\n}\nreturn [{ json: { message: `❌ Item \"${targetItem}\" not found in active list.` } }];"
+      },
+      "name": "Mark Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Command'].json.chatId}}",
+        "text": "={{$json.message}}",
+        "additionalFields": {}
+      },
+      "name": "Confirm Done",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "ShoppingList" },
+        "options": {}
+      },
+      "name": "Clear Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 550],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Command'].json.chatId}}",
+        "text": "🗑 Shopping list cleared!",
+        "additionalFields": {}
+      },
+      "name": "Confirm Clear",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 550],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "🛒 <b>Shopping List Bot</b>\n\n/add <item> — add item\n/list — show list\n/done <item> — remove item\n/clear — clear all",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Help",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 700],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Shopping List Bot\n\n**Commands:**\n- /add <item> - add to list\n- /list - show all items\n- /done <item> - mark done\n- /clear - clear all\n\n**Setup:**\n1. Set Telegram Bot credentials\n2. Create Google Sheet 'ShoppingList': itemName, chatId, username, status, timestamp",
+        "width": 400,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 800]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [{ "node": "Route Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [{ "node": "Add Item", "type": "main", "index": 0 }],
+        [{ "node": "Get List", "type": "main", "index": 0 }],
+        [{ "node": "Get Items for Done", "type": "main", "index": 0 }],
+        [{ "node": "Clear Sheet", "type": "main", "index": 0 }],
+        [{ "node": "Send Help", "type": "main", "index": 0 }]
+      ]
+    },
+    "Add Item": {
+      "main": [
+        [{ "node": "Confirm Add", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get List": {
+      "main": [
+        [{ "node": "Format List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format List": {
+      "main": [
+        [{ "node": "Send List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Items for Done": {
+      "main": [
+        [{ "node": "Mark Done", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mark Done": {
+      "main": [
+        [{ "node": "Confirm Done", "type": "main", "index": 0 }]
+      ]
+    },
+    "Clear Sheet": {
+      "main": [
+        [{ "node": "Confirm Clear", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

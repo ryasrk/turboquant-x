@@ -1,0 +1,200 @@
+{
+  "name": "Slack File Sharing Organizer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-file-event",
+        "options": {}
+      },
+      "name": "Slack File Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst event = items[0].json.event || items[0].json;\nconst file = event.file || event;\n\nreturn [{json: {\n  fileId: file.id || '',\n  fileName: file.name || 'unnamed',\n  fileType: file.filetype || 'unknown',\n  fileSize: file.size || 0,\n  downloadUrl: file.url_private_download || file.url_private || '',\n  channelId: (event.channel_id || event.channel || ''),\n  userId: file.user || event.user_id || '',\n  timestamp: new Date().toISOString(),\n  mimeType: file.mimetype || ''\n}}];"
+      },
+      "name": "Parse File Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.downloadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.slackApi.accessToken }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "Download File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "name": "={{ $('Parse File Event').item.json.fileName }}",
+        "options": {}
+      },
+      "name": "Upload to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [920, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "File Index",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "file_name": "={{ $('Parse File Event').item.json.fileName }}",
+            "file_type": "={{ $('Parse File Event').item.json.fileType }}",
+            "drive_link": "={{ $json.webViewLink || $json.webContentLink || '' }}",
+            "uploaded_by": "={{ $('Parse File Event').item.json.userId }}",
+            "channel": "={{ $('Parse File Event').item.json.channelId }}",
+            "date": "={{ $('Parse File Event').item.json.timestamp }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Sheets Index",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1140, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $('Parse File Event').item.json.channelId }}",
+          "mode": "id"
+        },
+        "text": ":file_folder: File *{{ $('Parse File Event').item.json.fileName }}* has been backed up to Google Drive.\n\n:link: {{ $json.webViewLink || 'Link available in file index' }}",
+        "otherOptions": {}
+      },
+      "name": "Reply with Link",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1360, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack File Sharing Organizer\n\nAutomatic file backup from Slack to Google Drive.\n\n**Flow:**\n1. Slack event triggers on file share\n2. Parse file metadata\n3. Download file from Slack\n4. Upload to Google Drive folder\n5. Index in Google Sheets\n6. Reply in Slack with Drive link\n\n**Setup:**\n- Enable Slack Events API (file_shared)\n- Configure Google Drive destination folder\n- Set up Sheets for file index",
+        "width": 340,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Slack File Event": {
+      "main": [
+        [
+          {
+            "node": "Parse File Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse File Event": {
+      "main": [
+        [
+          {
+            "node": "Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download File": {
+      "main": [
+        [
+          {
+            "node": "Upload to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Drive": {
+      "main": [
+        [
+          {
+            "node": "Sheets Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Index": {
+      "main": [
+        [
+          {
+            "node": "Reply with Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

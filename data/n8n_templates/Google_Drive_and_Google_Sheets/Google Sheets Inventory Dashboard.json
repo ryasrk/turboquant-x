@@ -1,0 +1,150 @@
+{
+  "name": "Google Sheets Inventory Dashboard",
+  "nodes": [
+    {
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Products Sheet 1",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 180],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Warehouse_A" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Products Sheet 2",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 360],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Warehouse_B" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Products Sheet 3",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 540],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Warehouse_C" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Aggregate Inventory",
+      "type": "n8n-nodes-base.code",
+      "position": [780, 360],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst products = {};\nconst lowStockThreshold = 10;\nconst lowStockItems = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const sku = row.sku || row.productId || row.id;\n  if (!sku) continue;\n\n  if (!products[sku]) {\n    products[sku] = {\n      sku,\n      name: row.name || row.productName || '',\n      category: row.category || '',\n      totalStock: 0,\n      warehouses: {}\n    };\n  }\n  const qty = Number(row.quantity || row.stock || 0);\n  const warehouse = row.warehouse || row._source || 'unknown';\n  products[sku].totalStock += qty;\n  products[sku].warehouses[warehouse] = qty;\n}\n\nconst dashboard = Object.values(products);\nfor (const p of dashboard) {\n  if (p.totalStock < lowStockThreshold) {\n    lowStockItems.push({ sku: p.sku, name: p.name, totalStock: p.totalStock });\n  }\n}\n\nreturn [{ json: { dashboard, totalProducts: dashboard.length, lowStockItems, lowStockCount: lowStockItems.length, updatedAt: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Dashboard Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1020, 360],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Dashboard" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "If Low Stock",
+      "type": "n8n-nodes-base.if",
+      "position": [1240, 360],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.lowStockCount }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Telegram Low Stock Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1460, 260],
+      "parameters": {
+        "chatId": "",
+        "text": "=⚠️ Low Stock Alert!\n\n{{ $json.lowStockCount }} items below threshold:\n\n{{ $json.lowStockItems.map(i => `• ${i.name} (${i.sku}): ${i.totalStock} units`).join('\\n') }}",
+        "additionalFields": {}
+      },
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 60],
+      "parameters": {
+        "width": 1350,
+        "height": 100,
+        "content": "### Google Sheets Inventory Dashboard\nHourly workflow that reads inventory from multiple warehouse sheets, aggregates stock levels, writes a dashboard, and sends Telegram alerts for low-stock items."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [[
+        { "node": "Read Products Sheet 1", "type": "main", "index": 0 },
+        { "node": "Read Products Sheet 2", "type": "main", "index": 0 },
+        { "node": "Read Products Sheet 3", "type": "main", "index": 0 }
+      ]]
+    },
+    "Read Products Sheet 1": { "main": [[{ "node": "Aggregate Inventory", "type": "main", "index": 0 }]] },
+    "Read Products Sheet 2": { "main": [[{ "node": "Aggregate Inventory", "type": "main", "index": 0 }]] },
+    "Read Products Sheet 3": { "main": [[{ "node": "Aggregate Inventory", "type": "main", "index": 0 }]] },
+    "Aggregate Inventory": { "main": [[{ "node": "Write Dashboard Sheet", "type": "main", "index": 0 }]] },
+    "Write Dashboard Sheet": { "main": [[{ "node": "If Low Stock", "type": "main", "index": 0 }]] },
+    "If Low Stock": {
+      "main": [
+        [{ "node": "Telegram Low Stock Alert", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

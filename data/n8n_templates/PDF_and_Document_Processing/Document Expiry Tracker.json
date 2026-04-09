@@ -1,0 +1,163 @@
+{
+  "name": "Document Expiry Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "daily-schedule",
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "sheets-docs",
+      "name": "Read Sheets Documents",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\nconst results = [];\nfor (const item of items) {\n  const expiryStr = item.json.expiryDate || item.json.ExpiryDate || '';\n  if (!expiryStr) continue;\n  const expiry = new Date(expiryStr);\n  const daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));\n  const isExpired = daysUntilExpiry < 0;\n  const isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= 30;\n  if (isExpired || isExpiringSoon) {\n    results.push({\n      json: {\n        documentName: item.json.documentName || item.json.DocumentName || 'Unknown',\n        documentType: item.json.documentType || item.json.DocumentType || 'General',\n        expiryDate: expiryStr,\n        daysUntilExpiry,\n        status: isExpired ? 'EXPIRED' : daysUntilExpiry <= 7 ? 'CRITICAL' : 'WARNING',\n        owner: item.json.owner || item.json.Owner || 'Unassigned',\n        ownerEmail: item.json.ownerEmail || item.json.OwnerEmail || ''\n      }\n    });\n  }\n}\nif (results.length === 0) {\n  results.push({ json: { message: 'No documents expiring within 30 days' } });\n}\nreturn results;"
+      },
+      "id": "check-expiry",
+      "name": "Code Check Expiry Dates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "combinator": "or",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "EXPIRED",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "CRITICAL",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "WARNING",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "if-expiring",
+      "name": "If Expiring Soon",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.ownerEmail || 'admin@company.com' }}",
+        "subject": "=[{{ $json.status }}] Document Expiry: {{ $json.documentName }}",
+        "message": "=Document Expiry Alert\n\nDocument: {{ $json.documentName }}\nType: {{ $json.documentType }}\nExpiry Date: {{ $json.expiryDate }}\nDays Until Expiry: {{ $json.daysUntilExpiry }}\nStatus: {{ $json.status }}\nOwner: {{ $json.owner }}\n\nPlease take action to renew or replace this document.",
+        "options": {}
+      },
+      "id": "gmail-reminder",
+      "name": "Gmail Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.telegramChatId || '' }}",
+        "text": "=🚨 *{{ $json.status }}*: {{ $json.documentName }}\nExpiry: {{ $json.expiryDate }} ({{ $json.daysUntilExpiry }} days)\nOwner: {{ $json.owner }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-alert",
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1120, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Document Expiry Tracker\n\nRuns daily at 8AM → reads document registry from Sheets →\nCode checks expiry dates → filters expiring/expired →\nGmail reminder to owner + Telegram alert.\n\n**Status Levels:**\n- EXPIRED: Past expiry date\n- CRITICAL: 0-7 days until expiry\n- WARNING: 8-30 days until expiry\n\n**Setup:**\n1. Create document registry sheet (columns: documentName, documentType, expiryDate, owner, ownerEmail)\n2. Set Gmail credentials\n3. Set Telegram bot credentials and chat ID\n4. Adjust warning threshold in Code node if needed"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [{ "node": "Read Sheets Documents", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sheets Documents": {
+      "main": [
+        [{ "node": "Code Check Expiry Dates", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Check Expiry Dates": {
+      "main": [
+        [{ "node": "If Expiring Soon", "type": "main", "index": 0 }]
+      ]
+    },
+    "If Expiring Soon": {
+      "main": [
+        [
+          { "node": "Gmail Reminder", "type": "main", "index": 0 },
+          { "node": "Telegram Alert", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

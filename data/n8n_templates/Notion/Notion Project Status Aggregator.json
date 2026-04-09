@@ -1,0 +1,136 @@
+{
+  "name": "Notion Project Status Aggregator",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Project Status Aggregator\nWeekly project status collection, progress summary, status report page, and email distribution.\n\n**Setup:**\n1. Set Notion projects database ID\n2. Set parent page for status reports\n3. Set email recipients"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 5"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query All Projects",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Summarize Progress",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\n\nconst projects = items.map(item => {\n  const props = item.json.properties || {};\n  const name = props['Name']?.title?.map(t => t.plain_text).join('') || 'Untitled';\n  const status = props['Status']?.select?.name || 'Unknown';\n  const progress = props['Progress']?.number || 0;\n  const owner = props['Owner']?.rich_text?.map(t => t.plain_text).join('') || 'Unassigned';\n  const dueDate = props['Due Date']?.date?.start || 'No deadline';\n  return { name, status, progress, owner, dueDate };\n});\n\nconst byStatus = {};\nprojects.forEach(p => {\n  byStatus[p.status] = (byStatus[p.status] || 0) + 1;\n});\n\nconst statusBreakdown = Object.entries(byStatus)\n  .map(([status, count]) => `${status}: ${count}`)\n  .join(', ');\n\nconst avgProgress = projects.length > 0\n  ? Math.round(projects.reduce((sum, p) => sum + p.progress, 0) / projects.length)\n  : 0;\n\nconst atRisk = projects.filter(p => {\n  if (p.dueDate === 'No deadline') return false;\n  const due = new Date(p.dueDate);\n  const daysLeft = Math.ceil((due - Date.now()) / (1000 * 60 * 60 * 24));\n  return daysLeft < 7 && p.progress < 80;\n});\n\nconst detailedList = projects.map(p =>\n  `• **${p.name}** — ${p.status} (${p.progress}%) — Owner: ${p.owner} — Due: ${p.dueDate}`\n).join('\\n');\n\nconst atRiskList = atRisk.length > 0\n  ? atRisk.map(p => `⚠️ ${p.name} — ${p.progress}% — Due: ${p.dueDate}`).join('\\n')\n  : 'None';\n\nreturn [{\n  json: {\n    date: today,\n    totalProjects: projects.length,\n    statusBreakdown,\n    avgProgress,\n    atRiskCount: atRisk.length,\n    atRiskList,\n    detailedList,\n    summary: `Weekly Status Report — ${today}\\n\\nTotal Projects: ${projects.length}\\nAvg Progress: ${avgProgress}%\\nStatus: ${statusBreakdown}\\nAt Risk: ${atRisk.length}`\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Status Report",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 400],
+      "parameters": {
+        "resource": "page",
+        "operation": "create",
+        "parentPageId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "title": "=Weekly Status Report — {{ $json.date }}",
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=## Overview\n\nTotal Projects: {{ $json.totalProjects }}\nAverage Progress: {{ $json.avgProgress }}%\nStatus Breakdown: {{ $json.statusBreakdown }}\n\n## At Risk ({{ $json.atRiskCount }})\n{{ $json.atRiskList }}\n\n## All Projects\n{{ $json.detailedList }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Email Status Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1120, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=📊 Weekly Project Status — {{ $('Summarize Progress').item.json.date }}",
+        "message": "={{ $('Summarize Progress').item.json.summary }}\n\n---\nAt Risk Projects:\n{{ $('Summarize Progress').item.json.atRiskList }}\n\n---\nAll Projects:\n{{ $('Summarize Progress').item.json.detailedList }}\n\nFull report available in Notion.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [{ "node": "Notion Query All Projects", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query All Projects": {
+      "main": [
+        [{ "node": "Summarize Progress", "type": "main", "index": 0 }]
+      ]
+    },
+    "Summarize Progress": {
+      "main": [
+        [{ "node": "Notion Create Status Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Status Report": {
+      "main": [
+        [{ "node": "Email Status Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,232 @@
+{
+  "name": "Log Error Pattern Detector",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 15 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "logFiles",
+              "value": "/var/log/nginx/error.log,/var/log/app/application.log,/var/log/syslog"
+            },
+            {
+              "name": "patterns",
+              "value": "HTTP/1\\.[01]\\\" 5[0-9]{2},OutOfMemoryError|OOM|oom-killer,timeout|timed out|ETIMEDOUT,FATAL|panic|segfault,connection refused|ECONNREFUSED"
+            }
+          ],
+          "number": [
+            {
+              "name": "tailLines",
+              "value": 200
+            },
+            {
+              "name": "alertThreshold",
+              "value": 5
+            }
+          ]
+        }
+      },
+      "name": "Set Log Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "command": "=LOGS=\"{{ $json.logFiles }}\"\nTAIL_N={{ $json.tailLines }}\nPATTERNS=\"{{ $json.patterns }}\"\nRESULTS=\"[]\"\n\nIFS=',' read -ra LOG_ARRAY <<< \"$LOGS\"\nIFS=',' read -ra PAT_ARRAY <<< \"$PATTERNS\"\n\nfor log_file in \"${LOG_ARRAY[@]}\"; do\n  if [ -f \"$log_file\" ]; then\n    for pattern in \"${PAT_ARRAY[@]}\"; do\n      count=$(tail -n $TAIL_N \"$log_file\" | grep -cEi \"$pattern\" 2>/dev/null || echo 0)\n      if [ \"$count\" -gt 0 ]; then\n        sample=$(tail -n $TAIL_N \"$log_file\" | grep -Ei \"$pattern\" | tail -3 | tr '\"' \"'\" | tr '\\n' '|')\n        echo \"${log_file}::${pattern}::${count}::${sample}\"\n      fi\n    done\n  fi\ndone"
+      },
+      "name": "SSH Tail Error Logs",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [700, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json.stdout || '';\nconst threshold = $('Set Log Config').first().json.alertThreshold || 5;\nconst lines = output.trim().split('\\n').filter(l => l.includes('::'));\n\nconst results = lines.map(line => {\n  const [logFile, pattern, count, samples] = line.split('::');\n  const matchCount = parseInt(count) || 0;\n  return {\n    logFile: logFile.trim(),\n    pattern: pattern.trim(),\n    matchCount,\n    samples: (samples || '').split('|').filter(s => s.trim()).slice(0, 3),\n    exceedsThreshold: matchCount >= threshold,\n    severity: matchCount >= threshold * 2 ? 'CRITICAL' : matchCount >= threshold ? 'WARNING' : 'INFO',\n    timestamp: new Date().toISOString()\n  };\n});\n\nif (results.length === 0) {\n  return [{ json: { noErrors: true, timestamp: new Date().toISOString() } }];\n}\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "name": "Parse Error Patterns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-threshold",
+              "leftValue": "={{ $json.exceedsThreshold }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Exceeds Threshold?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "📋 *Log Error Pattern Detected*\n\nSeverity: {{ $json.severity }}\nLog File: `{{ $json.logFile }}`\nPattern: `{{ $json.pattern }}`\nMatches: {{ $json.matchCount }} (threshold: {{ $('Set Log Config').first().json.alertThreshold }})\n\n*Sample Errors:*\n{{ $json.samples.map((s, i) => `${i+1}. ${s.substring(0, 200)}`).join('\\n') }}\n\nTimestamp: {{ $json.timestamp }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Escalation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1360, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "ErrorPatternLog"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "log_file": "={{ $json.logFile }}",
+            "pattern": "={{ $json.pattern }}",
+            "match_count": "={{ $json.matchCount }}",
+            "severity": "={{ $json.severity }}",
+            "exceeds_threshold": "={{ $json.exceedsThreshold }}"
+          }
+        }
+      },
+      "name": "Google Sheets Error Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1360, 420],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Log Error Pattern Detector\n\n**Schedule:** Every 15 minutes\n**Function:** SSHs into server, tails error logs, applies regex pattern matching.\n\n**Patterns Detected:**\n- HTTP 500 errors\n- Out of Memory (OOM)\n- Timeouts\n- Fatal/Panic errors\n- Connection refused\n\n**Alerting:** Telegram escalation when matches exceed threshold.\n**Logging:** All detections logged to Google Sheets.\n\n### Setup\n1. Configure SSH credentials\n2. Update log file paths and regex patterns in 'Set Log Config'\n3. Adjust tail lines and alert threshold\n4. Configure Telegram Bot credentials\n5. Set Google Sheets document ID",
+        "width": 420,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -100]
+    }
+  ],
+  "connections": {
+    "Schedule Every 15 Min": {
+      "main": [
+        [
+          {
+            "node": "Set Log Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Log Config": {
+      "main": [
+        [
+          {
+            "node": "SSH Tail Error Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH Tail Error Logs": {
+      "main": [
+        [
+          {
+            "node": "Parse Error Patterns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Error Patterns": {
+      "main": [
+        [
+          {
+            "node": "Exceeds Threshold?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exceeds Threshold?": {
+      "main": [
+        [
+          {
+            "node": "Telegram Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets Error Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "name": "Slack Kudos and Recognition",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kudos",
+        "options": {}
+      },
+      "name": "Kudos Slash Command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst body = items[0].json.body || items[0].json;\nconst text = body.text || '';\nconst fromUser = body.user_id || '';\nconst fromName = body.user_name || '';\n\n// Parse: @user reason\nconst match = text.match(/<@(\\w+)(?:\\|[^>]*)?>\\s*(.*)/);\nconst toUser = match ? match[1] : '';\nconst reason = match ? match[2].trim() : text;\n\nconst emojis = [':tada:', ':star2:', ':trophy:', ':clap:', ':rocket:', ':heart:', ':fire:', ':100:'];\nconst randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];\n\nreturn [{json: {\n  fromUser,\n  fromName,\n  toUser,\n  reason: reason || 'Being awesome!',\n  emoji: randomEmoji,\n  timestamp: new Date().toISOString(),\n  month: new Date().toISOString().slice(0, 7)\n}}];"
+      },
+      "name": "Parse Kudos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#recognition",
+          "mode": "name"
+        },
+        "text": "{{ $json.emoji }} *Kudos!*\n\n<@{{ $json.fromUser }}> recognizes <@{{ $json.toUser }}>:\n\n> {{ $json.reason }}\n\nKeep up the great work! :sparkles:",
+        "otherOptions": {}
+      },
+      "name": "Post to Recognition",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Kudos Leaderboard",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Leaderboard",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [920, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 1 * *"
+            }
+          ]
+        }
+      },
+      "name": "Monthly Summary Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 540]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Kudos Leaderboard",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "name": "Read Leaderboard",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 540],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst lastMonth = new Date();\nlastMonth.setMonth(lastMonth.getMonth() - 1);\nconst monthKey = lastMonth.toISOString().slice(0, 7);\n\nconst monthlyKudos = items.filter(i => (i.json.month || '') === monthKey);\nconst counts = {};\nfor (const k of monthlyKudos) {\n  const user = k.json.toUser || 'unknown';\n  counts[user] = (counts[user] || 0) + 1;\n}\n\nconst sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);\nlet summary = `:trophy: *Monthly Kudos Summary — ${monthKey}*\\n\\n`;\nsummary += `*Total kudos given:* ${monthlyKudos.length}\\n\\n`;\nsummary += '*Top recognized:*\\n';\nsorted.slice(0, 5).forEach(([user, count], i) => {\n  const medal = i === 0 ? ':first_place_medal:' : i === 1 ? ':second_place_medal:' : i === 2 ? ':third_place_medal:' : ':star:';\n  summary += `${medal} <@${user}> — ${count} kudos\\n`;\n});\n\nreturn [{json: {summary, month: monthKey, totalKudos: monthlyKudos.length}}];"
+      },
+      "name": "Compile Monthly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 540]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#recognition",
+          "mode": "name"
+        },
+        "text": "={{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "name": "Post Monthly Summary",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 540],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Kudos and Recognition\n\nPeer recognition system with leaderboard.\n\n**Kudos Flow:**\n1. `/kudos @user Great work on the API!`\n2. Parse recipient and reason\n3. Post formatted kudos to #recognition\n4. Track in Google Sheets leaderboard\n\n**Monthly Summary:**\n1. 1st of month at 10AM\n2. Read leaderboard data\n3. Compile top recognized people\n4. Post summary to #recognition",
+        "width": 340,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Kudos Slash Command": {
+      "main": [
+        [
+          {
+            "node": "Parse Kudos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Kudos": {
+      "main": [
+        [
+          {
+            "node": "Post to Recognition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Recognition": {
+      "main": [
+        [
+          {
+            "node": "Sheets Leaderboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly Summary Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Leaderboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leaderboard": {
+      "main": [
+        [
+          {
+            "node": "Compile Monthly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Monthly": {
+      "main": [
+        [
+          {
+            "node": "Post Monthly Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "name": "Telegram Meeting Notifier Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 30 }
+          ]
+        }
+      },
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "calendar": "",
+        "options": {
+          "timeMin": "={{$now.toISO()}}",
+          "timeMax": "={{$now.plus({minutes: 30}).toISO()}}",
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "name": "Get Upcoming Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 3,
+      "position": [500, 300],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\nconst in15min = new Date(now.getTime() + 15 * 60 * 1000);\nconst in20min = new Date(now.getTime() + 20 * 60 * 1000);\n\nconst upcoming = items.filter(i => {\n  const start = new Date(i.json.start?.dateTime || i.json.start?.date || '');\n  return start >= in15min && start <= in20min;\n});\n\nif (upcoming.length === 0) {\n  return [{ json: { hasMeeting: false } }];\n}\n\nreturn upcoming.map(i => {\n  const event = i.json;\n  const start = new Date(event.start?.dateTime || event.start?.date);\n  const meetLink = event.hangoutLink || event.conferenceData?.entryPoints?.[0]?.uri || '';\n  const location = event.location || '';\n  \n  return {\n    json: {\n      hasMeeting: true,\n      title: event.summary || 'Untitled Meeting',\n      startTime: start.toTimeString().split(' ')[0].substring(0, 5),\n      endTime: event.end?.dateTime ? new Date(event.end.dateTime).toTimeString().split(' ')[0].substring(0, 5) : '',\n      meetLink,\n      location,\n      description: (event.description || '').substring(0, 200),\n      organizer: event.organizer?.email || '',\n      minutesUntil: Math.round((start - now) / 60000),\n      timestamp: now.toISOString()\n    }\n  };\n});"
+      },
+      "name": "Filter 15-min Window",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.hasMeeting}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Has Meeting?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=📅 <b>Meeting in {{$json.minutesUntil}} minutes!</b>\n\n📌 {{$json.title}}\n⏰ {{$json.startTime}} - {{$json.endTime}}\n{{$json.meetLink ? '🔗 Join: ' + $json.meetLink : ''}}{{$json.location ? '📍 ' + $json.location : ''}}\n{{$json.description ? '📝 ' + $json.description : ''}}\n👤 Organizer: {{$json.organizer}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Meeting Notifier Bot\n\nEvery 30 min → check Google Calendar → if meeting in ~15 min → Telegram reminder with join link.\n\n**Setup:**\n1. Set Google Calendar OAuth2 credentials\n2. Set calendar ID in Get Upcoming Events node\n3. Set Telegram Bot credentials and chat ID\n4. Adjust time window in Filter 15-min Window if needed",
+        "width": 420,
+        "height": 200
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [
+        [{ "node": "Get Upcoming Events", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Upcoming Events": {
+      "main": [
+        [{ "node": "Filter 15-min Window", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter 15-min Window": {
+      "main": [
+        [{ "node": "Has Meeting?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Meeting?": {
+      "main": [
+        [{ "node": "Send Reminder", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

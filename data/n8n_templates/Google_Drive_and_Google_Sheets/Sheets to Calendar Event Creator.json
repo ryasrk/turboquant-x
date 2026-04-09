@@ -1,0 +1,99 @@
+{
+  "name": "Sheets to Calendar Event Creator",
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 6 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Events Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Events" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Filter Pending Events",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst pending = items.filter(item => {\n  const status = (item.json.status || '').toLowerCase();\n  return status === 'pending' || status === '' || status === 'new';\n});\n\nreturn pending.length > 0 ? pending : [{ json: { noPending: true } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [960, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ summary: $json.title || $json.eventName, description: $json.description || '', start: { dateTime: $json.startDate || $json.start, timeZone: $json.timezone || 'UTC' }, end: { dateTime: $json.endDate || $json.end, timeZone: $json.timezone || 'UTC' }, location: $json.location || '' }) }}",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Update Status in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1180, 300],
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Events" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "created",
+            "calendarEventId": "={{ $json.id }}",
+            "createdAt": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Sheets to Calendar Event Creator\nReads pending events from a Google Sheet, creates Google Calendar events via API, and updates the sheet status to 'created' with the calendar event ID."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Read Events Sheet", "type": "main", "index": 0 }]] },
+    "Read Events Sheet": { "main": [[{ "node": "Filter Pending Events", "type": "main", "index": 0 }]] },
+    "Filter Pending Events": { "main": [[{ "node": "Create Calendar Event", "type": "main", "index": 0 }]] },
+    "Create Calendar Event": { "main": [[{ "node": "Update Status in Sheet", "type": "main", "index": 0 }]] }
+  }
+}

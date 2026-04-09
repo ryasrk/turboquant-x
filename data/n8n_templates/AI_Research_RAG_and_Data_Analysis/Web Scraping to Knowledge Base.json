@@ -1,0 +1,122 @@
+{
+  "name": "Web Scraping to Knowledge Base",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] }
+      },
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "range": "A:B",
+        "options": {}
+      },
+      "name": "Read URL List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } },
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Scrape Pages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const html = (item.json.data || item.json.body || '').toString();\n\n  // Remove script/style tags and HTML markup\n  let text = html\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]*>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  // Extract title from HTML\n  const titleMatch = html.match(/<title[^>]*>(.*?)<\\/title>/i);\n  const title = titleMatch ? titleMatch[1].trim() : 'Untitled';\n\n  // Extract headings for structure\n  const headings = [];\n  const headingRegex = /<h[1-3][^>]*>(.*?)<\\/h[1-3]>/gi;\n  let match;\n  while ((match = headingRegex.exec(html)) !== null) {\n    headings.push(match[1].replace(/<[^>]*>/g, '').trim());\n  }\n\n  results.push({\n    json: {\n      url: item.json.url || '',\n      title,\n      content: text.substring(0, 5000),\n      headings: headings.slice(0, 20),\n      charCount: text.length,\n      scrapedAt: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "name": "Clean HTML and Extract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const content = item.json.content || '';\n  const headings = item.json.headings || [];\n\n  // Extract key sentences (first sentences of paragraphs)\n  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 30).slice(0, 10);\n\n  // Extract potential keywords (frequent capitalized words)\n  const words = content.match(/[A-Z][a-z]{3,}/g) || [];\n  const wordFreq = {};\n  words.forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });\n  const keywords = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([w]) => w);\n\n  results.push({\n    json: {\n      url: item.json.url,\n      title: item.json.title,\n      keySentences: sentences.map(s => s.trim()).join('. '),\n      headings: headings.join('; '),\n      keywords: keywords.join(', '),\n      charCount: item.json.charCount,\n      scrapedAt: item.json.scrapedAt\n    }\n  });\n}\n\nreturn results;"
+      },
+      "name": "Extract Key Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $json.url }}",
+            "title": "={{ $json.title }}",
+            "key_sentences": "={{ $json.keySentences }}",
+            "headings": "={{ $json.headings }}",
+            "keywords": "={{ $json.keywords }}",
+            "scraped_at": "={{ $json.scrapedAt }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write to Knowledge Base",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1350, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Web Scraping to Knowledge Base\n\nDaily workflow that reads URLs from a list, scrapes each page, cleans HTML, extracts key information (titles, headings, keywords, key sentences), and stores in a Google Sheets knowledge base.\n\n**Setup:**\n1. Configure Google Sheets with url column in the source sheet\n2. Create a target sheet for the knowledge base\n3. Adjust schedule interval as needed"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [{ "node": "Read URL List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read URL List": {
+      "main": [
+        [{ "node": "HTTP Scrape Pages", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Scrape Pages": {
+      "main": [
+        [{ "node": "Clean HTML and Extract", "type": "main", "index": 0 }]
+      ]
+    },
+    "Clean HTML and Extract": {
+      "main": [
+        [{ "node": "Extract Key Info", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Key Info": {
+      "main": [
+        [{ "node": "Write to Knowledge Base", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

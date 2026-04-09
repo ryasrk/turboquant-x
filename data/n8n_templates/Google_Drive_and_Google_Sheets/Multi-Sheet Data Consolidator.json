@@ -1,0 +1,126 @@
+{
+  "name": "Multi-Sheet Data Consolidator",
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "days", "daysInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Sheet 1",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 160],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Sheet1" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Sheet 2",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 340],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Sheet2" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Sheet 3",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 520],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Sheet3" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.code",
+      "position": [760, 340],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst allRows = items.map(item => item.json);\n\nconst sources = {};\nfor (const row of allRows) {\n  const source = row._source || 'unknown';\n  sources[source] = (sources[source] || 0) + 1;\n}\n\nconst consolidated = allRows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));\n\nreturn [{ json: { consolidated, totalRows: consolidated.length, sourceBreakdown: sources, mergedAt: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Consolidated Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [980, 340],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Consolidated" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Summary",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1200, 340],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Data Consolidation Complete - {{ $json.totalRows }} rows merged",
+        "message": "=Multi-sheet consolidation completed.\n\nTotal rows merged: {{ $json.totalRows }}\nSource breakdown: {{ JSON.stringify($json.sourceBreakdown) }}\nTimestamp: {{ $json.mergedAt }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 60],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Multi-Sheet Data Consolidator\nReads data from 3+ Google Sheets, merges them into a single consolidated sheet, and sends an email summary with source breakdown."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[
+        { "node": "Read Sheet 1", "type": "main", "index": 0 },
+        { "node": "Read Sheet 2", "type": "main", "index": 0 },
+        { "node": "Read Sheet 3", "type": "main", "index": 0 }
+      ]]
+    },
+    "Read Sheet 1": { "main": [[{ "node": "Merge Data", "type": "main", "index": 0 }]] },
+    "Read Sheet 2": { "main": [[{ "node": "Merge Data", "type": "main", "index": 0 }]] },
+    "Read Sheet 3": { "main": [[{ "node": "Merge Data", "type": "main", "index": 0 }]] },
+    "Merge Data": { "main": [[{ "node": "Write Consolidated Sheet", "type": "main", "index": 0 }]] },
+    "Write Consolidated Sheet": { "main": [[{ "node": "Email Summary", "type": "main", "index": 0 }]] }
+  }
+}

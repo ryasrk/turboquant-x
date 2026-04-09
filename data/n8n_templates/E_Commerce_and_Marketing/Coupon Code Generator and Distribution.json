@@ -1,0 +1,226 @@
+{
+  "name": "Coupon Code Generator and Distribution",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-coupon",
+        "responseMode": "lastNode",
+        "responseData": "allEntries"
+      },
+      "name": "Coupon Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "customerName", "value": "={{ $json.body.name }}" },
+            { "name": "customerEmail", "value": "={{ $json.body.email }}" },
+            { "name": "customerPhone", "value": "={{ $json.body.phone }}" },
+            { "name": "channel", "value": "={{ $json.body.channel || 'email' }}" },
+            { "name": "discountType", "value": "={{ $json.body.discount_type || 'percentage' }}" },
+            { "name": "discountValue", "value": "={{ $json.body.discount_value || '10' }}" },
+            { "name": "expiryDays", "value": "={{ $json.body.expiry_days || '30' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract Request Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\nlet code = '';\nfor (let i = 0; i < 8; i++) {\n  code += chars.charAt(Math.floor(Math.random() * chars.length));\n}\n\nconst prefix = data.discountType === 'percentage' ? 'PCT' : 'AMT';\nconst couponCode = `${prefix}-${code}`;\n\nconst expiryDate = new Date();\nexpiryDate.setDate(expiryDate.getDate() + parseInt(data.expiryDays));\n\nreturn [{\n  json: {\n    ...data,\n    couponCode,\n    expiryDate: expiryDate.toISOString().split('T')[0],\n    createdAt: new Date().toISOString(),\n    discountDisplay: data.discountType === 'percentage' \n      ? `${data.discountValue}% off` \n      : `$${data.discountValue} off`,\n    status: 'active',\n    redemptionCount: 0\n  }\n}];"
+      },
+      "name": "Generate Unique Coupon Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Coupon Codes" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Coupon Code": "={{ $json.couponCode }}",
+            "Customer Name": "={{ $json.customerName }}",
+            "Customer Email": "={{ $json.customerEmail }}",
+            "Discount": "={{ $json.discountDisplay }}",
+            "Expiry Date": "={{ $json.expiryDate }}",
+            "Created At": "={{ $json.createdAt }}",
+            "Channel": "={{ $json.channel }}",
+            "Status": "Active",
+            "Redemptions": "0"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save Coupon to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.channel }}",
+              "operation": "equal",
+              "value2": "whatsapp"
+            }
+          ]
+        }
+      },
+      "name": "Delivery Channel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customerEmail }}",
+        "subject": "🎁 Your Exclusive Coupon Code: {{ $json.couponCode }}",
+        "emailType": "html",
+        "message": "<div style=\"max-width:600px;margin:0 auto;font-family:Arial,sans-serif;\"><h2>Hi {{ $json.customerName }}! 🎉</h2><p>Here's your exclusive discount coupon:</p><div style=\"background:#f0f0f0;padding:20px;text-align:center;border-radius:8px;margin:20px 0;\"><h1 style=\"color:#4CAF50;letter-spacing:3px;\">{{ $json.couponCode }}</h1><p style=\"font-size:18px;margin:10px 0;\">{{ $json.discountDisplay }}</p></div><p><strong>Valid until:</strong> {{ $json.expiryDate }}</p><p>Apply this code at checkout to enjoy your discount!</p><p style=\"font-size:12px;color:#666;margin-top:30px;\">This coupon is single-use and cannot be combined with other offers.</p></div>",
+        "options": {
+          "senderName": "Your Store"
+        }
+      },
+      "name": "Send Coupon via Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.customerPhone }}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"🎁 Hi {{ $json.customerName }}!\\n\\nHere's your exclusive coupon code:\\n\\n*{{ $json.couponCode }}*\\n\\n{{ $json.discountDisplay }}\\nValid until: {{ $json.expiryDate }}\\n\\nApply at checkout to save! 🛍️\"\n  }\n}",
+        "options": {}
+      },
+      "name": "Send Coupon via WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1350, 420],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "redeem-coupon",
+        "responseMode": "lastNode",
+        "responseData": "allEntries"
+      },
+      "name": "Redemption Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Coupon Codes" },
+        "options": {}
+      },
+      "name": "Lookup Coupon in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const coupons = $input.all();\nconst requestedCode = $('Redemption Webhook').first().json.body.coupon_code;\nconst match = coupons.find(c => c.json['Coupon Code'] === requestedCode);\n\nif (!match) {\n  return [{ json: { valid: false, message: 'Coupon not found' } }];\n}\n\nconst expiry = new Date(match.json['Expiry Date']);\nif (expiry < new Date()) {\n  return [{ json: { valid: false, message: 'Coupon expired' } }];\n}\n\nif (match.json.Status !== 'Active') {\n  return [{ json: { valid: false, message: 'Coupon already redeemed' } }];\n}\n\nreturn [{ json: { valid: true, couponCode: requestedCode, discount: match.json.Discount, message: 'Coupon valid' } }];"
+      },
+      "name": "Validate and Track Redemption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 600]
+    },
+    {
+      "parameters": {
+        "content": "## Coupon Code Generator and Distribution\n\n**How to use:**\n1. Set up the Webhook URLs in your e-commerce platform\n2. Configure Google Sheets OAuth2 credentials\n3. Create 'Coupon Codes' sheet tab with columns: Coupon Code, Customer Name, Customer Email, Discount, Expiry Date, Created At, Channel, Status, Redemptions\n4. Set up Gmail for email delivery\n5. For WhatsApp: configure Meta WhatsApp Business API and update phone number ID\n\n**Generate Coupon webhook payload:**\n```json\n{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+1234567890\",\n  \"channel\": \"email\",\n  \"discount_type\": \"percentage\",\n  \"discount_value\": \"10\",\n  \"expiry_days\": \"30\"\n}\n```\n\n**Redeem Coupon webhook payload:**\n```json\n{ \"coupon_code\": \"PCT-AB3D7F9K\" }\n```\n\n**Coupon format:** PCT-XXXXXXXX (percentage) or AMT-XXXXXXXX (fixed amount)",
+        "width": 440,
+        "height": 420
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -160]
+    }
+  ],
+  "connections": {
+    "Coupon Request Webhook": {
+      "main": [
+        [{ "node": "Extract Request Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Request Data": {
+      "main": [
+        [{ "node": "Generate Unique Coupon Code", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Unique Coupon Code": {
+      "main": [
+        [{ "node": "Save Coupon to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Coupon to Sheets": {
+      "main": [
+        [{ "node": "Delivery Channel?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Delivery Channel?": {
+      "main": [
+        [{ "node": "Send Coupon via WhatsApp", "type": "main", "index": 0 }],
+        [{ "node": "Send Coupon via Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Redemption Webhook": {
+      "main": [
+        [{ "node": "Lookup Coupon in Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Lookup Coupon in Sheets": {
+      "main": [
+        [{ "node": "Validate and Track Redemption", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

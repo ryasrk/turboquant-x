@@ -1,0 +1,293 @@
+{
+  "name": "WhatsApp Broadcast Campaign Manager",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1" }]
+        }
+      },
+      "name": "Campaign Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Contacts"
+        },
+        "options": {}
+      },
+      "name": "Read Contact List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.tag }}",
+              "operation": "equal",
+              "value2": "vip"
+            }
+          ]
+        }
+      },
+      "name": "Segment VIP Contacts",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.tag }}",
+              "operation": "equal",
+              "value2": "regular"
+            }
+          ]
+        }
+      },
+      "name": "Segment Regular Contacts",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 500]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "🌟 Halo {{ $json.name }}! Sebagai pelanggan VIP, Anda mendapat DISKON EKSKLUSIF 30%!\n\nGunakan kode: VIP30\nBerlaku hingga akhir bulan ini.\n\nTerima kasih atas loyalitas Anda! 🙏"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Prepare VIP Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [850, 100]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "Halo {{ $json.name }}! 👋\n\nAda promo spesial minggu ini:\n🎁 Diskon 15% untuk semua produk\n📦 Gratis ongkir min. belanja Rp 200.000\n\nYuk belanja sekarang! Ketik 'ORDER' untuk mulai."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Prepare Regular Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "name": "Rate Limit Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "delivery_status",
+              "value": "={{ $json.statusCode === 200 ? 'delivered' : 'failed' }}"
+            },
+            {
+              "name": "sent_at",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Track Delivery Status",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Campaign_Report"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "campaign_date": "={{ $now.toISO() }}",
+            "contact_name": "={{ $json.name }}",
+            "phone": "={{ $json.phone }}",
+            "segment": "={{ $json.tag }}",
+            "delivery_status": "={{ $json.delivery_status }}",
+            "sent_at": "={{ $json.sent_at }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Save Campaign Report",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1650, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const items = $input.all();\nconst total = items.length;\nconst delivered = items.filter(i => i.json.delivery_status === 'delivered').length;\nconst failed = total - delivered;\n\nreturn [{\n  json: {\n    campaign_summary: `Campaign Report\\n\\nTotal sent: ${total}\\nDelivered: ${delivered}\\nFailed: ${failed}\\nSuccess rate: ${((delivered/total)*100).toFixed(1)}%`\n  }\n}];"
+      },
+      "name": "Generate Campaign Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "content": "## WhatsApp Broadcast Campaign Manager\n\nAutomates broadcast campaigns with contact segmentation and rate limiting.\n\n**Features:**\n- Reads contacts from Google Sheets\n- Segments by VIP / Regular tags\n- 1-second rate limit between messages\n- Delivery tracking per contact\n- Campaign summary report\n\n**Setup:**\n1. Create Sheets with columns: name, phone, tag\n2. Configure WhatsApp API token\n3. Adjust schedule trigger as needed",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Campaign Schedule Trigger": {
+      "main": [
+        [{ "node": "Read Contact List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Contact List": {
+      "main": [
+        [
+          { "node": "Segment VIP Contacts", "type": "main", "index": 0 },
+          { "node": "Segment Regular Contacts", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Segment VIP Contacts": {
+      "main": [
+        [{ "node": "Prepare VIP Message", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Segment Regular Contacts": {
+      "main": [
+        [{ "node": "Prepare Regular Message", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Prepare VIP Message": {
+      "main": [
+        [{ "node": "Rate Limit Delay", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Regular Message": {
+      "main": [
+        [{ "node": "Rate Limit Delay", "type": "main", "index": 0 }]
+      ]
+    },
+    "Rate Limit Delay": {
+      "main": [
+        [{ "node": "Send WhatsApp Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send WhatsApp Message": {
+      "main": [
+        [{ "node": "Track Delivery Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Track Delivery Status": {
+      "main": [
+        [{ "node": "Save Campaign Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Campaign Report": {
+      "main": [
+        [{ "node": "Generate Campaign Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

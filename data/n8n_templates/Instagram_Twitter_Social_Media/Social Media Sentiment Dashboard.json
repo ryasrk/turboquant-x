@@ -1,0 +1,181 @@
+{
+  "name": "Social Media Sentiment Dashboard",
+  "nodes": [
+    {
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 1}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Twitter Mentions",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 180],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets/search/recent",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "query", "value": "@yourbrand"},
+            {"name": "tweet.fields", "value": "created_at,text"},
+            {"name": "max_results", "value": "100"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Get Instagram Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 420],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.ig_user_id }}/media",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "fields", "value": "id,comments{text,timestamp}"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Merge Mentions",
+      "type": "n8n-nodes-base.merge",
+      "position": [720, 300],
+      "parameters": {
+        "mode": "append"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sentiment Analysis",
+      "type": "n8n-nodes-base.code",
+      "position": [920, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst positiveWords = ['love','great','awesome','amazing','excellent','good','best','happy','fantastic','wonderful'];\nconst negativeWords = ['hate','bad','terrible','awful','worst','horrible','disappointed','angry','poor','broken'];\n\nlet positive = 0, negative = 0, neutral = 0;\nconst results = [];\n\nfor (const item of items) {\n  const texts = item.json.data || [item.json];\n  for (const entry of texts) {\n    const text = (entry.text || '').toLowerCase();\n    const posCount = positiveWords.filter(w => text.includes(w)).length;\n    const negCount = negativeWords.filter(w => text.includes(w)).length;\n    let sentiment = 'neutral';\n    if (posCount > negCount) { sentiment = 'positive'; positive++; }\n    else if (negCount > posCount) { sentiment = 'negative'; negative++; }\n    else { neutral++; }\n    results.push({text: entry.text, sentiment});\n  }\n}\n\nconst total = positive + negative + neutral;\nreturn [{\n  json: {\n    date: new Date().toISOString(),\n    total_mentions: total,\n    positive, negative, neutral,\n    negative_ratio: total > 0 ? (negative / total * 100).toFixed(1) : '0',\n    spike_detected: total > 0 && (negative / total) > 0.4\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save to Dashboard",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1120, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Sentiment Dashboard",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Check Negative Spike",
+      "type": "n8n-nodes-base.if",
+      "position": [1320, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.spike_detected }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1520, 250],
+      "parameters": {
+        "chatId": "",
+        "text": "⚠️ NEGATIVE SENTIMENT SPIKE\n\nNegative ratio: {{ $json.negative_ratio }}%\nTotal mentions: {{ $json.total_mentions }}\nNegative: {{ $json.negative }}\n\nCheck the dashboard immediately!",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 80],
+      "parameters": {
+        "content": "## Social Media Sentiment Dashboard\nRuns hourly. Fetches mentions from Twitter and Instagram in parallel, performs keyword-based sentiment analysis, logs to a Google Sheets dashboard, and sends a Telegram alert if the negative sentiment ratio exceeds 40%."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [
+        [
+          {"node": "Get Twitter Mentions", "type": "main", "index": 0},
+          {"node": "Get Instagram Comments", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Get Twitter Mentions": {
+      "main": [[{"node": "Merge Mentions", "type": "main", "index": 0}]]
+    },
+    "Get Instagram Comments": {
+      "main": [[{"node": "Merge Mentions", "type": "main", "index": 0}]]
+    },
+    "Merge Mentions": {
+      "main": [[{"node": "Sentiment Analysis", "type": "main", "index": 0}]]
+    },
+    "Sentiment Analysis": {
+      "main": [[{"node": "Save to Dashboard", "type": "main", "index": 0}]]
+    },
+    "Save to Dashboard": {
+      "main": [[{"node": "Check Negative Spike", "type": "main", "index": 0}]]
+    },
+    "Check Negative Spike": {
+      "main": [
+        [{"node": "Telegram Alert", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  }
+}

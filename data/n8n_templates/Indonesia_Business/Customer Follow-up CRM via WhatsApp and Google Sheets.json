@@ -1,0 +1,122 @@
+{
+  "name": "Customer Follow-up CRM via WhatsApp and Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "0 9 * * 1-5"}]
+        }
+      },
+      "name": "Weekday Morning Check (9AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Customers"},
+        "options": {"range": "A:L"}
+      },
+      "name": "Read Customer Database",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const customers = $input.all();\nconst now = new Date();\nconst today = now.getTime();\nconst oneDay = 24 * 60 * 60 * 1000;\n\nconst followUps = [];\n\nfor (const cust of customers) {\n  const c = cust.json;\n  const lastContact = c.tanggal_kontak_terakhir || c.last_contact;\n  const lastPurchase = c.tanggal_pembelian_terakhir || c.last_purchase;\n  const status = (c.status || '').toLowerCase();\n  \n  if (status === 'inactive' || status === 'blacklist') continue;\n  \n  const lastContactDate = lastContact ? new Date(lastContact).getTime() : 0;\n  const lastPurchaseDate = lastPurchase ? new Date(lastPurchase).getTime() : 0;\n  const daysSinceContact = Math.floor((today - lastContactDate) / oneDay);\n  const daysSincePurchase = Math.floor((today - lastPurchaseDate) / oneDay);\n  \n  let followUpType = null;\n  let priority = 'normal';\n  let message = '';\n  const nama = c.nama || c.name || 'Pelanggan';\n  const sapaan = c.sapaan || 'Bapak/Ibu';\n  \n  // New lead - not yet contacted\n  if (status === 'lead' && daysSinceContact > 1) {\n    followUpType = 'new_lead';\n    priority = 'high';\n    message = `Selamat pagi ${sapaan} ${nama} 🙏\\n\\nPerkenalkan, saya dari ${c.sales_name || 'Tim Sales'}. Terima kasih sudah tertarik dengan produk kami.\\n\\nApakah ada yang bisa kami bantu? Kami siap memberikan penawaran terbaik untuk Anda.\\n\\nTerima kasih 🙏`;\n  }\n  // Quoted but no response for 3 days\n  else if (status === 'quoted' && daysSinceContact >= 3) {\n    followUpType = 'quote_followup';\n    priority = 'high';\n    message = `Selamat pagi ${sapaan} ${nama} 🙏\\n\\nMohon maaf mengganggu, kami ingin follow up mengenai penawaran yang sudah kami kirimkan sebelumnya.\\n\\nApakah ada pertanyaan atau hal yang perlu kami jelaskan lebih lanjut?\\n\\nKami juga bisa menyesuaikan penawaran sesuai kebutuhan ${sapaan}.\\n\\nTerima kasih 🙏`;\n  }\n  // Customer hasn't purchased in 30 days\n  else if ((status === 'customer' || status === 'pelanggan') && daysSincePurchase >= 30) {\n    followUpType = 'repeat_purchase';\n    priority = daysSincePurchase > 60 ? 'high' : 'normal';\n    message = `Selamat pagi ${sapaan} ${nama} 🙏\\n\\nSemoga ${sapaan} selalu dalam keadaan baik. Kami ingin menanyakan kabar dan apakah ada kebutuhan yang bisa kami bantu?\\n\\n${daysSincePurchase > 60 ? 'Sudah lama kami tidak bertemu, kami punya promo spesial untuk pelanggan setia! 🎉' : 'Kami sedang ada penawaran menarik yang mungkin cocok untuk kebutuhan Anda.'}\\n\\nTerima kasih selalu mempercayai kami 🙏`;\n  }\n  // After-sales check - 7 days after purchase\n  else if (status === 'delivered' && daysSincePurchase >= 7 && daysSincePurchase <= 14) {\n    followUpType = 'after_sales';\n    priority = 'normal';\n    message = `Selamat pagi ${sapaan} ${nama} 🙏\\n\\nSemoga barang yang ${sapaan} terima dalam kondisi baik. Bagaimana pengalaman menggunakan produk kami?\\n\\nJika ada kendala atau pertanyaan, jangan ragu untuk menghubungi kami ya.\\n\\nTerima kasih 🙏`;\n  }\n  \n  if (followUpType) {\n    followUps.push({\n      json: {\n        customer_id: c.customer_id || c.id,\n        nama: nama,\n        sapaan: sapaan,\n        whatsapp: c.whatsapp || c.no_hp || c.phone,\n        email: c.email || '',\n        kota: c.kota || c.city || '-',\n        status: status,\n        follow_up_type: followUpType,\n        priority: priority,\n        days_since_contact: daysSinceContact,\n        days_since_purchase: daysSincePurchase,\n        message: message,\n        sales_name: c.sales_name || c.pic || '-'\n      }\n    });\n  }\n}\n\n// Sort by priority (high first)\nfollowUps.sort((a, b) => (a.json.priority === 'high' ? -1 : 1));\n\nreturn followUps.length > 0 ? followUps : [{json: {no_followup: true}}];"
+      },
+      "name": "Identify Follow-ups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false},
+          "combinator": "and",
+          "conditions": [
+            {"leftValue": "={{ $json.no_followup }}", "rightValue": true, "operator": {"type": "boolean", "operation": "notTrue"}}
+          ]
+        }
+      },
+      "name": "Has Follow-ups?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [930, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.fonnte.com/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "target", "value": "={{ $json.whatsapp }}"},
+            {"name": "message", "value": "={{ $json.message }}"}
+          ]
+        },
+        "options": {}
+      },
+      "name": "Send WhatsApp (Fonnte)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 200],
+      "credentials": {
+        "httpHeaderAuth": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Follow-up Log"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              {"column": "tanggal", "value": "={{ $now.format('dd/MM/yyyy HH:mm') }}"},
+              {"column": "customer_id", "value": "={{ $json.customer_id }}"},
+              {"column": "nama", "value": "={{ $json.nama }}"},
+              {"column": "tipe", "value": "={{ $json.follow_up_type }}"},
+              {"column": "priority", "value": "={{ $json.priority }}"},
+              {"column": "status", "value": "Sent via WhatsApp"},
+              {"column": "sales", "value": "={{ $json.sales_name }}"}
+            ]
+          }
+        }
+      },
+      "name": "Log Follow-up",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1180, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Customer CRM Follow-up (Indonesia)\n\n### Auto-identifies customers needing follow-up:\n- **New Lead**: Not contacted in >1 day → intro message\n- **Quote Follow-up**: Quoted >3 days ago, no response\n- **Repeat Purchase**: Active customer, no purchase in 30+ days\n- **After-Sales**: 7-14 days after delivery → satisfaction check\n\n### Messages in Bahasa Indonesia with:\n- Proper sapaan (Bapak/Ibu)\n- Professional tone\n- Context-aware messaging\n\n### Required Sheets columns:\ncustomer_id, nama, sapaan, whatsapp, email, kota, status (lead/quoted/customer/delivered), tanggal_kontak_terakhir, tanggal_pembelian_terakhir, sales_name\n\n### WhatsApp via Fonnte API (popular in Indonesia)\nAlternatives: Wablas, WA Gateway, Twilio"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 60]
+    }
+  ],
+  "connections": {
+    "Weekday Morning Check (9AM)": {"main": [[{"node": "Read Customer Database", "type": "main", "index": 0}]]},
+    "Read Customer Database": {"main": [[{"node": "Identify Follow-ups", "type": "main", "index": 0}]]},
+    "Identify Follow-ups": {"main": [[{"node": "Has Follow-ups?", "type": "main", "index": 0}]]},
+    "Has Follow-ups?": {"main": [[{"node": "Send WhatsApp (Fonnte)", "type": "main", "index": 0}, {"node": "Log Follow-up", "type": "main", "index": 0}], []]},
+    "Send WhatsApp (Fonnte)": {"main": [[]]}
+  }
+}

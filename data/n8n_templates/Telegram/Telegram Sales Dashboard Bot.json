@@ -1,0 +1,108 @@
+{
+  "name": "Telegram Sales Dashboard Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst text = (items[0].json.message?.text || '').trim();\nconst chatId = items[0].json.message?.chat?.id;\nconst username = items[0].json.message?.from?.username || 'user';\n\nlet command = 'help';\nif (text === '/report' || text === '/report today') command = 'report';\nelse if (text === '/report week') command = 'weekly';\nelse if (text === '/report month') command = 'monthly';\n\nreturn [{ json: { command, chatId, username } }];"
+      },
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Sales" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Read Sales Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst command = '{{$node[\"Parse Command\"].json.command}}';\nconst now = new Date();\nconst today = now.toISOString().split('T')[0];\n\nconst sales = items.map(i => ({\n  ...i.json,\n  amount: parseFloat(i.json.amount || 0),\n  date: i.json.date || ''\n}));\n\n// Today\nconst todaySales = sales.filter(s => s.date === today);\nconst todayTotal = todaySales.reduce((sum, s) => sum + s.amount, 0);\nconst todayCount = todaySales.length;\n\n// This week (last 7 days)\nconst weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];\nconst weekSales = sales.filter(s => s.date >= weekAgo);\nconst weekTotal = weekSales.reduce((sum, s) => sum + s.amount, 0);\nconst weekCount = weekSales.length;\n\n// This month\nconst monthStr = today.substring(0, 7);\nconst monthSales = sales.filter(s => s.date.startsWith(monthStr));\nconst monthTotal = monthSales.reduce((sum, s) => sum + s.amount, 0);\nconst monthCount = monthSales.length;\n\n// Top products\nconst productMap = {};\nsales.forEach(s => {\n  const p = s.product || 'Unknown';\n  if (!productMap[p]) productMap[p] = { count: 0, total: 0 };\n  productMap[p].count++;\n  productMap[p].total += s.amount;\n});\nconst topProducts = Object.entries(productMap)\n  .sort((a, b) => b[1].total - a[1].total)\n  .slice(0, 5);\n\nlet text = `📊 <b>Sales Dashboard</b>\\n`;\ntext += `━━━━━━━━━━━━━━━━━━\\n\\n`;\n\ntext += `📅 <b>Today (${today})</b>\\n`;\ntext += `  💰 Revenue: Rp ${todayTotal.toLocaleString()}\\n`;\ntext += `  📦 Orders: ${todayCount}\\n`;\ntext += `  📈 Avg: Rp ${todayCount > 0 ? Math.round(todayTotal / todayCount).toLocaleString() : 0}\\n\\n`;\n\ntext += `📆 <b>This Week</b>\\n`;\ntext += `  💰 Revenue: Rp ${weekTotal.toLocaleString()}\\n`;\ntext += `  📦 Orders: ${weekCount}\\n\\n`;\n\ntext += `📅 <b>This Month</b>\\n`;\ntext += `  💰 Revenue: Rp ${monthTotal.toLocaleString()}\\n`;\ntext += `  📦 Orders: ${monthCount}\\n\\n`;\n\ntext += `🏆 <b>Top Products</b>\\n`;\ntopProducts.forEach(([name, data], idx) => {\n  text += `  ${idx + 1}. ${name} — Rp ${data.total.toLocaleString()} (${data.count}x)\\n`;\n});\n\ntext += `\\n━━━━━━━━━━━━━━━━━━\\n`;\ntext += `Generated: ${now.toISOString()}`;\n\nreturn [{ json: { text } }];"
+      },
+      "name": "Calculate Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Command'].json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Sales Dashboard Bot\n\n/report — generates today/week/month sales summary from Google Sheets.\n\n**Setup:**\n1. Create Google Sheet 'Sales': date, product, amount, customer, salesperson\n2. Set Telegram Bot credentials\n3. Populate with sales data (or connect to your POS/CRM)",
+        "width": 420,
+        "height": 200
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [{ "node": "Read Sales Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sales Data": {
+      "main": [
+        [{ "node": "Calculate Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Report": {
+      "main": [
+        [{ "node": "Send Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

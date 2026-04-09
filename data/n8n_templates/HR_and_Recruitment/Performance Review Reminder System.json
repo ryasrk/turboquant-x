@@ -1,0 +1,234 @@
+{
+  "name": "Performance Review Reminder System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtMonth": [0, 3, 6, 9],
+              "triggerAtDayOfMonth": 1,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "name": "Quarterly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Employees"
+        },
+        "options": {}
+      },
+      "name": "Read Employee List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const employees = $input.all().map(i => i.json);\nconst now = new Date();\nconst results = employees.map(emp => {\n  const lastReview = emp.lastReviewDate ? new Date(emp.lastReviewDate) : null;\n  const daysSinceReview = lastReview ? Math.floor((now - lastReview) / (1000 * 60 * 60 * 24)) : 999;\n  const isOverdue = daysSinceReview > 100;\n  const needsReview = daysSinceReview > 80;\n  return {\n    ...emp,\n    daysSinceReview,\n    isOverdue,\n    needsReview,\n    reviewStatus: isOverdue ? 'overdue' : needsReview ? 'due_soon' : 'current'\n  };\n});\nreturn results.filter(r => r.needsReview || r.isOverdue).map(r => ({ json: r }));"
+      },
+      "name": "Check Last Review Date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.isOverdue}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Is Overdue?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.managerEmail}}",
+        "subject": "=OVERDUE: Performance Review Required - {{$json.name}}",
+        "emailType": "text",
+        "message": "=Dear {{$json.managerName}},\n\nThis is an ESCALATION notice. The performance review for {{$json.name}} ({{$json.position}}) is OVERDUE.\n\nLast review date: {{$json.lastReviewDate || 'Never'}}\nDays since last review: {{$json.daysSinceReview}}\n\nPlease schedule and complete this review within the next 5 business days. If you need assistance, please contact HR.\n\nThis notification has also been sent to the HR Director.\n\nBest regards,\nHR Automation System",
+        "options": {}
+      },
+      "name": "Escalate Overdue Reviews",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1130, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.managerEmail}}",
+        "subject": "=Reminder: Performance Review Due - {{$json.name}}",
+        "emailType": "text",
+        "message": "=Dear {{$json.managerName}},\n\nThis is a friendly reminder that a performance review is due for {{$json.name}} ({{$json.position}}).\n\nLast review date: {{$json.lastReviewDate || 'Never'}}\nDays since last review: {{$json.daysSinceReview}}\n\nPlease schedule the review at your earliest convenience. Quarterly reviews help track growth and align goals.\n\nBest regards,\nHR Automation System",
+        "options": {}
+      },
+      "name": "Send Manager Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1130, 420],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Review Reminders Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employeeName": "={{$json.name}}",
+            "managerName": "={{$json.managerName}}",
+            "reviewStatus": "={{$json.reviewStatus}}",
+            "daysSinceReview": "={{$json.daysSinceReview}}",
+            "reminderSentAt": "={{$now.toISO()}}",
+            "escalated": "={{$json.isOverdue}}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1350, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Performance Review Reminder System\n\n**Trigger:** Quarterly schedule (1st of Jan, Apr, Jul, Oct at 9 AM)\n**Process:**\n1. Read all employees from sheet\n2. Check last review date vs today\n3. If >100 days: OVERDUE → escalate to manager + HR Director\n4. If >80 days: DUE SOON → send reminder to manager\n5. Log all reminders to tracking sheet\n\n**Setup:**\n- 'Employees' sheet: name, email, position, managerName, managerEmail, lastReviewDate\n- 'Review Reminders Log' sheet for audit trail\n- Gmail credentials for sending reminders",
+        "width": 420,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -40]
+    }
+  ],
+  "connections": {
+    "Quarterly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Employee List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Employee List": {
+      "main": [
+        [
+          {
+            "node": "Check Last Review Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Last Review Date": {
+      "main": [
+        [
+          {
+            "node": "Is Overdue?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Overdue?": {
+      "main": [
+        [
+          {
+            "node": "Escalate Overdue Reviews",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Manager Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate Overdue Reviews": {
+      "main": [
+        [
+          {
+            "node": "Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Manager Reminder": {
+      "main": [
+        [
+          {
+            "node": "Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

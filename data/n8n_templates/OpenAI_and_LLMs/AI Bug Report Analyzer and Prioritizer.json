@@ -1,0 +1,165 @@
+{
+  "name": "AI Bug Report Analyzer and Prioritizer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze-bug",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Bug Report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a QA engineering AI. Analyze this bug report and provide triage information.\n\nReturn JSON:\n{\n  \"title\": \"concise bug title\",\n  \"severity\": \"critical/high/medium/low\",\n  \"impact\": \"description of user/business impact\",\n  \"category\": \"UI/Backend/API/Database/Performance/Security/Integration\",\n  \"affected_component\": \"best guess of affected system component\",\n  \"reproducibility\": \"always/sometimes/rare/unknown\",\n  \"suggested_priority\": \"P0/P1/P2/P3\",\n  \"estimated_effort\": \"hours estimate (1-40)\",\n  \"root_cause_hypothesis\": \"likely root cause\",\n  \"suggested_fix\": \"recommended approach to fix\",\n  \"workaround\": \"temporary workaround if any\",\n  \"is_critical\": true/false\n}\n\nBug Report:\nReporter: {{ $json.body.reporter || 'Unknown' }}\nEnvironment: {{ $json.body.environment || 'Not specified' }}\nDescription: {{ $json.body.description }}\nSteps to Reproduce: {{ $json.body.steps || 'Not provided' }}\nExpected Behavior: {{ $json.body.expected || 'Not provided' }}\nActual Behavior: {{ $json.body.actual || 'Not provided' }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1000
+        }
+      },
+      "name": "OpenAI - Analyze Bug",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { title: 'Error parsing', severity: 'medium', is_critical: false, suggested_priority: 'P2' };\n}\nreturn [{\n  json: {\n    date: new Date().toISOString(),\n    reporter: items[0].json.body?.reporter || 'Unknown',\n    title: parsed.title || '',\n    severity: parsed.severity || 'medium',\n    impact: parsed.impact || '',\n    category: parsed.category || '',\n    affectedComponent: parsed.affected_component || '',\n    reproducibility: parsed.reproducibility || 'unknown',\n    priority: parsed.suggested_priority || 'P2',\n    estimatedEffort: parsed.estimated_effort || '',\n    rootCause: parsed.root_cause_hypothesis || '',\n    suggestedFix: parsed.suggested_fix || '',\n    workaround: parsed.workaround || '',\n    isCritical: parsed.is_critical || false,\n    originalDescription: items[0].json.body?.description || ''\n  }\n}];"
+      },
+      "name": "Code - Parse Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Timestamp": "={{ $json.date }}",
+            "Reporter": "={{ $json.reporter }}",
+            "Title": "={{ $json.title }}",
+            "Severity": "={{ $json.severity }}",
+            "Priority": "={{ $json.priority }}",
+            "Category": "={{ $json.category }}",
+            "Component": "={{ $json.affectedComponent }}",
+            "Impact": "={{ $json.impact }}",
+            "Root Cause": "={{ $json.rootCause }}",
+            "Suggested Fix": "={{ $json.suggestedFix }}",
+            "Effort (hrs)": "={{ $json.estimatedEffort }}"
+          },
+          "schema": [
+            { "id": "Timestamp", "type": "string", "display": true },
+            { "id": "Reporter", "type": "string", "display": true },
+            { "id": "Title", "type": "string", "display": true },
+            { "id": "Severity", "type": "string", "display": true },
+            { "id": "Priority", "type": "string", "display": true },
+            { "id": "Category", "type": "string", "display": true },
+            { "id": "Component", "type": "string", "display": true },
+            { "id": "Impact", "type": "string", "display": true },
+            { "id": "Root Cause", "type": "string", "display": true },
+            { "id": "Suggested Fix", "type": "string", "display": true },
+            { "id": "Effort (hrs)", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Bug Triage",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isCritical }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "IF - Critical Bug",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 *CRITICAL BUG REPORTED*\n\n*{{ $json.title }}*\nSeverity: {{ $json.severity }} | Priority: {{ $json.priority }}\n\n*Impact:* {{ $json.impact }}\n*Category:* {{ $json.category }} ({{ $json.affectedComponent }})\n*Root Cause:* {{ $json.rootCause }}\n\n*Workaround:* {{ $json.workaround || 'None available' }}\n\n*Reporter:* {{ $json.reporter }}\n_{{ $json.date }}_",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "name": "Telegram - Critical Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1500, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 200,
+        "content": "## AI Bug Report Analyzer & Prioritizer\n\n**Setup:**\n1. Connect OpenAI API, Google Sheets OAuth2, Telegram Bot credentials\n2. Set spreadsheet ID for bug triage board\n3. Set Telegram chat ID for critical alerts\n4. POST to webhook: `{\"description\": \"bug description\", \"reporter\": \"name\", \"environment\": \"prod\", \"steps\": \"1. Do X...\", \"expected\": \"Y should happen\", \"actual\": \"Z happened\"}`\n\nAnalyzes bugs for severity/impact/category, suggests root cause and fix, triages to Sheets, and sends Telegram alert for critical issues."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Bug Report": {
+      "main": [[{ "node": "OpenAI - Analyze Bug", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Analyze Bug": {
+      "main": [[{ "node": "Code - Parse Analysis", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Analysis": {
+      "main": [[{ "node": "Google Sheets - Bug Triage", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Bug Triage": {
+      "main": [[{ "node": "IF - Critical Bug", "type": "main", "index": 0 }]]
+    },
+    "IF - Critical Bug": {
+      "main": [
+        [{ "node": "Telegram - Critical Alert", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

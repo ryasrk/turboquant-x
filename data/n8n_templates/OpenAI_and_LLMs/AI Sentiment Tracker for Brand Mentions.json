@@ -1,0 +1,183 @@
+{
+  "name": "AI Sentiment Tracker for Brand Mentions",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 6 }] }
+      },
+      "name": "Schedule - Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.example.com/mentions?brand={{ encodeURIComponent('YourBrand') }}&limit=50",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "name": "HTTP - Fetch Brand Mentions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst responseData = items[0].json.body || items[0].json;\nlet mentions = [];\nif (Array.isArray(responseData)) {\n  mentions = responseData;\n} else if (responseData.results) {\n  mentions = responseData.results;\n} else if (responseData.data) {\n  mentions = responseData.data;\n}\nconst mentionTexts = mentions.slice(0, 20).map((m, i) => `[${i+1}] Source: ${m.source || 'unknown'} | Text: ${m.text || m.content || JSON.stringify(m).substring(0, 200)}`).join('\\n');\nreturn [{ json: { mentionTexts, mentionCount: mentions.length, rawMentions: mentions.slice(0, 20) } }];"
+      },
+      "name": "Code - Prepare Mentions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze the sentiment of each brand mention below. For each mention, classify as: positive, negative, or neutral.\n\nAlso provide:\n- Overall sentiment distribution (% positive, negative, neutral)\n- Top 3 positive themes\n- Top 3 negative themes (if any)\n- Urgency flag: true if any mention indicates a PR crisis or widespread negativity\n\nReturn JSON:\n{\n  \"mentions\": [{\"id\": 1, \"sentiment\": \"positive\", \"score\": 0.9, \"summary\": \"brief\"}],\n  \"distribution\": {\"positive\": 60, \"negative\": 20, \"neutral\": 20},\n  \"positive_themes\": [],\n  \"negative_themes\": [],\n  \"urgency\": false,\n  \"overall_summary\": \"brief overall assessment\"\n}\n\nMentions:\n{{ $json.mentionTexts }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 2000
+        }
+      },
+      "name": "OpenAI - Sentiment Analysis",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { distribution: {}, urgency: false, overall_summary: aiResponse };\n}\nreturn [{\n  json: {\n    date: new Date().toISOString(),\n    positivePercent: parsed.distribution?.positive || 0,\n    negativePercent: parsed.distribution?.negative || 0,\n    neutralPercent: parsed.distribution?.neutral || 0,\n    positiveThemes: Array.isArray(parsed.positive_themes) ? parsed.positive_themes.join(', ') : '',\n    negativeThemes: Array.isArray(parsed.negative_themes) ? parsed.negative_themes.join(', ') : '',\n    urgency: parsed.urgency || false,\n    overallSummary: parsed.overall_summary || '',\n    mentionCount: items[0].json.mentionCount || 0\n  }\n}];"
+      },
+      "name": "Code - Parse Sentiment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Timestamp": "={{ $json.date }}",
+            "Mentions Count": "={{ $json.mentionCount }}",
+            "Positive %": "={{ $json.positivePercent }}",
+            "Negative %": "={{ $json.negativePercent }}",
+            "Neutral %": "={{ $json.neutralPercent }}",
+            "Positive Themes": "={{ $json.positiveThemes }}",
+            "Negative Themes": "={{ $json.negativeThemes }}",
+            "Summary": "={{ $json.overallSummary }}"
+          },
+          "schema": [
+            { "id": "Timestamp", "type": "string", "display": true },
+            { "id": "Mentions Count", "type": "string", "display": true },
+            { "id": "Positive %", "type": "string", "display": true },
+            { "id": "Negative %", "type": "string", "display": true },
+            { "id": "Neutral %", "type": "string", "display": true },
+            { "id": "Positive Themes", "type": "string", "display": true },
+            { "id": "Negative Themes", "type": "string", "display": true },
+            { "id": "Summary", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Dashboard",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.urgency }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "IF - Negative Alert",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1750, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 *Brand Sentiment Alert*\n\nNegative sentiment detected: {{ $json.negativePercent }}%\n\n*Negative Themes:* {{ $json.negativeThemes }}\n\n*Summary:* {{ $json.overallSummary }}\n\n_{{ $json.date }}_",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "name": "Telegram - Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2000, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 900,
+        "height": 200,
+        "content": "## AI Sentiment Tracker for Brand Mentions\n\n**Setup:**\n1. Connect OpenAI API, Google Sheets OAuth2, Telegram Bot credentials\n2. Update the HTTP node URL with your brand monitoring API endpoint\n3. Set Telegram chat ID for alerts\n4. Set Google Sheets document ID\n\nRuns every 6 hours, scrapes brand mentions, analyzes sentiment with GPT, logs to a dashboard spreadsheet, and sends Telegram alerts when negative sentiment is detected."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Schedule - Every 6 Hours": {
+      "main": [[{ "node": "HTTP - Fetch Brand Mentions", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Fetch Brand Mentions": {
+      "main": [[{ "node": "Code - Prepare Mentions", "type": "main", "index": 0 }]]
+    },
+    "Code - Prepare Mentions": {
+      "main": [[{ "node": "OpenAI - Sentiment Analysis", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Sentiment Analysis": {
+      "main": [[{ "node": "Code - Parse Sentiment", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Sentiment": {
+      "main": [[{ "node": "Google Sheets - Dashboard", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Dashboard": {
+      "main": [[{ "node": "IF - Negative Alert", "type": "main", "index": 0 }]]
+    },
+    "IF - Negative Alert": {
+      "main": [
+        [{ "node": "Telegram - Alert", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

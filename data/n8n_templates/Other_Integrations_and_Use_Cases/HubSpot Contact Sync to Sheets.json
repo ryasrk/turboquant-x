@@ -1,0 +1,107 @@
+{
+  "name": "HubSpot Contact Sync to Sheets",
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 6 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Fetch HubSpot Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+        "method": "GET",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "limit", "value": "100" },
+            { "name": "properties", "value": "firstname,lastname,email,phone,company,lifecyclestage,createdate,lastmodifieddate" }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Transform Contacts",
+      "type": "n8n-nodes-base.code",
+      "position": [710, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = items[0]?.json?.results || [];\nconst now = new Date().toISOString();\nreturn results.map(contact => {\n  const props = contact.properties || {};\n  return {\n    json: {\n      hubspotId: contact.id || '',\n      firstName: props.firstname || '',\n      lastName: props.lastname || '',\n      email: props.email || '',\n      phone: props.phone || '',\n      company: props.company || '',\n      lifecycleStage: props.lifecyclestage || '',\n      createdDate: props.createdate || '',\n      lastModified: props.lastmodifieddate || '',\n      syncedAt: now\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Sync",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Diff Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1170, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=HubSpot Contact Sync Report - {{ $now.toISODate() }}",
+        "message": "=HubSpot contact sync completed.\n\nTotal contacts synced: {{ $input.all().length }}\nSync time: {{ $now.toISO() }}\n\nContacts have been updated in Google Sheets.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## HubSpot Contact Sync to Sheets\nScheduled sync of HubSpot CRM contacts to Google Sheets with email diff reports.\n\n**Setup:**\n1. Set HubSpot API key in HTTP Header Auth (Bearer token)\n2. Connect Google Sheets with your contacts spreadsheet\n3. Configure Gmail for sync reports\n4. Adjust schedule frequency as needed (default: every 6 hours)"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Fetch HubSpot Contacts", "type": "main", "index": 0 }]]
+    },
+    "Fetch HubSpot Contacts": {
+      "main": [[{ "node": "Transform Contacts", "type": "main", "index": 0 }]]
+    },
+    "Transform Contacts": {
+      "main": [[{ "node": "Sheets Sync", "type": "main", "index": 0 }]]
+    },
+    "Sheets Sync": {
+      "main": [[{ "node": "Email Diff Report", "type": "main", "index": 0 }]]
+    }
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "name": "Sheets Change Detector and Alert",
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Current Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Data" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Previous Snapshot",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 500],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Snapshot" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Compare Data",
+      "type": "n8n-nodes-base.code",
+      "position": [760, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst currentHash = JSON.stringify(items.map(i => i.json));\n\n// Compare with stored snapshot hash\nconst previousHash = items.length > 0 && items[0].json._snapshotHash ? items[0].json._snapshotHash : '';\nconst hasChanged = currentHash !== previousHash;\n\nconst changes = [];\nif (hasChanged) {\n  changes.push({ type: 'data_modified', timestamp: new Date().toISOString() });\n}\n\nreturn [{ json: { hasChanged, changeCount: changes.length, changes, currentHash, checkedAt: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "If Changed",
+      "type": "n8n-nodes-base.if",
+      "position": [980, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasChanged }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save New Snapshot",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1200, 300],
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Snapshot" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1420, 300],
+      "parameters": {
+        "chatId": "",
+        "text": "=🔔 Sheet Change Detected!\n\nChanges found: {{ $json.changeCount }}\nChecked at: {{ $json.checkedAt }}\n\nReview your Google Sheet for details.",
+        "additionalFields": {}
+      },
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1300,
+        "height": 100,
+        "content": "### Sheets Change Detector and Alert\nPolls a Google Sheet every 5 minutes, compares with previous snapshot stored in a separate Sheet tab, and sends a Telegram alert when changes are detected."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[
+        { "node": "Read Current Data", "type": "main", "index": 0 },
+        { "node": "Read Previous Snapshot", "type": "main", "index": 0 }
+      ]]
+    },
+    "Read Current Data": { "main": [[{ "node": "Compare Data", "type": "main", "index": 0 }]] },
+    "Read Previous Snapshot": { "main": [[{ "node": "Compare Data", "type": "main", "index": 0 }]] },
+    "Compare Data": { "main": [[{ "node": "If Changed", "type": "main", "index": 0 }]] },
+    "If Changed": {
+      "main": [
+        [{ "node": "Save New Snapshot", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Save New Snapshot": { "main": [[{ "node": "Telegram Alert", "type": "main", "index": 0 }]] }
+  }
+}

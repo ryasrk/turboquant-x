@@ -1,0 +1,112 @@
+{
+  "name": "AI Powered Data Categorizer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "categorize-data",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst batch = items[0].json.body.items || items[0].json.body.data || [];\n\n// Prepare items for classification\nconst preparedItems = batch.map((item, i) => ({\n  index: i,\n  text: typeof item === 'string' ? item : item.text || item.description || item.content || JSON.stringify(item),\n  original: item\n}));\n\n// Split into chunks of 10 for API efficiency\nconst chunks = [];\nfor (let i = 0; i < preparedItems.length; i += 10) {\n  chunks.push(preparedItems.slice(i, i + 10));\n}\n\nreturn chunks.map(chunk => ({\n  json: {\n    items: chunk,\n    categories: items[0].json.body.categories || ['Technology', 'Business', 'Science', 'Health', 'Education', 'Other'],\n    batchSize: chunk.length\n  }\n}));"
+      },
+      "name": "Prepare Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Classify each item into one of these categories: {{ $json.categories.join(', ') }}\n\nItems to classify:\n{{ $json.items.map(i => `${i.index}: ${i.text}`).join('\\n') }}\n\nRespond in JSON format:\n[{\"index\": 0, \"category\": \"...\", \"confidence\": 0.95, \"reason\": \"brief reason\"}]"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 2000
+        }
+      },
+      "name": "OpenAI Classify",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst categorized = {};\n\nfor (const item of items) {\n  let classifications;\n  try {\n    const content = item.json.message.content;\n    const jsonMatch = content.match(/\\[.*\\]/s);\n    classifications = jsonMatch ? JSON.parse(jsonMatch[0]) : [];\n  } catch (e) {\n    classifications = [];\n  }\n\n  for (const cls of classifications) {\n    const category = cls.category || 'Uncategorized';\n    if (!categorized[category]) categorized[category] = [];\n    categorized[category].push({\n      text: cls.text || `Item ${cls.index}`,\n      confidence: cls.confidence || 0,\n      reason: cls.reason || ''\n    });\n  }\n}\n\nconst summary = Object.entries(categorized).map(([category, items]) => ({\n  category,\n  count: items.length,\n  items\n}));\n\nreturn [{\n  json: {\n    totalItems: summary.reduce((a, c) => a + c.count, 0),\n    categoryCount: summary.length,\n    categories: summary,\n    processedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Organize by Category",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "total_items": "={{ $json.totalItems }}",
+            "categories": "={{ JSON.stringify($json.categories) }}",
+            "processed_at": "={{ $json.processedAt }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Sorted Output",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1130, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Powered Data Categorizer\n\nReceives a batch of items via webhook, uses OpenAI to classify each item into categories, organizes results, and writes sorted output to Google Sheets.\n\n**Setup:**\n1. Add OpenAI API key and Google Sheets credentials\n2. POST: `{\"items\": [\"item1\", \"item2\"], \"categories\": [\"Cat1\", \"Cat2\"]}`\n3. Categories are optional — defaults provided"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Prepare Batch", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Batch": {
+      "main": [
+        [{ "node": "OpenAI Classify", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Classify": {
+      "main": [
+        [{ "node": "Organize by Category", "type": "main", "index": 0 }]
+      ]
+    },
+    "Organize by Category": {
+      "main": [
+        [{ "node": "Write Sorted Output", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "name": "Twitter Mention Auto-Responder",
+  "nodes": [
+    {
+      "name": "Every 10 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 10}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Mentions",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/users/{{ $json.user_id }}/mentions",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "tweet.fields", "value": "created_at,author_id,text"},
+            {"name": "max_results", "value": "20"},
+            {"name": "since_id", "value": "={{ $json.last_mention_id || '' }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Check New Mentions",
+      "type": "n8n-nodes-base.if",
+      "position": [650, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ ($json.meta?.result_count) || 0 }}",
+              "value2": 0,
+              "operation": "larger"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Generate Replies",
+      "type": "n8n-nodes-base.code",
+      "position": [850, 250],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst mentions = items[0].json.data || [];\n\nreturn mentions.map(mention => {\n  let reply = '';\n  const text = mention.text.toLowerCase();\n  if (text.includes('help') || text.includes('support')) {\n    reply = `@${mention.author_id} Thanks for reaching out! Please DM us for support or visit our help center. We're here to help! 🙏`;\n  } else if (text.includes('love') || text.includes('great') || text.includes('awesome')) {\n    reply = `@${mention.author_id} Thank you so much for the kind words! We really appreciate your support! ❤️`;\n  } else {\n    reply = `@${mention.author_id} Thanks for mentioning us! We appreciate you being part of our community. 😊`;\n  }\n  return {json: {mention_id: mention.id, author_id: mention.author_id, original_text: mention.text, reply_text: reply}};\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Post Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 250],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "text", "value": "={{ $json.reply_text }}"},
+            {"name": "reply.in_reply_to_tweet_id", "value": "={{ $json.mention_id }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1250, 250],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Mention Replies",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Twitter Mention Auto-Responder\nChecks for new mentions every 10 minutes. Generates contextual replies based on mention content (support, praise, general), posts replies via the Twitter API, and logs all interactions to Google Sheets."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Every 10 Minutes": {
+      "main": [[{"node": "Get Mentions", "type": "main", "index": 0}]]
+    },
+    "Get Mentions": {
+      "main": [[{"node": "Check New Mentions", "type": "main", "index": 0}]]
+    },
+    "Check New Mentions": {
+      "main": [
+        [{"node": "Generate Replies", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Generate Replies": {
+      "main": [[{"node": "Post Reply", "type": "main", "index": 0}]]
+    },
+    "Post Reply": {
+      "main": [[{"node": "Log to Sheets", "type": "main", "index": 0}]]
+    }
+  }
+}

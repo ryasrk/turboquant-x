@@ -1,0 +1,108 @@
+{
+  "name": "SendGrid Email Campaign Tracker",
+  "nodes": [
+    {
+      "name": "Webhook SendGrid Events",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "sendgrid-events",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Parse Email Events",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst events = items[0]?.json?.body || items[0]?.json || [];\nconst eventList = Array.isArray(events) ? events : [events];\n\nlet opens = 0, clicks = 0, bounces = 0, delivered = 0, total = eventList.length;\nconst bounceEmails = [];\n\neventList.forEach(evt => {\n  const eventType = (evt.event || '').toLowerCase();\n  if (eventType === 'open') opens++;\n  else if (eventType === 'click') clicks++;\n  else if (eventType === 'bounce' || eventType === 'dropped') {\n    bounces++;\n    bounceEmails.push(evt.email || '');\n  }\n  else if (eventType === 'delivered') delivered++;\n});\n\nreturn [{\n  json: {\n    timestamp: new Date().toISOString(),\n    totalEvents: total,\n    opens: opens,\n    clicks: clicks,\n    bounces: bounces,\n    delivered: delivered,\n    openRate: total > 0 ? ((opens / total) * 100).toFixed(1) + '%' : '0%',\n    clickRate: total > 0 ? ((clicks / total) * 100).toFixed(1) + '%' : '0%',\n    bounceRate: total > 0 ? ((bounces / total) * 100).toFixed(1) + '%' : '0%',\n    hasBounces: bounces > 0,\n    bounceEmails: JSON.stringify(bounceEmails)\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Analytics",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Check Bounces",
+      "type": "n8n-nodes-base.if",
+      "position": [940, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasBounces }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Update Bounce Contacts Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1170, 200],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "Bounced Contacts", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## SendGrid Email Campaign Tracker\nReceives SendGrid event webhooks, parses opens/clicks/bounces, logs analytics to Sheets, and updates bounced contact lists.\n\n**Setup:**\n1. Configure SendGrid Event Webhook to this URL\n2. Enable events: open, click, bounce, delivered, dropped\n3. Connect Google Sheets for analytics tracking\n4. Create a 'Bounced Contacts' sheet for automatic updates"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook SendGrid Events": {
+      "main": [[{ "node": "Parse Email Events", "type": "main", "index": 0 }]]
+    },
+    "Parse Email Events": {
+      "main": [[{ "node": "Sheets Analytics", "type": "main", "index": 0 }]]
+    },
+    "Sheets Analytics": {
+      "main": [[{ "node": "Check Bounces", "type": "main", "index": 0 }]]
+    },
+    "Check Bounces": {
+      "main": [
+        [{ "node": "Update Bounce Contacts Sheet", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

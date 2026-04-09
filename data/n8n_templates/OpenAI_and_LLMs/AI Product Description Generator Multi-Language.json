@@ -1,0 +1,140 @@
+{
+  "name": "AI Product Description Generator Multi-Language",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "product-description",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Product Details",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a multilingual product copywriter. Generate compelling product descriptions in THREE languages.\n\nProduct Details:\n- Name: {{ $json.body.product_name }}\n- Category: {{ $json.body.category || 'General' }}\n- Features: {{ $json.body.features }}\n- Target Audience: {{ $json.body.target_audience || 'General consumers' }}\n- Price Range: {{ $json.body.price_range || 'Not specified' }}\n\nGenerate for each language:\n- Title (catchy, SEO-friendly)\n- Short description (50 words)\n- Long description (150 words)\n- Key selling points (3-5 bullets)\n\nReturn JSON:\n{\n  \"en\": {\"title\": \"\", \"short_desc\": \"\", \"long_desc\": \"\", \"selling_points\": []},\n  \"id\": {\"title\": \"\", \"short_desc\": \"\", \"long_desc\": \"\", \"selling_points\": []},\n  \"zh\": {\"title\": \"\", \"short_desc\": \"\", \"long_desc\": \"\", \"selling_points\": []}\n}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 3000
+        }
+      },
+      "name": "OpenAI - Generate Descriptions",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { en: { title: 'Error', short_desc: aiResponse }, id: { title: 'Error' }, zh: { title: 'Error' } };\n}\nconst productName = items[0].json.body?.product_name || 'Unknown';\nconst formatLang = (lang) => {\n  const d = parsed[lang] || {};\n  return {\n    title: d.title || '',\n    shortDesc: d.short_desc || '',\n    longDesc: d.long_desc || '',\n    sellingPoints: Array.isArray(d.selling_points) ? d.selling_points.join(' | ') : ''\n  };\n};\nreturn [{\n  json: {\n    productName,\n    date: new Date().toISOString().split('T')[0],\n    en_title: formatLang('en').title,\n    en_short: formatLang('en').shortDesc,\n    en_long: formatLang('en').longDesc,\n    en_points: formatLang('en').sellingPoints,\n    id_title: formatLang('id').title,\n    id_short: formatLang('id').shortDesc,\n    id_long: formatLang('id').longDesc,\n    id_points: formatLang('id').sellingPoints,\n    zh_title: formatLang('zh').title,\n    zh_short: formatLang('zh').shortDesc,\n    zh_long: formatLang('zh').longDesc,\n    zh_points: formatLang('zh').sellingPoints\n  }\n}];"
+      },
+      "name": "Code - Parse Descriptions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Product": "={{ $json.productName }}",
+            "EN Title": "={{ $json.en_title }}",
+            "EN Short": "={{ $json.en_short }}",
+            "EN Long": "={{ $json.en_long }}",
+            "ID Title": "={{ $json.id_title }}",
+            "ID Short": "={{ $json.id_short }}",
+            "ZH Title": "={{ $json.zh_title }}",
+            "ZH Short": "={{ $json.zh_short }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Product", "type": "string", "display": true },
+            { "id": "EN Title", "type": "string", "display": true },
+            { "id": "EN Short", "type": "string", "display": true },
+            { "id": "EN Long", "type": "string", "display": true },
+            { "id": "ID Title", "type": "string", "display": true },
+            { "id": "ID Short", "type": "string", "display": true },
+            { "id": "ZH Title", "type": "string", "display": true },
+            { "id": "ZH Short", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Product Catalog",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.notify_email || 'marketing@example.com' }}",
+        "subject": "=Product Descriptions Ready: {{ $json.productName }}",
+        "message": "=<h2>Product Descriptions Generated</h2>\n<p><strong>Product:</strong> {{ $json.productName }}</p>\n\n<h3>English</h3>\n<p><strong>{{ $json.en_title }}</strong></p>\n<p>{{ $json.en_short }}</p>\n\n<h3>Bahasa Indonesia</h3>\n<p><strong>{{ $json.id_title }}</strong></p>\n<p>{{ $json.id_short }}</p>\n\n<h3>中文</h3>\n<p><strong>{{ $json.zh_title }}</strong></p>\n<p>{{ $json.zh_short }}</p>\n\n<p>Full descriptions saved to Google Sheets.</p>",
+        "options": {}
+      },
+      "name": "Gmail - Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 200,
+        "content": "## AI Product Description Generator (EN/ID/ZH)\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set spreadsheet ID for product catalog\n3. POST to webhook: `{\"product_name\": \"...\", \"category\": \"...\", \"features\": \"...\", \"target_audience\": \"...\", \"price_range\": \"...\", \"notify_email\": \"...\"}`\n\nGenerates SEO-friendly product descriptions in English, Indonesian, and Chinese, saves to Sheets, and emails a summary."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Product Details": {
+      "main": [[{ "node": "OpenAI - Generate Descriptions", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Generate Descriptions": {
+      "main": [[{ "node": "Code - Parse Descriptions", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Descriptions": {
+      "main": [[
+        { "node": "Google Sheets - Product Catalog", "type": "main", "index": 0 },
+        { "node": "Gmail - Notification", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

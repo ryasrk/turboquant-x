@@ -1,0 +1,122 @@
+{
+  "name": "Twitter Thread Scheduler",
+  "nodes": [
+    {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "twitter-thread",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Split Into Tweets",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst threadText = items[0].json.body.thread_text;\nconst maxLen = 280;\nconst sentences = threadText.split(/(?<=[.!?])\\s+/);\nconst tweets = [];\nlet current = '';\n\nfor (const sentence of sentences) {\n  if ((current + ' ' + sentence).trim().length <= maxLen) {\n    current = (current + ' ' + sentence).trim();\n  } else {\n    if (current) tweets.push(current);\n    current = sentence;\n  }\n}\nif (current) tweets.push(current);\n\nreturn tweets.map((text, i) => ({\n  json: {\n    tweet_text: `${i + 1}/${tweets.length} ${text}`,\n    index: i,\n    total: tweets.length\n  }\n}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Post Tweet",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.tweet_text }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 3000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [850, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Thread Log",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1050, 300],
+      "parameters": {
+        "sendTo": "={{ $json.email || 'user@example.com' }}",
+        "subject": "Thread Posted Successfully",
+        "message": "Your Twitter thread with {{ $json.total }} tweets has been posted successfully.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Twitter Thread Scheduler\nSend a POST with `thread_text` to the webhook. The workflow splits text into tweet-sized chunks, posts them sequentially via the Twitter API, logs to Google Sheets, and sends a confirmation email."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Split Into Tweets", "type": "main", "index": 0}]]
+    },
+    "Split Into Tweets": {
+      "main": [[{"node": "Post Tweet", "type": "main", "index": 0}]]
+    },
+    "Post Tweet": {
+      "main": [[{"node": "Log to Sheets", "type": "main", "index": 0}]]
+    },
+    "Log to Sheets": {
+      "main": [[{"node": "Send Confirmation Email", "type": "main", "index": 0}]]
+    }
+  }
+}

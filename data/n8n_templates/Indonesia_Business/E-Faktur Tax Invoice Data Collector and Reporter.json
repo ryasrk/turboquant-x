@@ -1,0 +1,104 @@
+{
+  "name": "E-Faktur Tax Invoice Data Collector and Reporter",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "months", "monthsInterval": 1}]
+        }
+      },
+      "name": "Monthly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Transaksi"},
+        "options": {"range": "A:L"}
+      },
+      "name": "Read Transaction Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst currentMonth = new Date().getMonth();\nconst currentYear = new Date().getFullYear();\n\n// Filter current month transactions\nconst monthlyTx = items.filter(item => {\n  const d = new Date(item.json.tanggal_transaksi);\n  return d.getMonth() === currentMonth && d.getFullYear() === currentYear;\n});\n\n// Calculate PPN summary\nlet totalDPP = 0;  // Dasar Pengenaan Pajak\nlet totalPPN = 0;  // PPN 11%\nlet totalPPnBM = 0; // PPnBM if any\nlet fakturCount = 0;\n\nconst fakturData = monthlyTx.map(tx => {\n  const dpp = Number(tx.json.dpp || tx.json.subtotal || 0);\n  const ppn = Math.round(dpp * 0.11);\n  const ppnbm = Number(tx.json.ppnbm || 0);\n  totalDPP += dpp;\n  totalPPN += ppn;\n  totalPPnBM += ppnbm;\n  fakturCount++;\n  return {\n    no_faktur: tx.json.no_faktur || `010.000-${currentYear.toString().slice(-2)}.${String(fakturCount).padStart(8, '0')}`,\n    tanggal: tx.json.tanggal_transaksi,\n    npwp_pembeli: tx.json.npwp_pembeli || '-',\n    nama_pembeli: tx.json.nama_customer,\n    alamat_pembeli: tx.json.alamat_customer || '-',\n    dpp: dpp,\n    ppn: ppn,\n    ppnbm: ppnbm,\n    total: dpp + ppn + ppnbm,\n    kode_jenis: tx.json.kode_jenis_transaksi || '01',\n    status: 'belum_upload'\n  };\n});\n\nreturn [{\n  json: {\n    periode: `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`,\n    total_faktur: fakturCount,\n    total_dpp: totalDPP,\n    total_ppn: totalPPN,\n    total_ppnbm: totalPPnBM,\n    faktur_list: fakturData\n  }\n}];"
+      },
+      "name": "Calculate PPN Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "E-Faktur"},
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "name": "Save E-Faktur Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "csv_content",
+              "value": "=FK,KD_JENIS_TRANSAKSI,FG_PENGGANTI,NOMOR_FAKTUR,MASA_PAJAK,TAHUN_PAJAK,TANGGAL_FAKTUR,NPWP,NAMA,ALAMAT_LENGKAP,JUMLAH_DPP,JUMLAH_PPN,JUMLAH_PPNBM,ID_KETERANGAN_TAMBAHAN,FG_UANG_MUKA,UANG_MUKA_DPP,UANG_MUKA_PPN,UANG_MUKA_PPNBM,REFERENSI\n{{ $json.faktur_list.map(f => `FK,${f.kode_jenis},0,${f.no_faktur},${$json.periode.split('-')[1]},${$json.periode.split('-')[0]},${f.tanggal.replace(/-/g,'/')},${f.npwp_pembeli},${f.nama_pembeli},${f.alamat_pembeli},${f.dpp},${f.ppn},${f.ppnbm},,0,0,0,0,`).join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "name": "Generate E-Faktur CSV",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "=pajak@company.co.id",
+        "subject": "=📊 Laporan E-Faktur Periode {{ $json.periode }}",
+        "message": "=Berikut rekap E-Faktur bulan ini:\n\n📅 Periode: {{ $json.periode }}\n📋 Jumlah Faktur: {{ $json.total_faktur }}\n💰 Total DPP: Rp {{ $json.total_dpp.toLocaleString('id-ID') }}\n📊 Total PPN (11%): Rp {{ $json.total_ppn.toLocaleString('id-ID') }}\n\nFile CSV terlampir siap di-upload ke aplikasi e-Faktur DJP.\n\nMohon review dan upload sebelum tanggal 15 bulan berikutnya."
+      },
+      "name": "Email Tax Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 300],
+      "credentials": {
+        "gmailOAuth2": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## E-Faktur Tax Invoice Reporter (Indonesia)\n\n### Flow:\n1. **Schedule** — Runs monthly\n2. **Read** — Pulls transaction data from Google Sheets\n3. **Calculate** — Computes DPP, PPN (11%), PPnBM for each transaction\n4. **Save** — Stores E-Faktur data\n5. **CSV** — Generates CSV in DJP e-Faktur format\n6. **Email** — Sends report to tax/finance team\n\n### Required Sheet Columns:\n`tanggal_transaksi | nama_customer | npwp_pembeli | alamat_customer | subtotal/dpp | kode_jenis_transaksi`\n\n### Kode Jenis Transaksi:\n- 01: Penyerahan BKP/JKP\n- 02: Penyerahan ke Bendaharawan\n- 03: Penyerahan yang PPN-nya dipungut sendiri"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Monthly Schedule": {"main": [[{"node": "Read Transaction Data", "type": "main", "index": 0}]]},
+    "Read Transaction Data": {"main": [[{"node": "Calculate PPN Summary", "type": "main", "index": 0}]]},
+    "Calculate PPN Summary": {"main": [[{"node": "Save E-Faktur Data", "type": "main", "index": 0}]]},
+    "Save E-Faktur Data": {"main": [[{"node": "Generate E-Faktur CSV", "type": "main", "index": 0}]]},
+    "Generate E-Faktur CSV": {"main": [[{"node": "Email Tax Report", "type": "main", "index": 0}]]}
+  }
+}

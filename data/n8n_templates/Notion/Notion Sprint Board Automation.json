@@ -1,0 +1,178 @@
+{
+  "name": "Notion Sprint Board Automation",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Sprint Board Automation\nAt sprint start, moves undone items, creates a new sprint page, and notifies via Slack.\n\n**Setup:**\n1. Set Notion sprint/tasks database ID\n2. Set sprint duration and schedule\n3. Configure Slack webhook URL or channel"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Schedule Sprint Start",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1/2"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Get Undone Items",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Status|select",
+              "condition": "is_not",
+              "returnType": "string",
+              "value": "Done"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Move Items to New Sprint",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst sprintNumber = Math.ceil((new Date().getTime() - new Date('2024-01-01').getTime()) / (14 * 24 * 60 * 60 * 1000));\nconst sprintName = `Sprint ${sprintNumber}`;\n\nconst undoneItems = items.map(item => {\n  const props = item.json.properties || {};\n  const title = props['Name']?.title?.map(t => t.plain_text).join('') || 'Untitled';\n  const status = props['Status']?.select?.name || 'Unknown';\n  const priority = props['Priority']?.select?.name || 'Medium';\n  return {\n    json: {\n      pageId: item.json.id,\n      title,\n      status,\n      priority,\n      newSprint: sprintName,\n      sprintStart: $now.format('yyyy-MM-dd'),\n      sprintEnd: $now.plus({ days: 14 }).format('yyyy-MM-dd')\n    }\n  };\n});\n\nreturn undoneItems;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Update Sprint Tag",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": "={{ $json.pageId }}",
+        "properties": {
+          "assignments": [
+            {
+              "name": "Sprint",
+              "type": "select",
+              "select": "={{ $json.newSprint }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Notion Create Sprint Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [1120, 400],
+      "parameters": {
+        "resource": "page",
+        "operation": "create",
+        "parentPageId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "title": "={{ $('Move Items to New Sprint').first().json.newSprint }}",
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=Sprint Period: {{ $('Move Items to New Sprint').first().json.sprintStart }} to {{ $('Move Items to New Sprint').first().json.sprintEnd }}\n\nCarried over items: {{ $input.all().length }}\n\n## Goals\n- \n\n## Retrospective\n- What went well:\n- What to improve:\n- Action items:"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "position": [1340, 400],
+      "parameters": {
+        "channel": "#engineering",
+        "text": "=🏃 *New Sprint Started*\n\nSprint: {{ $('Move Items to New Sprint').first().json.newSprint }}\nPeriod: {{ $('Move Items to New Sprint').first().json.sprintStart }} → {{ $('Move Items to New Sprint').first().json.sprintEnd }}\nCarried over items: {{ $('Notion Get Undone Items').all().length }}\n\nCheck Notion for your sprint board!",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    }
+  ],
+  "connections": {
+    "Schedule Sprint Start": {
+      "main": [
+        [{ "node": "Notion Get Undone Items", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Get Undone Items": {
+      "main": [
+        [{ "node": "Move Items to New Sprint", "type": "main", "index": 0 }]
+      ]
+    },
+    "Move Items to New Sprint": {
+      "main": [
+        [{ "node": "Notion Update Sprint Tag", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Update Sprint Tag": {
+      "main": [
+        [{ "node": "Notion Create Sprint Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Sprint Page": {
+      "main": [
+        [{ "node": "Slack Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

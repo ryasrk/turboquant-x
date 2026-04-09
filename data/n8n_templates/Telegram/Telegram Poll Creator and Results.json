@@ -1,0 +1,185 @@
+{
+  "name": "Telegram Poll Creator and Results",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-poll",
+        "options": {}
+      },
+      "name": "Webhook Create Poll",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const body = item.json.body || item.json;\n  results.push({\n    json: {\n      question: body.question || 'Default Poll Question',\n      options: body.options || ['Option A', 'Option B', 'Option C'],\n      chatId: body.chatId || '',\n      isAnonymous: body.isAnonymous !== false,\n      pollId: `poll_${Date.now()}`,\n      createdAt: new Date().toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Prepare Poll Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=📊 New poll created: {{$json.question}}",
+        "additionalFields": {}
+      },
+      "name": "Send Poll",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [750, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Polls" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Save Poll to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": ["poll"],
+        "additionalFields": {}
+      },
+      "name": "Poll Answer Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 550],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const poll = item.json.poll || {};\n  const options = (poll.options || []).map(o => ({\n    text: o.text,\n    votes: o.voter_count\n  }));\n  const totalVotes = options.reduce((sum, o) => sum + o.votes, 0);\n  results.push({\n    json: {\n      pollId: poll.id,\n      question: poll.question,\n      options,\n      totalVotes,\n      isClosed: poll.is_closed,\n      timestamp: new Date().toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Poll Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 550]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "PollResults" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Results to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 550],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst item = items[0].json;\nlet text = `📊 <b>Poll Results: ${item.question}</b>\\n\\n`;\nconst options = Array.isArray(item.options) ? item.options : JSON.parse(item.options || '[]');\noptions.forEach(o => {\n  const pct = item.totalVotes > 0 ? Math.round((o.votes / item.totalVotes) * 100) : 0;\n  const bar = '█'.repeat(Math.round(pct / 10)) + '░'.repeat(10 - Math.round(pct / 10));\n  text += `${o.text}: ${bar} ${pct}% (${o.votes})\\n`;\n});\ntext += `\\n👥 Total votes: ${item.totalVotes}`;\nreturn [{ json: { text } }];"
+      },
+      "name": "Format Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 550]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Post Results",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 550],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Poll Creator and Results\n\n**Flow 1:** Webhook → prepare poll → send to Telegram → save to Sheets\n**Flow 2:** Poll answer trigger → parse results → log → format → post summary\n\n**Webhook body example:**\n```json\n{\"question\": \"Best language?\", \"options\": [\"Python\", \"Go\", \"Rust\"], \"chatId\": \"-100xxx\"}\n```\n\n**Setup:**\n1. Set Telegram Bot API credentials\n2. Set group chat ID in Post Results node\n3. Create Google Sheet: Polls and PollResults tabs",
+        "width": 450,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 750]
+    }
+  ],
+  "connections": {
+    "Webhook Create Poll": {
+      "main": [
+        [{ "node": "Prepare Poll Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Poll Data": {
+      "main": [
+        [{ "node": "Send Poll", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Poll": {
+      "main": [
+        [{ "node": "Save Poll to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Poll Answer Trigger": {
+      "main": [
+        [{ "node": "Parse Poll Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Poll Results": {
+      "main": [
+        [{ "node": "Log Results to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Results to Sheets": {
+      "main": [
+        [{ "node": "Format Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Results": {
+      "main": [
+        [{ "node": "Post Results", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

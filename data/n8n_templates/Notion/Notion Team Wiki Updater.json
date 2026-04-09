@@ -1,0 +1,136 @@
+{
+  "name": "Notion Team Wiki Updater",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Team Wiki Updater\nReceive content updates via webhook, update Notion pages, log changes to Sheets, and notify Slack.\n\n**Setup:**\n1. Configure webhook in your content system\n2. Set Notion page ID to update\n3. Set Google Sheet for change log\n4. Set Slack channel for notifications"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook Content Update",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "wiki-update",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Update Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": "={{ $json.body.pageId || $json.pageId }}",
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.body.title || $json.title }}"
+            },
+            {
+              "name": "Last Updated",
+              "type": "date",
+              "date": "={{ $now.toISO() }}"
+            },
+            {
+              "name": "Updated By",
+              "type": "rich_text",
+              "richText": "={{ $json.body.author || $json.author || 'System' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Google Sheets Log Change",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [680, 400],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Change Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now.toISO() }}",
+            "Page ID": "={{ $('Webhook Content Update').item.json.body.pageId || $('Webhook Content Update').item.json.pageId }}",
+            "Title": "={{ $('Webhook Content Update').item.json.body.title || $('Webhook Content Update').item.json.title }}",
+            "Author": "={{ $('Webhook Content Update').item.json.body.author || $('Webhook Content Update').item.json.author }}",
+            "Change Type": "={{ $('Webhook Content Update').item.json.body.changeType || 'Update' }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "name": "Slack Notify Update",
+      "type": "n8n-nodes-base.slack",
+      "position": [900, 400],
+      "parameters": {
+        "channel": "#wiki-updates",
+        "text": "=📝 *Wiki Page Updated*\n\nPage: {{ $('Webhook Content Update').item.json.body.title || $('Webhook Content Update').item.json.title }}\nUpdated by: {{ $('Webhook Content Update').item.json.body.author || $('Webhook Content Update').item.json.author || 'System' }}\nChange: {{ $('Webhook Content Update').item.json.body.changeType || 'Content update' }}\nTime: {{ $now.format('yyyy-MM-dd HH:mm') }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    }
+  ],
+  "connections": {
+    "Webhook Content Update": {
+      "main": [
+        [{ "node": "Notion Update Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Update Page": {
+      "main": [
+        [{ "node": "Google Sheets Log Change", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Sheets Log Change": {
+      "main": [
+        [{ "node": "Slack Notify Update", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

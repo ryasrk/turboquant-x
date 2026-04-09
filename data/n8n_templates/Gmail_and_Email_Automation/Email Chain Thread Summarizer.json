@@ -1,0 +1,149 @@
+{
+  "name": "Email Chain Thread Summarizer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "summarize-thread",
+        "options": {}
+      },
+      "name": "Webhook - Thread ID",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "threadId": "={{ $json.body.threadId }}"
+        },
+        "options": {}
+      },
+      "name": "Gmail Get Thread",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst webhookData = $('Webhook - Thread ID').item.json.body;\n\nif (items.length === 0) {\n  return [{ json: { summary: 'No messages found in thread.', messageCount: 0 } }];\n}\n\n// Sort by date\nconst sorted = items.sort((a, b) => new Date(a.json.date || 0) - new Date(b.json.date || 0));\n\nlet keyPoints = [];\nlet participants = new Set();\nlet threadSubject = '';\n\nfor (let i = 0; i < sorted.length; i++) {\n  const msg = sorted[i].json;\n  const from = msg.from || 'Unknown';\n  const body = (msg.textPlain || msg.snippet || '').trim();\n  const date = msg.date ? new Date(msg.date).toLocaleString() : '';\n  \n  participants.add(from);\n  if (i === 0) threadSubject = msg.subject || 'No Subject';\n  \n  // Extract key sentences (first 2-3 meaningful lines)\n  const lines = body.split('\\n').filter(l => {\n    const trimmed = l.trim();\n    return trimmed.length > 20 && !trimmed.startsWith('>') && !trimmed.startsWith('On ') && !trimmed.includes('wrote:');\n  });\n  \n  const keyContent = lines.slice(0, 3).join(' ').substring(0, 300);\n  if (keyContent) {\n    keyPoints.push(`**${from}** (${date}):\\n${keyContent}`);\n  }\n}\n\nconst summary = `# Thread Summary: ${threadSubject}\\n\\n` +\n  `**Messages:** ${sorted.length}\\n` +\n  `**Participants:** ${[...participants].join(', ')}\\n\\n` +\n  `## Key Points:\\n\\n${keyPoints.map((p, i) => `${i + 1}. ${p}`).join('\\n\\n')}`;\n\nreturn [{\n  json: {\n    summary: summary,\n    threadSubject: threadSubject,\n    messageCount: sorted.length,\n    participants: [...participants].join(', '),\n    forwardTo: webhookData.forwardTo || '',\n    threadId: webhookData.threadId,\n    summarizedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Extract Key Points",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.forwardTo || 'me' }}",
+        "subject": "Thread Summary: {{ $json.threadSubject }} ({{ $json.messageCount }} messages)",
+        "message": "={{ $json.summary }}",
+        "options": {}
+      },
+      "name": "Gmail Forward Summary",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Archive",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email Chain Thread Summarizer\n\nSummarizes an email thread into key points.\n\n**Flow:**\n1. Webhook receives thread ID\n2. Gmail fetches all messages in thread\n3. Code extracts key points, participants, and timeline\n4. Gmail forwards summary\n5. Archive summary to Sheets\n\n**Webhook payload:**\n```json\n{\n  \"threadId\": \"thread-abc123\",\n  \"forwardTo\": \"manager@example.com\"\n}\n```",
+        "width": 380,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Webhook - Thread ID": {
+      "main": [
+        [
+          {
+            "node": "Gmail Get Thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Get Thread": {
+      "main": [
+        [
+          {
+            "node": "Extract Key Points",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Key Points": {
+      "main": [
+        [
+          {
+            "node": "Gmail Forward Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Forward Summary": {
+      "main": [
+        [
+          {
+            "node": "Sheets Archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

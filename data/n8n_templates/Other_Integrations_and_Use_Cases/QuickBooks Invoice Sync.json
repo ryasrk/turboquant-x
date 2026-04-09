@@ -1,0 +1,106 @@
+{
+  "name": "QuickBooks Invoice Sync",
+  "nodes": [
+    {
+      "name": "Schedule Monthly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 4 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Fetch QuickBooks Invoices",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "https://quickbooks.api.intuit.com/v3/company/YOUR_COMPANY_ID/query",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/text",
+        "body": "SELECT * FROM Invoice WHERE MetaData.LastUpdatedTime > '{{ $now.minus({ months: 1 }).toFormat('yyyy-MM-dd') }}' MAXRESULTS 100",
+        "options": {
+          "response": {
+            "response": { "responseFormat": "json" }
+          }
+        }
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Transform Invoices",
+      "type": "n8n-nodes-base.code",
+      "position": [710, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst response = items[0]?.json?.QueryResponse || {};\nconst invoices = response.Invoice || [];\n\nlet totalAmount = 0;\nlet paidCount = 0;\nlet unpaidCount = 0;\n\nconst rows = invoices.map(inv => {\n  const amount = parseFloat(inv.TotalAmt || 0);\n  totalAmount += amount;\n  const isPaid = inv.Balance === 0;\n  if (isPaid) paidCount++;\n  else unpaidCount++;\n  \n  return {\n    json: {\n      invoiceId: inv.Id || '',\n      invoiceNumber: inv.DocNumber || '',\n      customerName: inv.CustomerRef?.name || '',\n      amount: amount,\n      currency: inv.CurrencyRef?.value || 'USD',\n      balance: inv.Balance || 0,\n      status: isPaid ? 'Paid' : 'Unpaid',\n      dueDate: inv.DueDate || '',\n      txnDate: inv.TxnDate || '',\n      lastUpdated: inv.MetaData?.LastUpdatedTime || '',\n      syncDate: new Date().toISOString()\n    }\n  };\n});\n\nif (rows.length === 0) {\n  rows.push({\n    json: {\n      invoiceId: 'none',\n      summary: 'No invoices found for this period',\n      syncDate: new Date().toISOString()\n    }\n  });\n}\n\nreturn rows;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Accounting",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Monthly Reconciliation",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1170, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Monthly QuickBooks Reconciliation - {{ $now.toISODate() }}",
+        "message": "=Monthly QuickBooks Invoice Sync Report\n\nSync Date: {{ $now.toISO() }}\nTotal Invoices Synced: {{ $input.all().length }}\n\nAll invoice data has been exported to Google Sheets for reconciliation.\n\nPlease review and verify the data.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## QuickBooks Invoice Sync\nMonthly sync of QuickBooks invoices to Google Sheets with email reconciliation report.\n\n**Setup:**\n1. Replace YOUR_COMPANY_ID in the QuickBooks API URL\n2. Set OAuth2 bearer token in HTTP Header Auth\n3. Connect Google Sheets for accounting export\n4. Configure Gmail for monthly reconciliation reports\n5. Adjust schedule as needed (default: every 4 weeks)"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Monthly": {
+      "main": [[{ "node": "Fetch QuickBooks Invoices", "type": "main", "index": 0 }]]
+    },
+    "Fetch QuickBooks Invoices": {
+      "main": [[{ "node": "Transform Invoices", "type": "main", "index": 0 }]]
+    },
+    "Transform Invoices": {
+      "main": [[{ "node": "Sheets Accounting", "type": "main", "index": 0 }]]
+    },
+    "Sheets Accounting": {
+      "main": [[{ "node": "Email Monthly Reconciliation", "type": "main", "index": 0 }]]
+    }
+  }
+}

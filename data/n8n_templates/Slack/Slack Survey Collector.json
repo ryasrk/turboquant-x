@@ -1,0 +1,225 @@
+{
+  "name": "Slack Survey Collector",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "survey-start",
+        "options": {}
+      },
+      "name": "Survey Slash Command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst body = items[0].json.body || items[0].json;\nconst text = body.text || '';\n\n// Parse: question | option1 | option2 | option3\nconst parts = text.split('|').map(p => p.trim());\nconst question = parts[0] || 'How are you feeling today?';\nconst options = parts.slice(1);\nif (options.length === 0) {\n  options.push('Great', 'Good', 'Okay', 'Not great');\n}\n\nconst surveyId = `survey-${Date.now()}`;\nconst channelId = body.channel_id || '';\n\nlet surveyMsg = `:bar_chart: *Survey: ${question}*\\n\\nPlease respond with one of the options below:\\n\\n`;\noptions.forEach((opt, i) => {\n  const emojis = [':one:', ':two:', ':three:', ':four:', ':five:', ':six:', ':seven:', ':eight:', ':nine:'];\n  surveyMsg += `${emojis[i] || ':small_blue_diamond:'} ${opt}\\n`;\n});\nsurveyMsg += `\\n_Survey ID: ${surveyId} | React with the corresponding number emoji to vote_`;\n\nreturn [{json: {\n  surveyId,\n  question,\n  options,\n  surveyMsg,\n  channelId,\n  createdBy: body.user_id || '',\n  createdAt: new Date().toISOString()\n}}];"
+      },
+      "name": "Parse Survey",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $json.channelId }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.surveyMsg }}",
+        "otherOptions": {}
+      },
+      "name": "Post Survey",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "survey-response",
+        "options": {}
+      },
+      "name": "Response Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 520]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Survey Responses",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Aggregate",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Survey Responses",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "name": "Read All Responses",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [700, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst responses = items.map(i => i.json);\n\nconst counts = {};\nfor (const r of responses) {\n  const choice = r.choice || 'Unknown';\n  counts[choice] = (counts[choice] || 0) + 1;\n}\n\nconst total = responses.length;\nlet results = `:bar_chart: *Survey Results* (${total} responses)\\n\\n`;\nconst sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);\nsorted.forEach(([choice, count]) => {\n  const pct = Math.round((count / total) * 100);\n  const bar = '█'.repeat(Math.round(pct / 5)) + '░'.repeat(20 - Math.round(pct / 5));\n  results += `*${choice}:* ${bar} ${pct}% (${count})\\n`;\n});\n\nreturn [{json: {results, total, counts}}];"
+      },
+      "name": "Compile Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 520]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $('Parse Survey').item.json.channelId }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.results }}",
+        "otherOptions": {}
+      },
+      "name": "Post Results",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 520],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Survey Collector\n\nCreate and collect survey responses with visual results.\n\n**Create Survey:**\n`/survey How was the sprint? | Great | Good | Okay | Bad`\n\n**Flow:**\n1. Slash command creates survey\n2. Post interactive message with options\n3. Collect responses via webhook\n4. Aggregate in Google Sheets\n5. Post visual results with bar charts",
+        "width": 340,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Survey Slash Command": {
+      "main": [
+        [
+          {
+            "node": "Parse Survey",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Survey": {
+      "main": [
+        [
+          {
+            "node": "Post Survey",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response Webhook": {
+      "main": [
+        [
+          {
+            "node": "Sheets Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Read All Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Responses": {
+      "main": [
+        [
+          {
+            "node": "Compile Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Results": {
+      "main": [
+        [
+          {
+            "node": "Post Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

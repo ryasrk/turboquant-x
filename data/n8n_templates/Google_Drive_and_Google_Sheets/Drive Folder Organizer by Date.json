@@ -1,0 +1,113 @@
+{
+  "name": "Drive Folder Organizer by Date",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "List All Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "list",
+        "folderId": { "__rl": true, "mode": "list", "value": "" },
+        "options": {
+          "fields": ["name", "id", "createdTime", "mimeType"]
+        }
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Group by Date",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst groups = {};\n\nfor (const item of items) {\n  const created = new Date(item.json.createdTime || item.json.createdDate);\n  const folderName = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, '0')}`;\n  if (!groups[folderName]) groups[folderName] = [];\n  groups[folderName].push({ id: item.json.id, name: item.json.name, folder: folderName });\n}\n\nconst results = [];\nfor (const [folder, files] of Object.entries(groups)) {\n  for (const file of files) {\n    results.push({ json: file });\n  }\n}\n\nreturn results;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Create Date Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "createFolder",
+        "name": "={{ $json.folder }}",
+        "options": {
+          "folderNotExist": true
+        }
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Move File to Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [1180, 300],
+      "parameters": {
+        "operation": "move",
+        "fileId": { "__rl": true, "mode": "id", "value": "={{ $json.id }}" },
+        "folderId": { "__rl": true, "mode": "id", "value": "={{ $json.folderId }}" },
+        "options": {}
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Write Index Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1400, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "FileIndex" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileName": "={{ $json.name }}",
+            "folder": "={{ $json.folder }}",
+            "movedAt": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1300,
+        "height": 100,
+        "content": "### Drive Folder Organizer by Date\nWeekly workflow that lists all files in a Google Drive folder, groups them by creation date (YYYY-MM), creates date folders, moves files, and builds an index Sheet."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": { "main": [[{ "node": "List All Files", "type": "main", "index": 0 }]] },
+    "List All Files": { "main": [[{ "node": "Group by Date", "type": "main", "index": 0 }]] },
+    "Group by Date": { "main": [[{ "node": "Create Date Folder", "type": "main", "index": 0 }]] },
+    "Create Date Folder": { "main": [[{ "node": "Move File to Folder", "type": "main", "index": 0 }]] },
+    "Move File to Folder": { "main": [[{ "node": "Write Index Sheet", "type": "main", "index": 0 }]] }
+  }
+}

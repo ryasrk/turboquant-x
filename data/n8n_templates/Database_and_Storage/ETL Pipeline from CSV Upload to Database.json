@@ -1,0 +1,246 @@
+{
+  "name": "ETL Pipeline from CSV Upload to Database",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "csv-upload",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "name": "CSV Upload Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const input = $input.first();\nconst csvData = input.json.body || '';\nconst lines = csvData.trim().split('\\n');\n\nif (lines.length < 2) {\n  throw new Error('CSV must have a header row and at least one data row');\n}\n\nconst headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'));\n\n// Define expected schema\nconst expectedColumns = ['id', 'name', 'email', 'amount', 'date', 'status'];\nconst missingColumns = expectedColumns.filter(c => !headers.includes(c));\nconst extraColumns = headers.filter(c => !expectedColumns.includes(c));\n\nif (missingColumns.length > 0) {\n  throw new Error(`Missing required columns: ${missingColumns.join(', ')}`);\n}\n\nconst rows = [];\nconst errors = [];\n\nfor (let i = 1; i < lines.length; i++) {\n  const values = lines[i].split(',').map(v => v.trim());\n  if (values.length !== headers.length) {\n    errors.push({ row: i + 1, error: `Expected ${headers.length} columns, got ${values.length}` });\n    continue;\n  }\n\n  const row = {};\n  headers.forEach((h, idx) => { row[h] = values[idx]; });\n\n  // Validate email format\n  if (row.email && !/^[^@]+@[^@]+\\.[^@]+$/.test(row.email)) {\n    errors.push({ row: i + 1, error: `Invalid email: ${row.email}` });\n    continue;\n  }\n\n  // Validate amount is numeric\n  if (row.amount && isNaN(parseFloat(row.amount))) {\n    errors.push({ row: i + 1, error: `Invalid amount: ${row.amount}` });\n    continue;\n  }\n\n  rows.push(row);\n}\n\nreturn [{\n  json: {\n    valid_rows: rows,\n    validation_errors: errors,\n    total_rows: lines.length - 1,\n    valid_count: rows.length,\n    error_count: errors.length,\n    headers: headers,\n    schema_valid: missingColumns.length === 0,\n    extra_columns: extraColumns\n  }\n}];"
+      },
+      "name": "Validate CSV Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "schema-valid",
+              "leftValue": "={{ $json.schema_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "has-valid-rows",
+              "leftValue": "={{ $json.valid_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Schema Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\nconst rows = data.valid_rows;\n\nconst cleaned = rows.map(row => ({\n  id: row.id.trim(),\n  name: row.name.trim().replace(/\\s+/g, ' '),\n  email: row.email.trim().toLowerCase(),\n  amount: parseFloat(row.amount).toFixed(2),\n  date: new Date(row.date).toISOString().split('T')[0],\n  status: row.status.trim().toUpperCase(),\n  imported_at: new Date().toISOString()\n}));\n\nreturn cleaned.map(row => ({ json: row }));"
+      },
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO imports (id, name, email, amount, date, status, imported_at)\nVALUES {{ $input.all().map(item => `('${item.json.id}', '${item.json.name}', '${item.json.email}', ${item.json.amount}, '${item.json.date}', '${item.json.status}', '${item.json.imported_at}')`).join(',\\n') }}\nON CONFLICT (id) DO UPDATE SET\n  name = EXCLUDED.name,\n  email = EXCLUDED.email,\n  amount = EXCLUDED.amount,\n  date = EXCLUDED.date,\n  status = EXCLUDED.status,\n  imported_at = EXCLUDED.imported_at;",
+        "options": {}
+      },
+      "name": "Bulk Insert to PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1200, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const validationData = $('Validate CSV Schema').first().json;\nconst insertedCount = $('Bulk Insert to PostgreSQL').all().length || validationData.valid_count;\n\nreturn [{\n  json: {\n    upload_timestamp: new Date().toISOString(),\n    total_rows_received: validationData.total_rows,\n    rows_inserted: validationData.valid_count,\n    rows_rejected: validationData.error_count,\n    validation_errors: JSON.stringify(validationData.validation_errors),\n    status: validationData.error_count > 0 ? 'PARTIAL_SUCCESS' : 'SUCCESS'\n  }\n}];"
+      },
+      "name": "Build Audit Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Import Audit Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Audit Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1660, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', rows_inserted: $json.rows_inserted, rows_rejected: $json.rows_rejected }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1660, 480]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', message: 'Schema validation failed', valid_count: $json.valid_count, errors: $json.validation_errors }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 520]
+    },
+    {
+      "parameters": {
+        "content": "## ETL Pipeline from CSV Upload to Database\n\n**Trigger:** Webhook POST with CSV body\n\n**Flow:**\n1. Receive CSV via webhook\n2. Validate schema (required columns: id, name, email, amount, date, status)\n3. Row-level validation (email format, numeric amounts)\n4. Transform: clean, normalize, format dates\n5. Bulk upsert to PostgreSQL\n6. Log results to Google Sheets audit trail\n7. Return response with import stats\n\n**Error handling:**\n- Invalid schema → 400 response\n- Invalid rows → skipped, logged as errors\n- Partial success supported\n\n**Setup:**\n- PostgreSQL: imports table with matching columns\n- Google Sheets for audit logging\n- POST CSV data to webhook URL",
+        "height": 380,
+        "width": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -20]
+    }
+  ],
+  "connections": {
+    "CSV Upload Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate CSV Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate CSV Schema": {
+      "main": [
+        [
+          {
+            "node": "Schema Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schema Valid?": {
+      "main": [
+        [
+          {
+            "node": "Transform Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [
+          {
+            "node": "Bulk Insert to PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bulk Insert to PostgreSQL": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Audit Record": {
+      "main": [
+        [
+          {
+            "node": "Sheets Audit Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

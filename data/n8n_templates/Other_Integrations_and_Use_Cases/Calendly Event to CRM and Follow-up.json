@@ -1,0 +1,98 @@
+{
+  "name": "Calendly Event to CRM and Follow-up",
+  "nodes": [
+    {
+      "name": "Webhook Calendly Event",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "calendly-event",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Parse Calendly Event",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const event = payload.payload || payload;\n  const invitee = event.invitee || {};\n  const eventDetails = event.event || {};\n  return {\n    json: {\n      eventName: eventDetails.name || event.event_type?.name || '',\n      eventDate: eventDetails.start_time || '',\n      eventEndTime: eventDetails.end_time || '',\n      inviteeName: invitee.name || '',\n      inviteeEmail: invitee.email || '',\n      inviteeTimezone: invitee.timezone || '',\n      location: eventDetails.location?.join_url || eventDetails.location || '',\n      questionsAndAnswers: JSON.stringify(invitee.questions_and_answers || []),\n      cancelUrl: invitee.cancel_url || '',\n      rescheduleUrl: invitee.reschedule_url || '',\n      createdAt: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets CRM Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 200],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Pre-Meeting Info",
+      "type": "n8n-nodes-base.gmail",
+      "position": [710, 400],
+      "parameters": {
+        "sendTo": "={{ $json.inviteeEmail }}",
+        "subject": "=Looking forward to our meeting: {{ $json.eventName }}",
+        "message": "=Hi {{ $json.inviteeName }},\n\nThank you for scheduling a meeting!\n\nEvent: {{ $json.eventName }}\nDate: {{ $json.eventDate }}\nLocation: {{ $json.location }}\n\nPlease prepare any relevant materials. If you need to reschedule, use this link:\n{{ $json.rescheduleUrl }}\n\nSee you soon!",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Telegram Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "position": [940, 300],
+      "parameters": {
+        "chatId": "",
+        "text": "=📅 New Calendly Booking!\n\nEvent: {{ $json.eventName }}\nWith: {{ $json.inviteeName }} ({{ $json.inviteeEmail }})\nDate: {{ $json.eventDate }}\nLocation: {{ $json.location }}",
+        "additionalFields": {}
+      },
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Calendly Event to CRM and Follow-up\nReceives Calendly event webhooks, logs to CRM (Sheets), sends pre-meeting info via Gmail, and notifies via Telegram.\n\n**Setup:**\n1. Configure Calendly webhook to this workflow URL\n2. Connect Google Sheets for CRM tracking\n3. Set up Gmail and Telegram credentials"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Calendly Event": {
+      "main": [[{ "node": "Parse Calendly Event", "type": "main", "index": 0 }]]
+    },
+    "Parse Calendly Event": {
+      "main": [
+        [
+          { "node": "Sheets CRM Log", "type": "main", "index": 0 },
+          { "node": "Gmail Pre-Meeting Info", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Gmail Pre-Meeting Info": {
+      "main": [[{ "node": "Telegram Reminder", "type": "main", "index": 0 }]]
+    }
+  }
+}

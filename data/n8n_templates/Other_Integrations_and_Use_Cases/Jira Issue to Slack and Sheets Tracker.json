@@ -1,0 +1,98 @@
+{
+  "name": "Jira Issue to Slack and Sheets Tracker",
+  "nodes": [
+    {
+      "name": "Webhook Jira Issue",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "jira-issue",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Format Issue Data",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const issue = payload.issue || {};\n  const fields = issue.fields || {};\n  return {\n    json: {\n      issueKey: issue.key || '',\n      summary: fields.summary || '',\n      description: (fields.description || '').substring(0, 500),\n      status: fields.status?.name || 'Unknown',\n      priority: fields.priority?.name || 'Medium',\n      assignee: fields.assignee?.displayName || 'Unassigned',\n      reporter: fields.reporter?.displayName || '',\n      project: fields.project?.name || '',\n      issueType: fields.issuetype?.name || '',\n      created: fields.created || new Date().toISOString(),\n      updated: fields.updated || new Date().toISOString(),\n      webhookEvent: payload.webhookEvent || 'unknown'\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "position": [710, 200],
+      "parameters": {
+        "channel": "",
+        "text": "=📋 *Jira Issue {{ $json.webhookEvent }}*\n\n*{{ $json.issueKey }}*: {{ $json.summary }}\nType: {{ $json.issueType }} | Priority: {{ $json.priority }}\nStatus: {{ $json.status }}\nAssignee: {{ $json.assignee }}\nReporter: {{ $json.reporter }}",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sheets Issue Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 400],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Weekly Digest",
+      "type": "n8n-nodes-base.gmail",
+      "position": [940, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Jira Issue Update: {{ $json.issueKey }} - {{ $json.summary }}",
+        "message": "=Issue {{ $json.issueKey }} has been updated.\n\nSummary: {{ $json.summary }}\nStatus: {{ $json.status }}\nPriority: {{ $json.priority }}\nAssignee: {{ $json.assignee }}\nProject: {{ $json.project }}\nUpdated: {{ $json.updated }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Jira Issue to Slack and Sheets Tracker\nReceives Jira issue webhooks, formats the data, notifies Slack, logs to Google Sheets, and sends email digests.\n\n**Setup:**\n1. Configure Jira webhook to point to this workflow URL\n2. Set Slack channel and Google Sheets credentials\n3. Configure Gmail for weekly digest notifications"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Jira Issue": {
+      "main": [[{ "node": "Format Issue Data", "type": "main", "index": 0 }]]
+    },
+    "Format Issue Data": {
+      "main": [
+        [
+          { "node": "Slack Notification", "type": "main", "index": 0 },
+          { "node": "Sheets Issue Log", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Sheets Issue Log": {
+      "main": [[{ "node": "Gmail Weekly Digest", "type": "main", "index": 0 }]]
+    }
+  }
+}

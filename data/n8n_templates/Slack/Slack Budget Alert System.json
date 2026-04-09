@@ -1,0 +1,230 @@
+{
+  "name": "Slack Budget Alert System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "name": "Daily Morning Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Budget Tracker",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "name": "Read Budget Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst alerts = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const department = row.department || 'Unknown';\n  const budget = parseFloat(row.budget || 0);\n  const spent = parseFloat(row.spent || 0);\n  const percentage = budget > 0 ? Math.round((spent / budget) * 100) : 0;\n  const remaining = budget - spent;\n\n  let severity = 'ok';\n  if (percentage >= 100) severity = 'over';\n  else if (percentage >= 90) severity = 'critical';\n  else if (percentage >= 75) severity = 'warning';\n\n  if (severity !== 'ok') {\n    alerts.push({\n      department,\n      budget,\n      spent,\n      remaining,\n      percentage,\n      severity,\n      date: new Date().toISOString().split('T')[0]\n    });\n  }\n}\n\nif (alerts.length === 0) {\n  return [{json: {hasAlerts: false, message: 'All budgets within limits'}}];\n}\n\nlet alertMsg = ':moneybag: *Daily Budget Alert Report*\\n\\n';\nfor (const a of alerts) {\n  const icon = a.severity === 'over' ? ':rotating_light:' : a.severity === 'critical' ? ':warning:' : ':eyes:';\n  alertMsg += `${icon} *${a.department}*: ${a.percentage}% used ($${a.spent.toLocaleString()} / $${a.budget.toLocaleString()}) — $${a.remaining.toLocaleString()} remaining\\n`;\n}\n\nreturn [{json: {\n  hasAlerts: true,\n  alertMsg,\n  alertCount: alerts.length,\n  hasCritical: alerts.some(a => a.severity === 'critical' || a.severity === 'over'),\n  alerts,\n  date: new Date().toISOString().split('T')[0]\n}}];"
+      },
+      "name": "Check Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.hasAlerts }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If Over 90%",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#finance",
+          "mode": "name"
+        },
+        "text": "={{ $json.alertMsg }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Finance Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 240],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.hasCritical }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If Critical",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1360, 240]
+    },
+    {
+      "parameters": {
+        "sendTo": "cfo@company.com",
+        "subject": "=URGENT: Budget Alert - {{ $json.date }}",
+        "message": "={{ $json.alertMsg.replace(/:[a-z_]+:/g, '').replace(/\\*/g, '') }}\n\nPlease review the budget tracker for details.",
+        "options": {}
+      },
+      "name": "Email CFO",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1580, 180],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Budget Alert System\n\nDaily budget monitoring with escalation.\n\n**Flow:**\n1. Daily trigger at 8AM weekdays\n2. Read budget tracker from Sheets\n3. Code checks thresholds (75%, 90%, 100%)\n4. If any over 90% → Slack #finance\n5. If critical (90%+) → email CFO\n\n**Sheet columns:**\ndepartment, budget, spent\n\n**Thresholds:**\n- 75%+ = warning (:eyes:)\n- 90%+ = critical (:warning:)\n- 100%+ = over budget (:rotating_light:)",
+        "width": 340,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 240]
+    }
+  ],
+  "connections": {
+    "Daily Morning Check": {
+      "main": [
+        [
+          {
+            "node": "Read Budget Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Budget Sheet": {
+      "main": [
+        [
+          {
+            "node": "Check Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Thresholds": {
+      "main": [
+        [
+          {
+            "node": "If Over 90%",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Over 90%": {
+      "main": [
+        [
+          {
+            "node": "Slack Finance Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Slack Finance Alert": {
+      "main": [
+        [
+          {
+            "node": "If Critical",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Critical": {
+      "main": [
+        [
+          {
+            "node": "Email CFO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

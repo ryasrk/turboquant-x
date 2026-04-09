@@ -1,0 +1,115 @@
+{
+  "name": "Bitly Link Shortener and Tracker",
+  "nodes": [
+    {
+      "name": "Webhook with URL",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "bitly-shorten",
+        "httpMethod": "POST",
+        "responseMode": "lastNode"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Shorten via Bitly",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "https://api-ssl.bitly.com/v4/shorten",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"long_url\": \"{{ $json.body?.url || $json.url }}\",\n  \"domain\": \"bit.ly\"\n}",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sheets Link Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 200],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "values": [
+              { "column": "longUrl", "value": "={{ $json.long_url }}" },
+              { "column": "shortUrl", "value": "={{ $json.link }}" },
+              { "column": "bitlyId", "value": "={{ $json.id }}" },
+              { "column": "createdAt", "value": "={{ $json.created_at || $now.toISO() }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail with Short URL",
+      "type": "n8n-nodes-base.gmail",
+      "position": [710, 400],
+      "parameters": {
+        "sendTo": "={{ $json.body?.email || $json.email || '' }}",
+        "subject": "Your shortened link is ready!",
+        "message": "=Here's your shortened URL:\n\nOriginal: {{ $json.long_url }}\nShortened: {{ $json.link }}\n\nCreated: {{ $json.created_at || $now.toISO() }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Telegram Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "position": [940, 300],
+      "parameters": {
+        "chatId": "",
+        "text": "=🔗 Link shortened!\n\nShort: {{ $json.link }}\nOriginal: {{ $json.long_url }}",
+        "additionalFields": {}
+      },
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Bitly Link Shortener and Tracker\nReceives a URL via webhook, shortens via Bitly API, logs to Sheets, emails the short URL, and confirms via Telegram.\n\n**Setup:**\n1. Set Bitly API token in HTTP Header Auth (Authorization: Bearer YOUR_TOKEN)\n2. Connect Google Sheets for link tracking\n3. Configure Gmail and Telegram credentials\n4. POST to webhook with { \"url\": \"https://example.com\", \"email\": \"user@example.com\" }"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook with URL": {
+      "main": [[{ "node": "Shorten via Bitly", "type": "main", "index": 0 }]]
+    },
+    "Shorten via Bitly": {
+      "main": [
+        [
+          { "node": "Sheets Link Log", "type": "main", "index": 0 },
+          { "node": "Gmail with Short URL", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Gmail with Short URL": {
+      "main": [[{ "node": "Telegram Confirmation", "type": "main", "index": 0 }]]
+    }
+  }
+}

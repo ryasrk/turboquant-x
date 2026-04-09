@@ -1,0 +1,88 @@
+{
+  "name": "Sheets Attendance Report Generator",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Attendance Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "DailyAttendance" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Generate Weekly Summary",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(i => i.json);\n\nconst oneWeekAgo = new Date();\noneWeekAgo.setDate(oneWeekAgo.getDate() - 7);\n\nconst weekData = rows.filter(r => new Date(r.date) >= oneWeekAgo);\n\nconst summary = {};\nfor (const row of weekData) {\n  const name = row.employeeName || row.name;\n  if (!summary[name]) {\n    summary[name] = { name, present: 0, absent: 0, late: 0, totalDays: 0 };\n  }\n  summary[name].totalDays++;\n  const status = (row.status || '').toLowerCase();\n  if (status === 'present') summary[name].present++;\n  else if (status === 'absent') summary[name].absent++;\n  else if (status === 'late') summary[name].late++;\n}\n\nconst report = Object.values(summary).map(s => ({\n  ...s,\n  attendanceRate: Math.round((s.present / s.totalDays) * 10000) / 100\n}));\n\nconst totalEmployees = report.length;\nconst avgAttendance = Math.round(report.reduce((sum, r) => sum + r.attendanceRate, 0) / totalEmployees * 100) / 100;\n\nreturn report.map(r => ({ json: { ...r, weekEnding: new Date().toISOString().split('T')[0], avgTeamAttendance: avgAttendance } }));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Report Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "WeeklyReport" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail to HR",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1180, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Weekly Attendance Report - Week ending {{ new Date().toISOString().split('T')[0] }}",
+        "message": "=Weekly attendance report has been generated.\n\nEmployees tracked: {{ $input.all().length }}\nAverage team attendance: {{ $input.all()[0]?.json.avgTeamAttendance || 'N/A' }}%\n\nFull report available in the WeeklyReport sheet.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Sheets Attendance Report Generator\nWeekly workflow that reads daily attendance data, generates a per-employee summary with attendance rates, writes to a report sheet, and emails HR."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": { "main": [[{ "node": "Read Attendance Data", "type": "main", "index": 0 }]] },
+    "Read Attendance Data": { "main": [[{ "node": "Generate Weekly Summary", "type": "main", "index": 0 }]] },
+    "Generate Weekly Summary": { "main": [[{ "node": "Write Report Sheet", "type": "main", "index": 0 }]] },
+    "Write Report Sheet": { "main": [[{ "node": "Gmail to HR", "type": "main", "index": 0 }]] }
+  }
+}

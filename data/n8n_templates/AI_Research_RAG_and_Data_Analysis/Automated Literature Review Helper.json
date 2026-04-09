@@ -1,0 +1,118 @@
+{
+  "name": "Automated Literature Review Helper",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "literature-review",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.semanticscholar.org/graph/v1/paper/search?query={{ encodeURIComponent($json.body.topic) }}&limit=20&fields=title,abstract,year,citationCount,authors,url,venue,externalIds",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Semantic Scholar Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0].json;\nconst papers = data.data || [];\nconst minCitations = $('Webhook').item.json.body.minCitations || 0;\nconst minYear = $('Webhook').item.json.body.minYear || 2015;\n\n// Filter by relevance criteria\nconst filtered = papers.filter(p => \n  (p.citationCount || 0) >= minCitations &&\n  (p.year || 0) >= minYear &&\n  p.abstract && p.abstract.length > 50\n);\n\n// Sort by citation count\nfiltered.sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0));\n\nreturn filtered.map(p => ({\n  json: {\n    title: p.title,\n    abstract: p.abstract,\n    year: p.year,\n    citations: p.citationCount || 0,\n    authors: (p.authors || []).map(a => a.name).join(', '),\n    venue: p.venue || '',\n    url: p.url || '',\n    doi: p.externalIds ? p.externalIds.DOI || '' : ''\n  }\n}));"
+      },
+      "name": "Filter Relevant Papers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Summarize this research paper for a literature review matrix:\n\nTitle: {{ $json.title }}\nYear: {{ $json.year }}\nAuthors: {{ $json.authors }}\nAbstract: {{ $json.abstract }}\n\nProvide a JSON object:\n{\"summary\": \"2-3 sentence summary\", \"methodology\": \"research method used\", \"keyFindings\": \"main results\", \"limitations\": \"noted limitations\", \"relevance\": \"high|medium|low\", \"tags\": [\"keyword1\", \"keyword2\"]}"
+            }
+          ]
+        },
+        "options": { "temperature": 0.2, "maxTokens": 800 }
+      },
+      "name": "OpenAI Summarize Each",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [910, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "title": "={{ $('Filter Relevant Papers').item.json.title }}",
+            "year": "={{ $('Filter Relevant Papers').item.json.year }}",
+            "authors": "={{ $('Filter Relevant Papers').item.json.authors }}",
+            "citations": "={{ $('Filter Relevant Papers').item.json.citations }}",
+            "venue": "={{ $('Filter Relevant Papers').item.json.venue }}",
+            "doi": "={{ $('Filter Relevant Papers').item.json.doi }}",
+            "ai_summary": "={{ $json.message.content }}",
+            "reviewed_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Review Matrix",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1130, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Literature Review Helper\n\nSearches Semantic Scholar for papers on a topic, filters by year and citation count, uses OpenAI to summarize each paper, and builds a review matrix in Google Sheets.\n\n**Setup:**\n1. Add OpenAI and Google Sheets credentials\n2. POST: `{\"topic\": \"deep learning NLP\", \"minCitations\": 10, \"minYear\": 2020}`\n3. Semantic Scholar API is free — no key required"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Semantic Scholar Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "Semantic Scholar Search": {
+      "main": [
+        [{ "node": "Filter Relevant Papers", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter Relevant Papers": {
+      "main": [
+        [{ "node": "OpenAI Summarize Each", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Summarize Each": {
+      "main": [
+        [{ "node": "Write Review Matrix", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

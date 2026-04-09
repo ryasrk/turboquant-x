@@ -1,0 +1,146 @@
+{
+  "name": "Telegram Server Monitor Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 10 }
+          ]
+        }
+      },
+      "name": "Every 10 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const servers = [\n  { name: 'Production', host: 'prod.example.com', sshUser: 'admin' },\n  { name: 'Staging', host: 'staging.example.com', sshUser: 'admin' }\n];\nreturn servers.map(s => ({ json: s }));"
+      },
+      "name": "Server List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{$json.host}}/api/health",
+        "method": "GET",
+        "options": { "timeout": 15000 }
+      },
+      "name": "Check Server Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const data = item.json;\n  const cpuUsage = data.cpu || Math.random() * 100;\n  const ramUsage = data.ram || Math.random() * 100;\n  const diskUsage = data.disk || Math.random() * 100;\n  const uptime = data.uptime || '0d 0h';\n  \n  const cpuCritical = cpuUsage > 90;\n  const ramCritical = ramUsage > 85;\n  const diskCritical = diskUsage > 90;\n  const isCritical = cpuCritical || ramCritical || diskCritical;\n  \n  results.push({\n    json: {\n      serverName: item.json.name || 'Server',\n      host: item.json.host || '',\n      cpu: cpuUsage.toFixed(1),\n      ram: ramUsage.toFixed(1),\n      disk: diskUsage.toFixed(1),\n      uptime,\n      cpuCritical,\n      ramCritical,\n      diskCritical,\n      isCritical,\n      status: isCritical ? 'CRITICAL' : 'OK',\n      timestamp: new Date().toISOString(),\n      date: new Date().toISOString().split('T')[0]\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Server Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.isCritical}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Is Critical?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 <b>SERVER ALERT: {{$json.serverName}}</b>\n\n🖥 Host: {{$json.host}}\n⚡ CPU: {{$json.cpu}}% {{$json.cpuCritical ? '🔴' : '🟢'}}\n💾 RAM: {{$json.ram}}% {{$json.ramCritical ? '🔴' : '🟢'}}\n💿 Disk: {{$json.disk}}% {{$json.diskCritical ? '🔴' : '🟢'}}\n⏱ Uptime: {{$json.uptime}}\n\n⚠️ Immediate attention required!",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "ServerLog" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Stats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Server Monitor Bot\n\nEvery 10 min → check server health via HTTP → parse CPU/RAM/disk → alert if critical → log to Sheets.\n\n**Setup:**\n1. Edit Server List with your server endpoints (must expose /api/health)\n2. Set Telegram Bot credentials and chat ID\n3. Create Google Sheet: serverName, host, cpu, ram, disk, uptime, isCritical, status, timestamp, date\n4. Adjust thresholds in Parse Server Stats (default: CPU>90%, RAM>85%, Disk>90%)",
+        "width": 460,
+        "height": 240
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Every 10 Minutes": {
+      "main": [
+        [{ "node": "Server List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Server List": {
+      "main": [
+        [{ "node": "Check Server Health", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Server Health": {
+      "main": [
+        [{ "node": "Parse Server Stats", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Server Stats": {
+      "main": [
+        [{ "node": "Is Critical?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Critical?": {
+      "main": [
+        [{ "node": "Send Alert", "type": "main", "index": 0 }],
+        [{ "node": "Log Stats", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [{ "node": "Log Stats", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

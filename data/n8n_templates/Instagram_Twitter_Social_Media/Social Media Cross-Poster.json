@@ -1,0 +1,166 @@
+{
+  "name": "Social Media Cross-Poster",
+  "nodes": [
+    {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "cross-post",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Adapt Format",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst post = items[0].json.body;\nconst text = post.text || '';\nconst image = post.image_url || '';\n\nconst twitter = {\n  text: text.substring(0, 280),\n  image_url: image,\n  platform: 'twitter'\n};\n\nconst linkedin = {\n  text: text.substring(0, 3000),\n  image_url: image,\n  platform: 'linkedin'\n};\n\nconst facebook = {\n  text: text,\n  image_url: image,\n  platform: 'facebook'\n};\n\nreturn [\n  {json: {twitter, linkedin, facebook, original_text: text, timestamp: new Date().toISOString()}}\n];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Post to Twitter",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [700, 150],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "text", "value": "={{ $json.twitter.text }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [700, 300],
+      "parameters": {
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "text", "value": "={{ $json.linkedin.text }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Post to Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [700, 450],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/me/feed",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "message", "value": "={{ $json.facebook.text }}"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "position": [950, 300],
+      "parameters": {
+        "mode": "append"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Track in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1150, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Post Tracking",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 80],
+      "parameters": {
+        "content": "## Social Media Cross-Poster\nReceives a single post via webhook, adapts format for each platform (character limits, etc.), posts in parallel to Twitter, LinkedIn, and Facebook, then tracks results in Google Sheets."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Adapt Format", "type": "main", "index": 0}]]
+    },
+    "Adapt Format": {
+      "main": [
+        [
+          {"node": "Post to Twitter", "type": "main", "index": 0},
+          {"node": "Post to LinkedIn", "type": "main", "index": 0},
+          {"node": "Post to Facebook", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Post to Twitter": {
+      "main": [[{"node": "Merge Results", "type": "main", "index": 0}]]
+    },
+    "Post to LinkedIn": {
+      "main": [[{"node": "Merge Results", "type": "main", "index": 0}]]
+    },
+    "Post to Facebook": {
+      "main": [[{"node": "Merge Results", "type": "main", "index": 0}]]
+    },
+    "Merge Results": {
+      "main": [[{"node": "Track in Sheets", "type": "main", "index": 0}]]
+    }
+  }
+}

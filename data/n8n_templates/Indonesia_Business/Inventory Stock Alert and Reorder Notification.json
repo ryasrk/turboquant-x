@@ -1,0 +1,98 @@
+{
+  "name": "Inventory Stock Alert and Reorder Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "0 8 * * 1-6"}]
+        }
+      },
+      "name": "Daily Stock Check (8AM Mon-Sat)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Inventory"},
+        "options": {"range": "A:K"}
+      },
+      "name": "Read Inventory Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\n\nconst alerts = {\n  critical: [],  // Stok habis\n  low: [],       // Di bawah minimum\n  expiring: [],  // Mendekati kadaluarsa\n  overstock: []  // Kelebihan stok\n};\n\nlet totalSKU = 0;\nlet totalItems = 0;\nlet totalValue = 0;\n\nfor (const item of items) {\n  const i = item.json;\n  const stok = Number(i.stok || i.stock || 0);\n  const minimum = Number(i.stok_minimum || i.min_stock || 10);\n  const maximum = Number(i.stok_maksimum || i.max_stock || 1000);\n  const harga = Number(i.harga_beli || i.cost_price || 0);\n  const expiry = i.tanggal_kadaluarsa || i.expiry_date;\n  \n  totalSKU++;\n  totalItems += stok;\n  totalValue += stok * harga;\n  \n  const product = {\n    kode: i.kode_barang || i.sku || '-',\n    nama: i.nama_barang || i.name || '-',\n    kategori: i.kategori || i.category || '-',\n    stok: stok,\n    satuan: i.satuan || i.unit || 'pcs',\n    minimum: minimum,\n    supplier: i.supplier || '-',\n    harga_beli: harga,\n    lokasi: i.lokasi_gudang || i.warehouse || '-'\n  };\n  \n  // Critical: zero stock\n  if (stok === 0) {\n    alerts.critical.push(product);\n  }\n  // Low: below minimum threshold\n  else if (stok <= minimum) {\n    alerts.low.push({...product, deficit: minimum - stok});\n  }\n  // Overstock: above maximum\n  else if (stok > maximum) {\n    alerts.overstock.push({...product, excess: stok - maximum});\n  }\n  \n  // Expiring: within 30 days\n  if (expiry) {\n    const expiryDate = new Date(expiry);\n    const daysUntilExpiry = Math.floor((expiryDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));\n    if (daysUntilExpiry >= 0 && daysUntilExpiry <= 30) {\n      alerts.expiring.push({...product, days_until_expiry: daysUntilExpiry, expiry_date: expiry});\n    }\n  }\n}\n\nconst hasAlerts = alerts.critical.length + alerts.low.length + alerts.expiring.length > 0;\n\nreturn [{\n  json: {\n    tanggal: now.toLocaleDateString('id-ID', {weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'}),\n    total_sku: totalSKU,\n    total_items: totalItems,\n    total_value: totalValue,\n    critical_count: alerts.critical.length,\n    low_count: alerts.low.length,\n    expiring_count: alerts.expiring.length,\n    overstock_count: alerts.overstock.length,\n    has_alerts: hasAlerts,\n    critical: alerts.critical,\n    low: alerts.low,\n    expiring: alerts.expiring,\n    overstock: alerts.overstock\n  }\n}];"
+      },
+      "name": "Analyze Stock Levels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false},
+          "combinator": "and",
+          "conditions": [
+            {"leftValue": "={{ $json.has_alerts }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true"}}
+          ]
+        }
+      },
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [930, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "=-100xxx",
+        "text": "=🚨 *LAPORAN STOK HARIAN*\n📅 {{ $json.tanggal }}\n\n📦 Total SKU: {{ $json.total_sku }}\n📊 Total Barang: {{ Number($json.total_items).toLocaleString('id-ID') }}\n💰 Nilai Inventory: Rp {{ Number($json.total_value).toLocaleString('id-ID') }}\n\n{{ $json.critical_count > 0 ? '🔴 *STOK HABIS (' + $json.critical_count + ' item):*\\n' + $json.critical.map(i => '• ' + i.kode + ' - ' + i.nama + ' (' + i.kategori + ')').join('\\n') + '\\n\\n' : '' }}{{ $json.low_count > 0 ? '🟡 *STOK RENDAH (' + $json.low_count + ' item):*\\n' + $json.low.map(i => '• ' + i.kode + ' - ' + i.nama + ': ' + i.stok + ' ' + i.satuan + ' (min: ' + i.minimum + ')').join('\\n') + '\\n\\n' : '' }}{{ $json.expiring_count > 0 ? '⏰ *MENDEKATI KADALUARSA (' + $json.expiring_count + ' item):*\\n' + $json.expiring.map(i => '• ' + i.kode + ' - ' + i.nama + ': ' + i.days_until_expiry + ' hari lagi').join('\\n') + '\\n\\n' : '' }}{{ $json.overstock_count > 0 ? '📈 Overstock: ' + $json.overstock_count + ' item di atas maksimum' : '' }}",
+        "additionalFields": {"parse_mode": "Markdown"}
+      },
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1180, 200],
+      "credentials": {
+        "telegramApi": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "=purchasing@company.co.id",
+        "subject": "=🚨 Stock Alert: {{ $json.critical_count }} habis, {{ $json.low_count }} rendah - {{ $json.tanggal }}",
+        "message": "=Tim Purchasing,\n\nBerikut laporan stok yang memerlukan tindakan:\n\n{{ $json.critical_count > 0 ? 'STOK HABIS:\\n' + $json.critical.map(i => '- ' + i.kode + ' ' + i.nama + ' | Supplier: ' + i.supplier + ' | Gudang: ' + i.lokasi).join('\\n') + '\\n\\n' : '' }}{{ $json.low_count > 0 ? 'STOK RENDAH (perlu reorder):\\n' + $json.low.map(i => '- ' + i.kode + ' ' + i.nama + ' | Sisa: ' + i.stok + ' ' + i.satuan + ' | Min: ' + i.minimum + ' | Supplier: ' + i.supplier).join('\\n') + '\\n\\n' : '' }}{{ $json.expiring_count > 0 ? 'MENDEKATI KADALUARSA:\\n' + $json.expiring.map(i => '- ' + i.kode + ' ' + i.nama + ' | Expired: ' + i.expiry_date + ' (' + i.days_until_expiry + ' hari)').join('\\n') : '' }}\n\nMohon segera ditindaklanjuti.\n\nTerima kasih."
+      },
+      "name": "Email Purchasing Team",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1180, 400],
+      "credentials": {
+        "gmailOAuth2": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Inventory Stock Alert (Indonesia)\n\n### Monitors:\n- 🔴 **Stok Habis** — Zero stock items\n- 🟡 **Stok Rendah** — Below minimum threshold\n- ⏰ **Mendekati Kadaluarsa** — Expiring within 30 days\n- 📈 **Overstock** — Above maximum threshold\n\n### Required Sheet columns:\nkode_barang, nama_barang, kategori, stok, satuan, stok_minimum, stok_maksimum, harga_beli, supplier, lokasi_gudang, tanggal_kadaluarsa\n\n### Outputs:\n- Telegram alert (real-time to warehouse manager)\n- Email to purchasing team (for reorder action)"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 60]
+    }
+  ],
+  "connections": {
+    "Daily Stock Check (8AM Mon-Sat)": {"main": [[{"node": "Read Inventory Data", "type": "main", "index": 0}]]},
+    "Read Inventory Data": {"main": [[{"node": "Analyze Stock Levels", "type": "main", "index": 0}]]},
+    "Analyze Stock Levels": {"main": [[{"node": "Has Alerts?", "type": "main", "index": 0}]]},
+    "Has Alerts?": {"main": [[{"node": "Send Telegram Alert", "type": "main", "index": 0}, {"node": "Email Purchasing Team", "type": "main", "index": 0}], []]}
+  }
+}

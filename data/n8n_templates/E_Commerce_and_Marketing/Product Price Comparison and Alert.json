@@ -1,0 +1,244 @@
+{
+  "name": "Product Price Comparison and Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Price Check Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Products to Monitor" },
+        "options": {}
+      },
+      "name": "Read Product Monitor List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json['Competitor URL'] }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "Scrape Competitor Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const html = item.json.data || item.json.body || '';\n  const productData = $('Read Product Monitor List').first().json;\n  \n  // Extract price using common e-commerce patterns\n  const pricePatterns = [\n    /\"price\"\\s*:\\s*\"?([\\d.,]+)\"?/i,\n    /class=\"price[^\"]*\"[^>]*>\\s*\\$?([\\d.,]+)/i,\n    /itemprop=\"price\"\\s+content=\"([\\d.,]+)\"/i,\n    /data-price=\"([\\d.,]+)\"/i,\n    /\\$([\\d,]+\\.\\d{2})/\n  ];\n  \n  let competitorPrice = null;\n  for (const pattern of pricePatterns) {\n    const match = html.match(pattern);\n    if (match) {\n      competitorPrice = parseFloat(match[1].replace(',', ''));\n      break;\n    }\n  }\n  \n  const ownPrice = parseFloat(productData['Our Price'] || 0);\n  const priceDiff = competitorPrice ? (ownPrice - competitorPrice).toFixed(2) : null;\n  const competitorCheaper = competitorPrice && competitorPrice < ownPrice;\n  \n  results.push({\n    productName: productData['Product Name'],\n    sku: productData.SKU || 'N/A',\n    ourPrice: ownPrice,\n    competitorPrice: competitorPrice || 'Could not extract',\n    competitorName: productData['Competitor Name'] || 'Unknown',\n    competitorUrl: productData['Competitor URL'],\n    priceDifference: priceDiff,\n    competitorCheaper,\n    checkedAt: new Date().toISOString()\n  });\n}\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "name": "Extract and Compare Prices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Price History" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.checkedAt }}",
+            "Product": "={{ $json.productName }}",
+            "SKU": "={{ $json.sku }}",
+            "Our Price": "={{ $json.ourPrice }}",
+            "Competitor": "={{ $json.competitorName }}",
+            "Competitor Price": "={{ $json.competitorPrice }}",
+            "Difference": "={{ $json.priceDifference }}",
+            "Alert": "={{ $json.competitorCheaper ? 'YES - Competitor cheaper' : 'No' }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Prices to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1130, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.competitorCheaper }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Competitor Cheaper?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🔔 *Price Alert: Competitor is Cheaper!*\n\n📦 *{{ $json.productName }}* ({{ $json.sku }})\n💰 Our Price: ${{ $json.ourPrice }}\n🏪 {{ $json.competitorName }}: ${{ $json.competitorPrice }}\n📉 Difference: ${{ $json.priceDifference }}\n🔗 [Competitor Link]({{ $json.competitorUrl }})\n\n_Consider adjusting your price to stay competitive._",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Price Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1570, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "⚠️ Price Alert: {{ $json.competitorName }} is cheaper on {{ $json.productName }}",
+        "emailType": "html",
+        "message": "<h2>🔔 Competitor Price Alert</h2><table style=\"border-collapse:collapse;width:100%;\"><tr><td style=\"padding:8px;border:1px solid #ddd;\"><strong>Product</strong></td><td style=\"padding:8px;border:1px solid #ddd;\">{{ $json.productName }} ({{ $json.sku }})</td></tr><tr><td style=\"padding:8px;border:1px solid #ddd;\"><strong>Our Price</strong></td><td style=\"padding:8px;border:1px solid #ddd;\">${{ $json.ourPrice }}</td></tr><tr><td style=\"padding:8px;border:1px solid #ddd;\"><strong>{{ $json.competitorName }}</strong></td><td style=\"padding:8px;border:1px solid #ddd;color:red;\"><strong>${{ $json.competitorPrice }}</strong></td></tr><tr><td style=\"padding:8px;border:1px solid #ddd;\"><strong>Difference</strong></td><td style=\"padding:8px;border:1px solid #ddd;\">${{ $json.priceDifference }}</td></tr></table><p><a href=\"{{ $json.competitorUrl }}\">View Competitor Listing</a></p>",
+        "options": {
+          "senderName": "Price Monitor"
+        }
+      },
+      "name": "Email Price Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1570, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allResults = $input.all();\nconst cheaperCount = allResults.filter(r => r.json.competitorCheaper).length;\nconst total = allResults.length;\n\nreturn [{ json: {\n  summary: `Daily price check complete. ${total} products checked, ${cheaperCount} competitor(s) have lower prices.`,\n  totalChecked: total,\n  alertCount: cheaperCount,\n  checkedAt: new Date().toISOString()\n}}];"
+      },
+      "name": "Generate Daily Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 520]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Daily Summaries" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.checkedAt }}",
+            "Products Checked": "={{ $json.totalChecked }}",
+            "Alerts": "={{ $json.alertCount }}",
+            "Summary": "={{ $json.summary }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Daily Summary",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1570, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Product Price Comparison and Alert\n\n**How to use:**\n1. Create Google Sheets with tabs:\n   - 'Products to Monitor': Product Name, SKU, Our Price, Competitor Name, Competitor URL\n   - 'Price History': auto-populated daily log\n   - 'Daily Summaries': auto-populated summaries\n2. Add products and competitor URLs to monitor\n3. Configure Google Sheets, Gmail, and Telegram credentials\n4. Set alert email recipient and Telegram Chat ID\n\n**Schedule:** Runs daily at 6am.\n\n**Price extraction:** Uses common e-commerce price patterns (JSON-LD, meta tags, CSS classes). Customize the regex patterns in 'Extract and Compare Prices' node for specific competitor sites.\n\n**Alert triggers:** When competitor price < our price:\n- Telegram notification with price details\n- Email alert with comparison table\n\n**Note:** Web scraping may be affected by site structure changes. Regularly verify extraction accuracy. Consider using official APIs where available.",
+        "width": 440,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -120]
+    }
+  ],
+  "connections": {
+    "Daily Price Check Trigger": {
+      "main": [
+        [{ "node": "Read Product Monitor List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Product Monitor List": {
+      "main": [
+        [{ "node": "Scrape Competitor Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Scrape Competitor Page": {
+      "main": [
+        [{ "node": "Extract and Compare Prices", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract and Compare Prices": {
+      "main": [
+        [{ "node": "Log Prices to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Prices to Sheets": {
+      "main": [
+        [
+          { "node": "Competitor Cheaper?", "type": "main", "index": 0 },
+          { "node": "Generate Daily Summary", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Competitor Cheaper?": {
+      "main": [
+        [
+          { "node": "Telegram Price Alert", "type": "main", "index": 0 },
+          { "node": "Email Price Alert", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Generate Daily Summary": {
+      "main": [
+        [{ "node": "Log Daily Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

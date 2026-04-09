@@ -1,0 +1,98 @@
+{
+  "name": "Sheets Row to PDF Converter",
+  "nodes": [
+    {
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [300, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "row-to-pdf",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "typeVersion": 2,
+      "webhookId": "row-to-pdf"
+    },
+    {
+      "name": "Generate HTML",
+      "type": "n8n-nodes-base.code",
+      "position": [520, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0].json;\n\nconst fields = Object.entries(data).filter(([k]) => !k.startsWith('_'));\nconst rows = fields.map(([key, value]) => `<tr><td style=\"font-weight:bold;padding:8px;border:1px solid #ddd;\">${key}</td><td style=\"padding:8px;border:1px solid #ddd;\">${value}</td></tr>`).join('\\n');\n\nconst html = `<!DOCTYPE html>\n<html>\n<head><style>body{font-family:Arial,sans-serif;margin:40px}table{border-collapse:collapse;width:100%}h1{color:#333}</style></head>\n<body>\n<h1>Record Details</h1>\n<p>Generated: ${new Date().toISOString()}</p>\n<table>${rows}</table>\n</body>\n</html>`;\n\nreturn [{ json: { html, fileName: `record_${Date.now()}.pdf`, sourceData: data } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Convert HTML to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [740, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.html2pdf.app/v1/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ html: $json.html, apiKey: '' }) }}",
+        "options": {
+          "response": { "response": { "responseFormat": "file" } }
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Save to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $json.fileName }}",
+        "folderId": { "__rl": true, "mode": "list", "value": "" },
+        "options": {}
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Log Link to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1180, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "PDFLog" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileName": "={{ $json.fileName }}",
+            "driveLink": "={{ $json.webViewLink || $json.webContentLink || '' }}",
+            "createdAt": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Sheets Row to PDF Converter\nWebhook receives row data, generates HTML from the fields, converts to PDF via API, saves to Google Drive, and logs the link in a Sheet."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Generate HTML", "type": "main", "index": 0 }]] },
+    "Generate HTML": { "main": [[{ "node": "Convert HTML to PDF", "type": "main", "index": 0 }]] },
+    "Convert HTML to PDF": { "main": [[{ "node": "Save to Drive", "type": "main", "index": 0 }]] },
+    "Save to Drive": { "main": [[{ "node": "Log Link to Sheet", "type": "main", "index": 0 }]] }
+  }
+}

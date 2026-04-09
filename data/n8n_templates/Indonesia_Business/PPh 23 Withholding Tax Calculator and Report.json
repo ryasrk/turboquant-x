@@ -1,0 +1,233 @@
+{
+  "name": "PPh 23 Withholding Tax Calculator and Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtDay": 5,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "name": "Monthly Schedule (Tanggal 5)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "id": "schedule-trigger-001"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Invoice_Payments"
+        },
+        "options": {
+          "range": "",
+          "valueRenderMode": "UNFORMATTED_VALUE"
+        }
+      },
+      "name": "Read Invoice Data (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [480, 300],
+      "id": "read-invoices-002",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// PPh 23 Withholding Tax Calculator - Indonesia\n// Tarif PPh 23:\n//   - 2% untuk jasa (punya NPWP)\n//   - 4% untuk jasa (tanpa NPWP / NPWP tidak valid)\n//   - 15% untuk dividen, bunga, royalti\n\nconst items = $input.all();\nconst now = new Date();\nconst masaPajak = `${String(now.getMonth() === 0 ? 12 : now.getMonth()).padStart(2, '0')}/${now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()}`;\n\nfunction validateNPWP(npwp) {\n  if (!npwp) return false;\n  const cleaned = String(npwp).replace(/[^0-9]/g, '');\n  // NPWP format: 15 digits (old) or 16 digits (NIK-based new format)\n  return cleaned.length === 15 || cleaned.length === 16;\n}\n\nfunction formatNPWP(npwp) {\n  const cleaned = String(npwp).replace(/[^0-9]/g, '');\n  if (cleaned.length === 15) {\n    return `${cleaned.slice(0,2)}.${cleaned.slice(2,5)}.${cleaned.slice(5,8)}.${cleaned.slice(8,9)}-${cleaned.slice(9,12)}.${cleaned.slice(12,15)}`;\n  }\n  return cleaned;\n}\n\nfunction formatRupiah(amount) {\n  return 'Rp ' + Number(amount).toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 });\n}\n\nfunction getTarifPPh23(jenisJasa, hasValidNPWP) {\n  const jenisLower = String(jenisJasa).toLowerCase();\n  if (['dividen', 'bunga', 'royalti', 'dividend', 'interest', 'royalty'].includes(jenisLower)) {\n    return 0.15; // 15% for dividends, interest, royalties\n  }\n  // Jasa (services): 2% with NPWP, 4% without\n  return hasValidNPWP ? 0.02 : 0.04;\n}\n\nlet buktiPotongCounter = 1;\nconst results = [];\nlet totalPPh23 = 0;\n\nfor (const item of items) {\n  const d = item.json;\n  const namaVendor = d.nama_vendor || d.vendor_name || '';\n  const npwp = d.npwp || d.NPWP || '';\n  const jenisJasa = d.jenis_jasa || d.service_type || 'jasa';\n  const nilaiBruto = Number(d.nilai_bruto || d.gross_amount || 0);\n  const noInvoice = d.no_invoice || d.invoice_number || '';\n  const tanggalInvoice = d.tanggal_invoice || d.invoice_date || '';\n  const tanggalBayar = d.tanggal_bayar || d.payment_date || '';\n\n  const hasValidNPWP = validateNPWP(npwp);\n  const tarifPPh23 = getTarifPPh23(jenisJasa, hasValidNPWP);\n  const pph23Terutang = Math.round(nilaiBruto * tarifPPh23);\n  const nilaiDibayar = nilaiBruto - pph23Terutang;\n\n  const noBuktiPotong = `BP-${masaPajak.replace('/', '')}-${String(buktiPotongCounter).padStart(4, '0')}`;\n  buktiPotongCounter++;\n  totalPPh23 += pph23Terutang;\n\n  results.push({\n    json: {\n      no_bukti_potong: noBuktiPotong,\n      masa_pajak: masaPajak,\n      nama_vendor: namaVendor,\n      npwp: npwp,\n      npwp_formatted: hasValidNPWP ? formatNPWP(npwp) : 'TIDAK VALID / BELUM ADA',\n      npwp_valid: hasValidNPWP,\n      jenis_jasa: jenisJasa,\n      no_invoice: noInvoice,\n      tanggal_invoice: tanggalInvoice,\n      tanggal_bayar: tanggalBayar,\n      nilai_bruto: nilaiBruto,\n      nilai_bruto_formatted: formatRupiah(nilaiBruto),\n      tarif_pph23: tarifPPh23,\n      tarif_pph23_persen: `${(tarifPPh23 * 100).toFixed(0)}%`,\n      pph23_terutang: pph23Terutang,\n      pph23_terutang_formatted: formatRupiah(pph23Terutang),\n      nilai_dibayar: nilaiDibayar,\n      nilai_dibayar_formatted: formatRupiah(nilaiDibayar),\n      keterangan: !hasValidNPWP ? 'Tarif lebih tinggi (100%) karena tidak memiliki NPWP valid' : '',\n      tanggal_potong: now.toISOString().split('T')[0],\n      total_pph23_bulan_ini: totalPPh23,\n      total_pph23_bulan_ini_formatted: formatRupiah(totalPPh23)\n    }\n  });\n}\n\nreturn results;"
+      },
+      "name": "Calculate PPh 23",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "id": "calc-pph23-003"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Bukti_Potong"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "No Bukti Potong": "={{ $json.no_bukti_potong }}",
+            "Masa Pajak": "={{ $json.masa_pajak }}",
+            "Nama Vendor": "={{ $json.nama_vendor }}",
+            "NPWP": "={{ $json.npwp_formatted }}",
+            "Jenis Jasa": "={{ $json.jenis_jasa }}",
+            "No Invoice": "={{ $json.no_invoice }}",
+            "Nilai Bruto": "={{ $json.nilai_bruto }}",
+            "Tarif PPh 23": "={{ $json.tarif_pph23_persen }}",
+            "PPh 23 Terutang": "={{ $json.pph23_terutang }}",
+            "Nilai Dibayar": "={{ $json.nilai_dibayar }}",
+            "Tanggal Potong": "={{ $json.tanggal_potong }}",
+            "Keterangan": "={{ $json.keterangan }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save Bukti Potong (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [960, 300],
+      "id": "save-bukti-potong-004",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate CSV in DJP e-Bupot PPh 23 format\n// Columns sesuai format impor e-Bupot Unifikasi DJP\n\nconst items = $input.all();\nconst now = new Date();\nconst bulan = String(now.getMonth() === 0 ? 12 : now.getMonth()).padStart(2, '0');\nconst tahun = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();\n\n// e-Bupot CSV Header\nconst csvHeaders = [\n  'Tahun Pajak',\n  'Masa Pajak',\n  'Tin (NPWP/NIK)',\n  'Nama',\n  'Alamat',\n  'Kode Objek Pajak',\n  'Nomor Faktur/Dokumen',\n  'Tanggal Dokumen',\n  'Jumlah Penghasilan Bruto',\n  'Tarif (%)',\n  'Jumlah PPh Dipotong',\n  'Nomor Bukti Potong',\n  'Tanggal Bukti Potong',\n  'Fasilitas'\n];\n\nfunction getKodeObjekPajak(jenisJasa) {\n  const jenis = String(jenisJasa).toLowerCase();\n  if (jenis === 'dividen' || jenis === 'dividend') return '24-100-01';\n  if (jenis === 'bunga' || jenis === 'interest') return '24-100-02';\n  if (jenis === 'royalti' || jenis === 'royalty') return '24-100-03';\n  if (jenis.includes('teknik') || jenis.includes('technical')) return '24-104-01';\n  if (jenis.includes('manajemen') || jenis.includes('management')) return '24-104-02';\n  if (jenis.includes('konsultan') || jenis.includes('consult')) return '24-104-03';\n  return '24-104-99'; // Jasa lainnya\n}\n\nfunction escapeCSV(val) {\n  const str = String(val || '');\n  if (str.includes(',') || str.includes('\"') || str.includes('\\n')) {\n    return '\"' + str.replace(/\"/g, '\"\"') + '\"';\n  }\n  return str;\n}\n\nconst csvRows = [csvHeaders.join(',')];\n\nlet totalBruto = 0;\nlet totalPPh = 0;\n\nfor (const item of items) {\n  const d = item.json;\n  totalBruto += d.nilai_bruto;\n  totalPPh += d.pph23_terutang;\n\n  const row = [\n    tahun,\n    bulan,\n    escapeCSV(d.npwp),\n    escapeCSV(d.nama_vendor),\n    '',\n    getKodeObjekPajak(d.jenis_jasa),\n    escapeCSV(d.no_invoice),\n    d.tanggal_invoice,\n    d.nilai_bruto,\n    (d.tarif_pph23 * 100).toFixed(0),\n    d.pph23_terutang,\n    escapeCSV(d.no_bukti_potong),\n    d.tanggal_potong,\n    d.npwp_valid ? '' : 'TANPA NPWP'\n  ];\n  csvRows.push(row.join(','));\n}\n\nconst csvContent = csvRows.join('\\n');\nconst filename = `eBupot_PPh23_${tahun}_${bulan}.csv`;\n\nconst summary = [\n  `\\n=== RINGKASAN PPh 23 - Masa Pajak ${bulan}/${tahun} ===`,\n  `Jumlah Bukti Potong: ${items.length}`,\n  `Total Penghasilan Bruto: Rp ${totalBruto.toLocaleString('id-ID')}`,\n  `Total PPh 23 Terutang: Rp ${totalPPh.toLocaleString('id-ID')}`,\n  `File: ${filename}`\n].join('\\n');\n\nreturn [{\n  json: {\n    filename: filename,\n    csv_content: csvContent,\n    summary: summary,\n    masa_pajak: `${bulan}/${tahun}`,\n    total_bukti_potong: items.length,\n    total_bruto: totalBruto,\n    total_pph23: totalPPh,\n    total_bruto_formatted: 'Rp ' + totalBruto.toLocaleString('id-ID'),\n    total_pph23_formatted: 'Rp ' + totalPPh.toLocaleString('id-ID')\n  }\n}];"
+      },
+      "name": "Generate e-Bupot CSV (DJP Format)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "id": "generate-csv-005"
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Laporan PPh 23 - Masa Pajak {{ $json.masa_pajak }}",
+        "emailType": "html",
+        "message": "=<h2>Laporan PPh 23 Withholding Tax</h2>\n<p><strong>Masa Pajak:</strong> {{ $json.masa_pajak }}</p>\n<hr>\n<h3>Ringkasan</h3>\n<table border='1' cellpadding='8' cellspacing='0' style='border-collapse:collapse;'>\n  <tr style='background:#f0f0f0;'>\n    <td><strong>Jumlah Bukti Potong</strong></td>\n    <td>{{ $json.total_bukti_potong }}</td>\n  </tr>\n  <tr>\n    <td><strong>Total Penghasilan Bruto</strong></td>\n    <td>{{ $json.total_bruto_formatted }}</td>\n  </tr>\n  <tr style='background:#f0f0f0;'>\n    <td><strong>Total PPh 23 Terutang</strong></td>\n    <td><strong>{{ $json.total_pph23_formatted }}</strong></td>\n  </tr>\n</table>\n<br>\n<p>File CSV e-Bupot terlampir: <strong>{{ $json.filename }}</strong></p>\n<p>Silakan impor file CSV ke aplikasi <strong>e-Bupot Unifikasi DJP</strong> untuk pelaporan SPT Masa PPh 23.</p>\n<hr>\n<p style='color:#888; font-size:12px;'>Laporan ini digenerate otomatis oleh sistem TurboQuantX pada {{ $now.toISOString().split('T')[0] }}.</p>",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": []
+          },
+          "appendAttribution": false
+        }
+      },
+      "name": "Email Tax Report to Accounting",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1440, 300],
+      "id": "email-report-006",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 🇮🇩 PPh 23 Withholding Tax Calculator & Report\n\n**Template untuk menghitung dan melaporkan PPh 23 secara otomatis.**\n\n### Cara Kerja:\n1. **Schedule Trigger** — Berjalan otomatis setiap tanggal 5 per bulan\n2. **Baca Data Invoice** — Mengambil data pembayaran vendor dari Google Sheets\n3. **Hitung PPh 23** — Kalkulasi otomatis berdasarkan tarif:\n   - **2%** untuk jasa (vendor punya NPWP)\n   - **4%** untuk jasa (vendor tanpa NPWP)\n   - **15%** untuk dividen, bunga, royalti\n4. **Simpan Bukti Potong** — Data bukti potong disimpan ke Google Sheets\n5. **Generate CSV e-Bupot** — Format CSV sesuai DJP e-Bupot Unifikasi\n6. **Email Laporan** — Kirim ringkasan + CSV ke tim accounting\n\n### Setup yang Diperlukan:\n- Google Sheets dengan kolom: `nama_vendor`, `npwp`, `jenis_jasa`, `nilai_bruto`, `no_invoice`, `tanggal_invoice`, `tanggal_bayar`\n- Koneksi OAuth2 ke Google Sheets dan Gmail\n- Set alamat email tujuan di node Gmail\n\n### Format NPWP:\n- **Lama:** 15 digit (XX.XXX.XXX.X-XXX.XXX)\n- **Baru (NIK):** 16 digit\n\n### Kode Objek Pajak PPh 23:\n- `24-100-01` — Dividen\n- `24-100-02` — Bunga\n- `24-100-03` — Royalti\n- `24-104-01` — Jasa Teknik\n- `24-104-02` — Jasa Manajemen\n- `24-104-03` — Jasa Konsultan\n- `24-104-99` — Jasa Lainnya",
+        "height": 620,
+        "width": 420,
+        "color": 4
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [60, 60],
+      "id": "sticky-note-007"
+    }
+  ],
+  "connections": {
+    "Monthly Schedule (Tanggal 5)": {
+      "main": [
+        [
+          {
+            "node": "Read Invoice Data (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Invoice Data (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Calculate PPh 23",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate PPh 23": {
+      "main": [
+        [
+          {
+            "node": "Save Bukti Potong (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Bukti Potong (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Generate e-Bupot CSV (DJP Format)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate e-Bupot CSV (DJP Format)": {
+      "main": [
+        [
+          {
+            "node": "Email Tax Report to Accounting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Indonesia Business"
+    },
+    {
+      "name": "Tax"
+    },
+    {
+      "name": "PPh 23"
+    },
+    {
+      "name": "Accounting"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-04-09T00:00:00.000Z",
+  "versionId": "1"
+}

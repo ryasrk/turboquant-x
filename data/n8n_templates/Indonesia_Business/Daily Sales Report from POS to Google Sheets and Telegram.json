@@ -1,0 +1,86 @@
+{
+  "name": "Daily Sales Report from POS to Google Sheets and Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "0 21 * * *"}]
+        }
+      },
+      "name": "Daily Close Schedule (9PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://your-pos-api.example.com/api/v1/transactions?date={{ $now.format('yyyy-MM-dd') }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Fetch POS Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300],
+      "credentials": {
+        "httpHeaderAuth": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const transactions = $input.all();\n\nlet totalPenjualan = 0;\nlet totalDiskon = 0;\nlet totalPPN = 0;\nlet totalTunai = 0;\nlet totalDebit = 0;\nlet totalQRIS = 0;\nlet totalTransaksi = 0;\nconst produkTerlaris = {};\n\nfor (const tx of transactions) {\n  const data = tx.json;\n  const items = data.items || [data];\n  for (const item of items) {\n    totalPenjualan += Number(item.subtotal || item.amount || 0);\n    totalDiskon += Number(item.discount || 0);\n    totalPPN += Number(item.ppn || item.tax || 0);\n    \n    const produk = item.product_name || item.nama_produk || 'Unknown';\n    produkTerlaris[produk] = (produkTerlaris[produk] || 0) + Number(item.qty || 1);\n  }\n  \n  const method = (data.payment_method || data.metode_bayar || 'tunai').toLowerCase();\n  const amount = Number(data.total || data.amount || 0);\n  if (method.includes('tunai') || method.includes('cash')) totalTunai += amount;\n  else if (method.includes('debit') || method.includes('card')) totalDebit += amount;\n  else if (method.includes('qris') || method.includes('gopay') || method.includes('ovo') || method.includes('dana') || method.includes('shopeepay')) totalQRIS += amount;\n  totalTransaksi++;\n}\n\nconst top5 = Object.entries(produkTerlaris)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 5)\n  .map(([name, qty]) => `${name}: ${qty} pcs`)\n  .join('\\n');\n\nconst netSales = totalPenjualan - totalDiskon;\n\nreturn [{\n  json: {\n    tanggal: new Date().toLocaleDateString('id-ID', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'}),\n    total_transaksi: totalTransaksi,\n    total_penjualan_kotor: totalPenjualan,\n    total_diskon: totalDiskon,\n    total_penjualan_bersih: netSales,\n    total_ppn: totalPPN,\n    tunai: totalTunai,\n    debit_card: totalDebit,\n    qris_ewallet: totalQRIS,\n    produk_terlaris: top5,\n    rata_rata_transaksi: totalTransaksi > 0 ? Math.round(netSales / totalTransaksi) : 0\n  }\n}];"
+      },
+      "name": "Calculate Daily Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Daily Sales"},
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [950, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "=-100xxx",
+        "text": "=📊 *LAPORAN PENJUALAN HARIAN*\n📅 {{ $json.tanggal }}\n\n🧾 Total Transaksi: {{ $json.total_transaksi }}\n💰 Penjualan Kotor: Rp {{ Number($json.total_penjualan_kotor).toLocaleString('id-ID') }}\n🏷️ Diskon: Rp {{ Number($json.total_diskon).toLocaleString('id-ID') }}\n✅ Penjualan Bersih: Rp {{ Number($json.total_penjualan_bersih).toLocaleString('id-ID') }}\n📋 PPN: Rp {{ Number($json.total_ppn).toLocaleString('id-ID') }}\n\n💳 *Metode Pembayaran:*\n💵 Tunai: Rp {{ Number($json.tunai).toLocaleString('id-ID') }}\n💳 Debit/Card: Rp {{ Number($json.debit_card).toLocaleString('id-ID') }}\n📱 QRIS/E-Wallet: Rp {{ Number($json.qris_ewallet).toLocaleString('id-ID') }}\n\n📈 Rata-rata/Transaksi: Rp {{ Number($json.rata_rata_transaksi).toLocaleString('id-ID') }}\n\n🏆 *Produk Terlaris:*\n{{ $json.produk_terlaris }}",
+        "additionalFields": {"parse_mode": "Markdown"}
+      },
+      "name": "Send Telegram Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [950, 420],
+      "credentials": {
+        "telegramApi": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Daily Sales Report (Indonesia POS)\n\n### Features:\n- Auto-runs at 9 PM daily (closing time)\n- Fetches from POS API (adaptable to Moka, Majoo, iReap, etc.)\n- Calculates: gross/net sales, discounts, PPN\n- Payment breakdown: Tunai, Debit/Card, QRIS/GoPay/OVO/DANA/ShopeePay\n- Top 5 best-selling products\n- Saves to Google Sheets + sends Telegram summary\n\n### Configuration:\n1. Replace POS API URL (Moka: api.mokapos.com, Majoo: api.majoo.id, etc.)\n2. Set Telegram Bot Token + Chat ID\n3. Configure Google Sheets document"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Daily Close Schedule (9PM)": {"main": [[{"node": "Fetch POS Transactions", "type": "main", "index": 0}]]},
+    "Fetch POS Transactions": {"main": [[{"node": "Calculate Daily Summary", "type": "main", "index": 0}]]},
+    "Calculate Daily Summary": {"main": [[{"node": "Save to Google Sheets", "type": "main", "index": 0}, {"node": "Send Telegram Report", "type": "main", "index": 0}]]}
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "name": "Email Attachment Saver to Google Drive",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "hasAttachment": true
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "name": "Gmail Trigger - Attachments",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nconst now = new Date();\nconst dateFolder = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;\n\nfor (const item of items) {\n  const from = item.json.from || 'unknown';\n  const subject = item.json.subject || 'no-subject';\n  const attachmentCount = item.json.attachments ? item.json.attachments.length : 0;\n  \n  // Get binary data keys for attachments\n  const binaryKeys = item.binary ? Object.keys(item.binary) : [];\n  \n  for (const key of binaryKeys) {\n    const binaryData = item.binary[key];\n    results.push({\n      json: {\n        fileName: binaryData.fileName || `attachment_${key}`,\n        mimeType: binaryData.mimeType || 'application/octet-stream',\n        dateFolder: dateFolder,\n        emailFrom: from,\n        emailSubject: subject,\n        savedAt: now.toISOString()\n      },\n      binary: {\n        data: binaryData\n      }\n    });\n  }\n}\nreturn results;"
+      },
+      "name": "Prepare Attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $json.fileName }}",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "name": "Upload to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [750, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Attachment Index",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Gmail Trigger - Attachments').item.json.from }}",
+        "subject": "Attachments Saved: {{ $('Gmail Trigger - Attachments').item.json.subject }}",
+        "message": "Hi,\n\nYour email attachments have been automatically saved to Google Drive.\n\nFolder: {{ $('Prepare Attachments').item.json.dateFolder }}\nFiles saved: {{ $('Prepare Attachments').item.json.fileName }}\n\nBest regards",
+        "options": {}
+      },
+      "name": "Reply Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email Attachment Saver to Google Drive\n\nAutomatically saves email attachments to organized Drive folders.\n\n**Flow:**\n1. Gmail trigger on emails with attachments\n2. Code node prepares attachments with date-based folder path\n3. Upload each attachment to Google Drive\n4. Index file metadata in Google Sheets\n5. Reply confirmation to sender\n\n**Setup:**\n- Connect Gmail OAuth2 credentials\n- Connect Google Drive credentials\n- Connect Google Sheets credentials\n- Set target Drive folder and Sheets spreadsheet",
+        "width": 380,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -70]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - Attachments": {
+      "main": [
+        [
+          {
+            "node": "Prepare Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Attachments": {
+      "main": [
+        [
+          {
+            "node": "Upload to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Drive": {
+      "main": [
+        [
+          {
+            "node": "Sheets Attachment Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Attachment Index": {
+      "main": [
+        [
+          {
+            "node": "Reply Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "name": "Competitive Intelligence Aggregator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] }
+      },
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "range": "A:C",
+        "options": {}
+      },
+      "name": "Read Competitor URLs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } },
+          "timeout": 20000
+        }
+      },
+      "name": "Fetch Competitor Pages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const html = (item.json.data || item.json.body || '').toString();\n  const text = html\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]*>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  // Extract pricing mentions\n  const priceMatches = text.match(/\\$[\\d,]+(?:\\.\\d{2})?(?:\\/\\w+)?/g) || [];\n\n  // Extract feature-like phrases\n  const features = text.match(/(?:new|introducing|launch|announce|update)[^.]{10,80}\\./gi) || [];\n\n  // Extract headings for structure changes\n  const headings = [];\n  const hRegex = /<h[1-3][^>]*>(.*?)<\\/h[1-3]>/gi;\n  let m;\n  while ((m = hRegex.exec(html)) !== null) {\n    headings.push(m[1].replace(/<[^>]*>/g, '').trim());\n  }\n\n  results.push({\n    json: {\n      competitor: item.json.competitor || item.json.name || 'Unknown',\n      url: item.json.url || '',\n      contentSnapshot: text.substring(0, 3000),\n      prices: priceMatches,\n      newFeatures: features.map(f => f.trim()),\n      headings: headings.slice(0, 15),\n      fetchedAt: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "name": "Extract Changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this competitor intelligence data and provide a concise competitive briefing:\n\n{{ JSON.stringify($json, null, 2) }}\n\nProvide:\n1. **Key Changes Detected** — new features, pricing changes, messaging shifts\n2. **Competitive Threats** — what should we watch\n3. **Opportunities** — gaps we could exploit\n4. **Action Items** — specific next steps"
+            }
+          ]
+        },
+        "options": { "temperature": 0.3, "maxTokens": 1500 }
+      },
+      "name": "OpenAI Summarize Diff",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1130, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Daily Competitive Intelligence: {{ $('Extract Changes').item.json.competitor }}",
+        "message": "={{ $json.message.content }}",
+        "options": {}
+      },
+      "name": "Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 200],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "competitor": "={{ $('Extract Changes').item.json.competitor }}",
+            "summary": "={{ $json.message.content }}",
+            "prices": "={{ $('Extract Changes').item.json.prices.join(', ') }}",
+            "new_features": "={{ $('Extract Changes').item.json.newFeatures.join('; ') }}",
+            "date": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1350, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Competitive Intelligence Aggregator\n\nDaily workflow that fetches competitor web pages, extracts pricing, features, and structural changes, then uses OpenAI to summarize differences and send an intelligence briefing.\n\n**Setup:**\n1. Add competitor URLs to source sheet (columns: competitor, url, category)\n2. Configure Gmail, Google Sheets, and OpenAI credentials\n3. Set email recipient in Email Report node"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [{ "node": "Read Competitor URLs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Competitor URLs": {
+      "main": [
+        [{ "node": "Fetch Competitor Pages", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Competitor Pages": {
+      "main": [
+        [{ "node": "Extract Changes", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Changes": {
+      "main": [
+        [{ "node": "OpenAI Summarize Diff", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Summarize Diff": {
+      "main": [
+        [
+          { "node": "Email Report", "type": "main", "index": 0 },
+          { "node": "Log to Sheets", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

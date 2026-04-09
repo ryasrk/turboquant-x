@@ -1,0 +1,100 @@
+{
+  "name": "Google Sheets to Contacts Sync",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "days", "daysInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Contacts Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Contacts" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Prepare Contact Data",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst contacts = items.map(item => {\n  const row = item.json;\n  return {\n    json: {\n      givenName: row.firstName || row.first_name || '',\n      familyName: row.lastName || row.last_name || '',\n      email: row.email || '',\n      phone: row.phone || row.phoneNumber || '',\n      company: row.company || row.organization || '',\n      title: row.title || row.jobTitle || '',\n      resourceName: row.resourceName || null\n    }\n  };\n});\n\nreturn contacts;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Create or Update Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [960, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://people.googleapis.com/v1/people:createContact",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ names: [{ givenName: $json.givenName, familyName: $json.familyName }], emailAddresses: [{ value: $json.email }], phoneNumbers: [{ value: $json.phone }], organizations: [{ name: $json.company, title: $json.title }] }) }}",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Write Sync Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1180, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "SyncLog" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "contact": "={{ $json.givenName }} {{ $json.familyName }}",
+            "email": "={{ $json.email }}",
+            "syncedAt": "={{ new Date().toISOString() }}",
+            "status": "synced"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Google Sheets to Contacts Sync\nDaily sync of contacts from a Google Sheet to Google Contacts API. Creates or updates contacts and maintains a sync log in the Sheet."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": { "main": [[{ "node": "Read Contacts Sheet", "type": "main", "index": 0 }]] },
+    "Read Contacts Sheet": { "main": [[{ "node": "Prepare Contact Data", "type": "main", "index": 0 }]] },
+    "Prepare Contact Data": { "main": [[{ "node": "Create or Update Contact", "type": "main", "index": 0 }]] },
+    "Create or Update Contact": { "main": [[{ "node": "Write Sync Log", "type": "main", "index": 0 }]] }
+  }
+}

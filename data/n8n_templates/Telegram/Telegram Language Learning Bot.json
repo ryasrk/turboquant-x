@@ -1,0 +1,195 @@
+{
+  "name": "Telegram Language Learning Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Vocabulary" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get Word List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst words = items.map(i => i.json);\nconst randomIdx = Math.floor(Math.random() * words.length);\nconst word = words[randomIdx];\nconst options = [word.translation];\nwhile (options.length < 4) {\n  const rnd = words[Math.floor(Math.random() * words.length)];\n  if (!options.includes(rnd.translation)) options.push(rnd.translation);\n}\n// Shuffle\nfor (let i = options.length - 1; i > 0; i--) {\n  const j = Math.floor(Math.random() * (i + 1));\n  [options[i], options[j]] = [options[j], options[i]];\n}\nconst correctIndex = options.indexOf(word.translation);\nreturn [{\n  json: {\n    word: word.word,\n    translation: word.translation,\n    example: word.example || '',\n    category: word.category || 'general',\n    options,\n    correctIndex,\n    correctLetter: ['A', 'B', 'C', 'D'][correctIndex],\n    date: new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "name": "Pick Random Word",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=📚 <b>Word of the Day</b>\n\n🔤 <b>{{$json.word}}</b>\n📂 Category: {{$json.category}}\n\nWhat does it mean?\nA) {{$json.options[0]}}\nB) {{$json.options[1]}}\nC) {{$json.options[2]}}\nD) {{$json.options[3]}}\n\nReply with A, B, C, or D!",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Word Quiz",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Quiz Answer Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 600],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = (item.json.message?.text || '').trim().toUpperCase();\n  const chatId = item.json.message?.chat?.id;\n  const username = item.json.message?.from?.username || 'user';\n  const validAnswers = ['A', 'B', 'C', 'D'];\n  if (validAnswers.includes(text)) {\n    results.push({\n      json: {\n        answer: text,\n        chatId,\n        username,\n        isQuizAnswer: true,\n        timestamp: new Date().toISOString()\n      }\n    });\n  }\n}\nreturn results.length > 0 ? results : [{ json: { isQuizAnswer: false } }];"
+      },
+      "name": "Parse Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.isQuizAnswer}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Is Quiz Answer?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 600]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Progress" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Track Progress",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=📝 Answer recorded: {{$json.answer}}\n\nThe correct answer will be revealed tomorrow! Keep learning! 🎯",
+        "additionalFields": {}
+      },
+      "name": "Confirm Answer",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 600],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Language Learning Bot\n\n**Flow 1:** Daily 8AM → pick random word from Sheets → send quiz with 4 options\n**Flow 2:** Collect answers → validate → track progress in Sheets\n\n**Setup:**\n1. Create Google Sheet 'Vocabulary' tab: word, translation, example, category\n2. Create 'Progress' tab: username, answer, timestamp\n3. Add 50+ vocabulary words\n4. Set Telegram group chat ID",
+        "width": 420,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 830]
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [{ "node": "Get Word List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Word List": {
+      "main": [
+        [{ "node": "Pick Random Word", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pick Random Word": {
+      "main": [
+        [{ "node": "Send Word Quiz", "type": "main", "index": 0 }]
+      ]
+    },
+    "Quiz Answer Trigger": {
+      "main": [
+        [{ "node": "Parse Answer", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Answer": {
+      "main": [
+        [{ "node": "Is Quiz Answer?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Quiz Answer?": {
+      "main": [
+        [{ "node": "Track Progress", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Track Progress": {
+      "main": [
+        [{ "node": "Confirm Answer", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

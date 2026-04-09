@@ -1,0 +1,132 @@
+{
+  "name": "Bounce and Failure Notification Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "q": "from:(mailer-daemon OR postmaster) OR subject:(delivery failed OR undeliverable OR returned mail OR bounce)"
+        },
+        "options": {}
+      },
+      "name": "Gmail Trigger - Bounces",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const body = item.json.textPlain || item.json.snippet || '';\n  const subject = item.json.subject || '';\n  \n  // Extract failed email address\n  const emailPatterns = [\n    /(?:to|recipient|address)[:\\s]+([\\w.+-]+@[\\w.-]+)/i,\n    /([\\w.+-]+@[\\w.-]+)\\s+(?:was not|could not|failed|rejected|bounced)/i,\n    /<([\\w.+-]+@[\\w.-]+)>/\n  ];\n  \n  let failedAddress = '';\n  for (const pattern of emailPatterns) {\n    const match = body.match(pattern);\n    if (match) {\n      failedAddress = match[1];\n      break;\n    }\n  }\n  \n  // Classify bounce type\n  const bodyLower = body.toLowerCase();\n  let bounceType = 'unknown';\n  if (bodyLower.includes('mailbox full') || bodyLower.includes('quota exceeded')) {\n    bounceType = 'soft_bounce_full';\n  } else if (bodyLower.includes('user unknown') || bodyLower.includes('does not exist') || bodyLower.includes('no such user')) {\n    bounceType = 'hard_bounce_invalid';\n  } else if (bodyLower.includes('blocked') || bodyLower.includes('spam') || bodyLower.includes('rejected')) {\n    bounceType = 'hard_bounce_blocked';\n  } else if (bodyLower.includes('temporary') || bodyLower.includes('try again')) {\n    bounceType = 'soft_bounce_temp';\n  }\n  \n  results.push({\n    json: {\n      failedAddress: failedAddress,\n      bounceType: bounceType,\n      originalSubject: subject,\n      snippet: body.substring(0, 300),\n      detectedAt: new Date().toISOString(),\n      action: bounceType.startsWith('hard') ? 'remove_from_list' : 'retry_later'\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Bounce Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Update Contact Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "admin@yourcompany.com",
+        "subject": "⚠️ Email Bounce Alert: {{ $json.failedAddress }} ({{ $json.bounceType }})",
+        "message": "An email bounce was detected:\n\n- **Failed Address:** {{ $json.failedAddress }}\n- **Bounce Type:** {{ $json.bounceType }}\n- **Recommended Action:** {{ $json.action }}\n- **Detected At:** {{ $json.detectedAt }}\n- **Original Subject:** {{ $json.originalSubject }}\n\nPlease review and take appropriate action.",
+        "options": {}
+      },
+      "name": "Gmail Alert Admin",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Bounce and Failure Notification Handler\n\nDetects bounced emails, classifies them, and alerts admin.\n\n**Flow:**\n1. Gmail trigger on bounce-back emails (mailer-daemon, delivery failed)\n2. Code parses failed address and classifies bounce type\n3. Update contact status in Sheets\n4. Gmail alerts admin with details\n\n**Bounce Types:**\n- hard_bounce_invalid — address doesn't exist\n- hard_bounce_blocked — spam/rejected\n- soft_bounce_full — mailbox full\n- soft_bounce_temp — temporary failure",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - Bounces": {
+      "main": [
+        [
+          {
+            "node": "Parse Bounce Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Bounce Details": {
+      "main": [
+        [
+          {
+            "node": "Sheets Update Contact Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Update Contact Status": {
+      "main": [
+        [
+          {
+            "node": "Gmail Alert Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

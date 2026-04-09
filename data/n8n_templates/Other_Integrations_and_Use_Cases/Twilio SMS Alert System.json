@@ -1,0 +1,109 @@
+{
+  "name": "Twilio SMS Alert System",
+  "nodes": [
+    {
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "sms-alert",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Format SMS Message",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const data = item.json.body || item.json;\n  const alertType = data.alertType || data.type || 'general';\n  const message = data.message || data.text || 'Alert triggered';\n  const recipient = data.phone || data.to || '';\n  const priority = data.priority || 'normal';\n  const truncated = message.length > 140 ? message.substring(0, 137) + '...' : message;\n  return {\n    json: {\n      to: recipient,\n      alertType: alertType,\n      message: truncated,\n      fullMessage: message,\n      priority: priority,\n      timestamp: new Date().toISOString(),\n      smsBody: `[${alertType.toUpperCase()}] ${truncated}`\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Send SMS via Twilio",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [710, 300],
+      "parameters": {
+        "url": "=https://api.twilio.com/2010-04-01/Accounts/YOUR_ACCOUNT_SID/Messages.json",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "To", "value": "={{ $json.to }}" },
+            { "name": "From", "value": "" },
+            { "name": "Body", "value": "={{ $json.smsBody }}" }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sheets SMS Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 200],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Backup",
+      "type": "n8n-nodes-base.gmail",
+      "position": [940, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=SMS Alert Sent: {{ $json.alertType }}",
+        "message": "=An SMS alert was sent.\n\nTo: {{ $json.to }}\nType: {{ $json.alertType }}\nPriority: {{ $json.priority }}\nMessage: {{ $json.fullMessage }}\nTimestamp: {{ $json.timestamp }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Twilio SMS Alert System\nReceives alert triggers via webhook, formats and sends SMS through Twilio API, logs to Google Sheets, and sends email backup.\n\n**Setup:**\n1. Replace YOUR_ACCOUNT_SID in the Twilio HTTP node\n2. Set HTTP Basic Auth with Twilio Account SID and Auth Token\n3. Set the 'From' number to your Twilio phone number\n4. Connect Google Sheets and Gmail credentials"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "Format SMS Message", "type": "main", "index": 0 }]]
+    },
+    "Format SMS Message": {
+      "main": [[{ "node": "Send SMS via Twilio", "type": "main", "index": 0 }]]
+    },
+    "Send SMS via Twilio": {
+      "main": [
+        [
+          { "node": "Sheets SMS Log", "type": "main", "index": 0 },
+          { "node": "Gmail Backup", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

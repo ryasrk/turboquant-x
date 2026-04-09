@@ -1,0 +1,118 @@
+{
+  "name": "Financial Statement Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze-financials",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0].json.body;\n\nconst revenue = parseFloat(data.revenue) || 0;\nconst cogs = parseFloat(data.costOfGoodsSold) || 0;\nconst operatingExpenses = parseFloat(data.operatingExpenses) || 0;\nconst totalAssets = parseFloat(data.totalAssets) || 1;\nconst totalLiabilities = parseFloat(data.totalLiabilities) || 0;\nconst equity = parseFloat(data.equity) || 1;\nconst currentAssets = parseFloat(data.currentAssets) || 0;\nconst currentLiabilities = parseFloat(data.currentLiabilities) || 1;\nconst netIncome = parseFloat(data.netIncome) || 0;\nconst inventory = parseFloat(data.inventory) || 0;\nconst cashFlow = parseFloat(data.operatingCashFlow) || 0;\n\nconst ratios = {\n  profitability: {\n    grossMargin: revenue > 0 ? ((revenue - cogs) / revenue * 100).toFixed(2) + '%' : 'N/A',\n    operatingMargin: revenue > 0 ? ((revenue - cogs - operatingExpenses) / revenue * 100).toFixed(2) + '%' : 'N/A',\n    netMargin: revenue > 0 ? (netIncome / revenue * 100).toFixed(2) + '%' : 'N/A',\n    returnOnAssets: (netIncome / totalAssets * 100).toFixed(2) + '%',\n    returnOnEquity: (netIncome / equity * 100).toFixed(2) + '%'\n  },\n  liquidity: {\n    currentRatio: (currentAssets / currentLiabilities).toFixed(2),\n    quickRatio: ((currentAssets - inventory) / currentLiabilities).toFixed(2),\n    cashRatio: currentLiabilities > 0 ? (cashFlow / currentLiabilities).toFixed(2) : 'N/A'\n  },\n  leverage: {\n    debtToEquity: (totalLiabilities / equity).toFixed(2),\n    debtToAssets: (totalLiabilities / totalAssets * 100).toFixed(2) + '%',\n    equityMultiplier: (totalAssets / equity).toFixed(2)\n  },\n  efficiency: {\n    assetTurnover: (revenue / totalAssets).toFixed(2),\n    inventoryTurnover: inventory > 0 ? (cogs / inventory).toFixed(2) : 'N/A'\n  }\n};\n\nreturn [{\n  json: {\n    company: data.company || 'Unknown',\n    period: data.period || new Date().toISOString().split('T')[0],\n    ratios,\n    rawData: {\n      revenue, cogs, operatingExpenses, totalAssets,\n      totalLiabilities, equity, currentAssets, currentLiabilities,\n      netIncome, inventory, cashFlow\n    }\n  }\n}];"
+      },
+      "name": "Calculate Ratios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Interpret these financial ratios for {{ $json.company }} ({{ $json.period }}):\n\n{{ JSON.stringify($json.ratios, null, 2) }}\n\nProvide:\n1. **Financial Health Summary** — overall assessment\n2. **Strengths** — what ratios indicate good performance\n3. **Concerns** — ratios that signal potential issues\n4. **Industry Comparison** — how these compare to typical ranges\n5. **Recommendations** — specific financial actions to consider\n6. **Risk Factors** — key financial risks identified"
+            }
+          ]
+        },
+        "options": { "temperature": 0.2, "maxTokens": 2000 }
+      },
+      "name": "OpenAI Interpret Results",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "company": "={{ $('Calculate Ratios').item.json.company }}",
+            "period": "={{ $('Calculate Ratios').item.json.period }}",
+            "gross_margin": "={{ $('Calculate Ratios').item.json.ratios.profitability.grossMargin }}",
+            "net_margin": "={{ $('Calculate Ratios').item.json.ratios.profitability.netMargin }}",
+            "current_ratio": "={{ $('Calculate Ratios').item.json.ratios.liquidity.currentRatio }}",
+            "debt_to_equity": "={{ $('Calculate Ratios').item.json.ratios.leverage.debtToEquity }}",
+            "roe": "={{ $('Calculate Ratios').item.json.ratios.profitability.returnOnEquity }}",
+            "analysis": "={{ $json.message.content }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Analysis to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').item.json.body.email || '' }}",
+        "subject": "=Financial Analysis: {{ $('Calculate Ratios').item.json.company }} — {{ $('Calculate Ratios').item.json.period }}",
+        "message": "={{ $json.message.content }}",
+        "options": {}
+      },
+      "name": "Gmail to Finance",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [910, 400],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Financial Statement Analyzer\n\nReceives financial statement data, calculates profitability, liquidity, leverage, and efficiency ratios, uses OpenAI to interpret results, and sends analysis to Sheets and email.\n\n**Setup:**\n1. Add OpenAI, Google Sheets, Gmail credentials\n2. POST with financial data: `{\"company\": \"...\", \"revenue\": 1000000, \"netIncome\": 150000, ...}`\n3. All numeric fields optional — will calculate available ratios"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Calculate Ratios", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Ratios": {
+      "main": [
+        [{ "node": "OpenAI Interpret Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Interpret Results": {
+      "main": [
+        [
+          { "node": "Write Analysis to Sheets", "type": "main", "index": 0 },
+          { "node": "Gmail to Finance", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,191 @@
+{
+  "name": "AI Competitor Price Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] }
+      },
+      "name": "Schedule - Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://competitor1.example.com/products",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "name": "HTTP - Fetch Competitor 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://competitor2.example.com/products",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "name": "HTTP - Fetch Competitor 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 450]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "name": "Merge - Combine Pages",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst pages = items.map((item, i) => {\n  const content = (item.json.body || item.json.data || '').toString();\n  const text = content.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim().substring(0, 5000);\n  return `[Competitor ${i+1}]\\n${text}`;\n}).join('\\n\\n');\nreturn [{ json: { competitorPages: pages } }];"
+      },
+      "name": "Code - Prepare Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=Extract product prices from these competitor pages. Identify:\n- Product names and their prices\n- Currency\n- Any promotions or discounts\n\nReturn JSON:\n{\n  \"competitors\": [\n    {\n      \"name\": \"Competitor 1\",\n      \"products\": [{\"product\": \"...\", \"price\": 0, \"currency\": \"USD\", \"discount\": \"\", \"original_price\": 0}]\n    }\n  ],\n  \"price_alerts\": [{\"product\": \"...\", \"competitor\": \"...\", \"their_price\": 0, \"note\": \"significantly lower/promotion\"}],\n  \"summary\": \"brief competitive pricing overview\"\n}\n\nPages:\n{{ $json.competitorPages }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 2500
+        }
+      },
+      "name": "OpenAI - Extract Prices",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { competitors: [], price_alerts: [], summary: aiResponse };\n}\nconst allProducts = [];\n(parsed.competitors || []).forEach(comp => {\n  (comp.products || []).forEach(p => {\n    allProducts.push({\n      date: new Date().toISOString().split('T')[0],\n      competitor: comp.name,\n      product: p.product,\n      price: p.price,\n      currency: p.currency || 'USD',\n      discount: p.discount || '',\n      originalPrice: p.original_price || p.price\n    });\n  });\n});\nconst hasAlerts = (parsed.price_alerts || []).length > 0;\nconst alertText = (parsed.price_alerts || []).map(a => `${a.product} @ ${a.competitor}: $${a.their_price} - ${a.note}`).join('\\n');\nif (allProducts.length === 0) {\n  allProducts.push({ date: new Date().toISOString().split('T')[0], competitor: 'N/A', product: 'No data extracted', price: 0, currency: 'USD', discount: '', originalPrice: 0 });\n}\nreturn allProducts.map(p => ({ json: { ...p, hasAlerts, alertText, summary: parsed.summary || '' } }));"
+      },
+      "name": "Code - Parse Prices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Competitor": "={{ $json.competitor }}",
+            "Product": "={{ $json.product }}",
+            "Price": "={{ $json.price }}",
+            "Currency": "={{ $json.currency }}",
+            "Discount": "={{ $json.discount }}",
+            "Original Price": "={{ $json.originalPrice }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Competitor", "type": "string", "display": true },
+            { "id": "Product", "type": "string", "display": true },
+            { "id": "Price", "type": "string", "display": true },
+            { "id": "Currency", "type": "string", "display": true },
+            { "id": "Discount", "type": "string", "display": true },
+            { "id": "Original Price", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Price Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=📊 *Competitor Price Update*\n\n{{ $json.summary }}\n\n{{ $json.hasAlerts ? '🚨 *Alerts:*\\n' + $json.alertText : '✅ No price alerts today' }}\n\n_{{ $json.date }}_",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "name": "Telegram - Price Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2000, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 900,
+        "height": 200,
+        "content": "## AI Competitor Price Monitor\n\n**Setup:**\n1. Connect OpenAI API, Google Sheets OAuth2, Telegram Bot credentials\n2. Update HTTP nodes with actual competitor product page URLs\n3. Set Telegram chat ID and Google Sheets document ID\n\nRuns daily: scrapes competitor pages, uses GPT-4o to extract and compare prices, logs to a price tracker spreadsheet, and sends Telegram alerts for significant price changes."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 550]
+    }
+  ],
+  "connections": {
+    "Schedule - Daily": {
+      "main": [[
+        { "node": "HTTP - Fetch Competitor 1", "type": "main", "index": 0 },
+        { "node": "HTTP - Fetch Competitor 2", "type": "main", "index": 0 }
+      ]]
+    },
+    "HTTP - Fetch Competitor 1": {
+      "main": [[{ "node": "Merge - Combine Pages", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Fetch Competitor 2": {
+      "main": [[{ "node": "Merge - Combine Pages", "type": "main", "index": 1 }]]
+    },
+    "Merge - Combine Pages": {
+      "main": [[{ "node": "Code - Prepare Content", "type": "main", "index": 0 }]]
+    },
+    "Code - Prepare Content": {
+      "main": [[{ "node": "OpenAI - Extract Prices", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Extract Prices": {
+      "main": [[{ "node": "Code - Parse Prices", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Prices": {
+      "main": [[{ "node": "Google Sheets - Price Log", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Price Log": {
+      "main": [[{ "node": "Telegram - Price Alert", "type": "main", "index": 0 }]]
+    }
+  }
+}

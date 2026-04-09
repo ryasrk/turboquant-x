@@ -1,0 +1,116 @@
+{
+  "name": "AI Text Comparison and Diff",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "compare-texts",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Compare these two texts and provide a detailed analysis:\n\n**Text A:**\n{{ $json.body.textA }}\n\n**Text B:**\n{{ $json.body.textB }}\n\nProvide:\n1. **Similarity Score** (0-100%)\n2. **Key Differences** — list each significant difference\n3. **Added Content** — what's in B but not A\n4. **Removed Content** — what's in A but not B\n5. **Modified Content** — same ideas expressed differently\n6. **Tone/Style Changes** — any shifts in voice or style\n7. **Summary** — overall assessment\n\nReturn structured JSON:\n{\"similarity\": N, \"differences\": [...], \"added\": [...], \"removed\": [...], \"modified\": [...], \"toneChanges\": \"...\", \"summary\": \"...\"}"
+            }
+          ]
+        },
+        "options": { "temperature": 0.1, "maxTokens": 2500 }
+      },
+      "name": "OpenAI Compare",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [470, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst content = items[0].json.message.content;\n\nlet comparison;\ntry {\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/s);\n  comparison = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: content };\n} catch (e) {\n  comparison = { summary: content, parseError: true };\n}\n\nconst textA = $('Webhook').item.json.body.textA || '';\nconst textB = $('Webhook').item.json.body.textB || '';\n\n// Word-level stats\nconst wordsA = textA.split(/\\s+/).length;\nconst wordsB = textB.split(/\\s+/).length;\n\nreturn [{\n  json: {\n    similarity: comparison.similarity || 0,\n    textALength: wordsA,\n    textBLength: wordsB,\n    lengthDiff: wordsB - wordsA,\n    differences: comparison.differences || [],\n    added: comparison.added || [],\n    removed: comparison.removed || [],\n    modified: comparison.modified || [],\n    toneChanges: comparison.toneChanges || 'None detected',\n    summary: comparison.summary || '',\n    comparedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Highlight Differences",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "similarity": "={{ $json.similarity }}",
+            "text_a_words": "={{ $json.textALength }}",
+            "text_b_words": "={{ $json.textBLength }}",
+            "differences_count": "={{ $json.differences.length }}",
+            "summary": "={{ $json.summary }}",
+            "compared_at": "={{ $json.comparedAt }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Comparison",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').item.json.body.email || '' }}",
+        "subject": "=Text Comparison: {{ $json.similarity }}% similar — {{ $json.differences.length }} differences",
+        "message": "=Text Comparison Report\n\nSimilarity: {{ $json.similarity }}%\nText A: {{ $json.textALength }} words | Text B: {{ $json.textBLength }} words\n\nSummary: {{ $json.summary }}\n\nKey Differences:\n{{ $json.differences.map((d, i) => `${i+1}. ${d}`).join('\\n') }}\n\nAdded: {{ $json.added.join('; ') }}\nRemoved: {{ $json.removed.join('; ') }}",
+        "options": {}
+      },
+      "name": "Email Results",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [910, 400],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Text Comparison and Diff\n\nCompares two texts using OpenAI, highlights differences (added/removed/modified), calculates similarity, and logs results to Sheets with optional email.\n\n**Setup:**\n1. Add OpenAI, Google Sheets, Gmail credentials\n2. POST: `{\"textA\": \"...\", \"textB\": \"...\", \"email\": \"optional@example.com\"}`"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "OpenAI Compare", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Compare": {
+      "main": [
+        [{ "node": "Highlight Differences", "type": "main", "index": 0 }]
+      ]
+    },
+    "Highlight Differences": {
+      "main": [
+        [
+          { "node": "Log Comparison", "type": "main", "index": 0 },
+          { "node": "Email Results", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

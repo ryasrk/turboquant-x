@@ -1,0 +1,140 @@
+{
+  "name": "AI Content Repurposer Blog to Social",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "repurpose-blog",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Blog URL Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.blog_url }}",
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "name": "HTTP - Fetch Blog Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst html = items[0].json.body || items[0].json.data || '';\n// Basic HTML to text extraction\nconst text = html.toString().replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim().substring(0, 8000);\nreturn [{ json: { blogContent: text, blogUrl: items[0].json.body?.blog_url || '' } }];"
+      },
+      "name": "Code - Extract Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a social media content expert. Given this blog post content, create:\n\n1. **Twitter/X Thread** (5-8 tweets, each under 280 chars, use emojis, include a hook first tweet)\n2. **LinkedIn Post** (professional tone, 1300 chars max, include relevant hashtags)\n3. **Instagram Caption** (engaging, relatable, with emojis, CTA, and 10 relevant hashtags)\n\nReturn as JSON with keys: twitter_thread (array of tweets), linkedin_post (string), instagram_caption (string).\n\nBlog content:\n{{ $json.blogContent }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 3000
+        }
+      },
+      "name": "OpenAI - Generate Social Content",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { twitter_thread: [aiResponse], linkedin_post: aiResponse, instagram_caption: aiResponse };\n}\nconst twitterThread = Array.isArray(parsed.twitter_thread) ? parsed.twitter_thread.join('\\n\\n---\\n\\n') : parsed.twitter_thread;\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    blogUrl: items[0].json.blogUrl || '',\n    twitterThread: twitterThread,\n    linkedinPost: parsed.linkedin_post || '',\n    instagramCaption: parsed.instagram_caption || '',\n    status: 'Draft'\n  }\n}];"
+      },
+      "name": "Code - Parse Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Blog URL": "={{ $json.blogUrl }}",
+            "Twitter Thread": "={{ $json.twitterThread }}",
+            "LinkedIn Post": "={{ $json.linkedinPost }}",
+            "Instagram Caption": "={{ $json.instagramCaption }}",
+            "Status": "={{ $json.status }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Blog URL", "type": "string", "display": true },
+            { "id": "Twitter Thread", "type": "string", "display": true },
+            { "id": "LinkedIn Post", "type": "string", "display": true },
+            { "id": "Instagram Caption", "type": "string", "display": true },
+            { "id": "Status", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Content Calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 200,
+        "content": "## AI Content Repurposer: Blog → Social Media\n\n**Setup:**\n1. Connect OpenAI API key\n2. Connect Google Sheets OAuth2 and set spreadsheet ID for content calendar\n3. POST to webhook: `{\"blog_url\": \"https://example.com/your-blog-post\"}`\n\nThe workflow fetches blog content, uses GPT-4o to generate platform-specific social posts (Twitter thread, LinkedIn post, Instagram caption), and saves to a content calendar spreadsheet."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Blog URL Input": {
+      "main": [[{ "node": "HTTP - Fetch Blog Content", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Fetch Blog Content": {
+      "main": [[{ "node": "Code - Extract Text", "type": "main", "index": 0 }]]
+    },
+    "Code - Extract Text": {
+      "main": [[{ "node": "OpenAI - Generate Social Content", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Generate Social Content": {
+      "main": [[{ "node": "Code - Parse Content", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Content": {
+      "main": [[{ "node": "Google Sheets - Content Calendar", "type": "main", "index": 0 }]]
+    }
+  }
+}

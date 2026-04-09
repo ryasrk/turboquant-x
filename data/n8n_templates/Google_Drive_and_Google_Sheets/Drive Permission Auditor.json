@@ -1,0 +1,112 @@
+{
+  "name": "Drive Permission Auditor",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "List Folders",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "list",
+        "folderId": { "__rl": true, "mode": "list", "value": "" },
+        "options": {
+          "fields": ["name", "id", "permissions", "shared"]
+        }
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Get Permissions",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [740, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.id }}/permissions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "fields", "value": "permissions(id,type,role,emailAddress,domain)" }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Find Over-Shared",
+      "type": "n8n-nodes-base.code",
+      "position": [960, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst issues = [];\n\nfor (const item of items) {\n  const perms = item.json.permissions || [];\n  const fileName = item.json.name || 'Unknown';\n  const fileId = item.json.id || '';\n\n  for (const perm of perms) {\n    if (perm.type === 'anyone') {\n      issues.push({ fileName, fileId, issue: 'Public access', role: perm.role, type: perm.type, severity: 'HIGH' });\n    } else if (perm.type === 'domain') {\n      issues.push({ fileName, fileId, issue: 'Domain-wide access', role: perm.role, domain: perm.domain, severity: 'MEDIUM' });\n    } else if (perm.role === 'owner' && perm.type === 'user') {\n      // Owner is expected, skip\n    } else if (perm.role === 'writer' || perm.role === 'organizer') {\n      issues.push({ fileName, fileId, issue: 'Editor access', role: perm.role, email: perm.emailAddress, severity: 'LOW' });\n    }\n  }\n}\n\nreturn issues.length > 0 ? issues.map(i => ({ json: i })) : [{ json: { noIssues: true, message: 'No over-sharing detected', auditedAt: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Audit Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1180, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "PermissionAudit" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Admin",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1400, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Drive Permission Audit - {{ $input.all().length }} issues found",
+        "message": "=Weekly Drive Permission Audit\n\nIssues found: {{ $input.all().length }}\nAudit date: {{ new Date().toISOString().split('T')[0] }}\n\nReview the PermissionAudit sheet for full details.\n\nHIGH severity = public access\nMEDIUM = domain-wide access\nLOW = external editor access",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1300,
+        "height": 100,
+        "content": "### Drive Permission Auditor\nWeekly audit of Google Drive folder permissions. Lists files, checks sharing settings, identifies over-shared items (public, domain-wide), writes audit to Sheet, and alerts admin via email."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": { "main": [[{ "node": "List Folders", "type": "main", "index": 0 }]] },
+    "List Folders": { "main": [[{ "node": "Get Permissions", "type": "main", "index": 0 }]] },
+    "Get Permissions": { "main": [[{ "node": "Find Over-Shared", "type": "main", "index": 0 }]] },
+    "Find Over-Shared": { "main": [[{ "node": "Write Audit Sheet", "type": "main", "index": 0 }]] },
+    "Write Audit Sheet": { "main": [[{ "node": "Email Admin", "type": "main", "index": 0 }]] }
+  }
+}

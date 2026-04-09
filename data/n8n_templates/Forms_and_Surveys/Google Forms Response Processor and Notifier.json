@@ -1,0 +1,180 @@
+{
+  "name": "Google Forms Response Processor and Notifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "google-forms-response",
+        "options": {}
+      },
+      "name": "Google Forms Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const response = $input.first().json.body;\n\nconst parsed = {\n  respondent_email: response.email || response.respondent_email || '',\n  respondent_name: response.name || response.respondent_name || 'Anonymous',\n  submission_time: new Date().toISOString(),\n  category: response.category || response.type || 'general',\n  priority: response.priority || response.urgency || 'normal',\n  subject: response.subject || response.title || 'No subject',\n  details: response.details || response.message || response.description || '',\n  rating: response.rating ? parseInt(response.rating) : null\n};\n\nparsed.is_urgent = parsed.priority.toLowerCase() === 'urgent' || \n                   parsed.priority.toLowerCase() === 'high' ||\n                   (parsed.rating !== null && parsed.rating <= 2);\n\nreturn [{ json: parsed }];"
+      },
+      "name": "Parse Form Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_urgent }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Urgent or Normal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "notifications@company.com",
+        "toEmail": "team-lead@company.com",
+        "subject": "🚨 URGENT Form Submission: {{ $json.subject }}",
+        "text": "URGENT RESPONSE RECEIVED\n\nFrom: {{ $json.respondent_name }} ({{ $json.respondent_email }})\nCategory: {{ $json.category }}\nPriority: {{ $json.priority }}\nSubject: {{ $json.subject }}\n\nDetails:\n{{ $json.details }}\n\nRating: {{ $json.rating || 'N/A' }}\nSubmitted: {{ $json.submission_time }}\n\nPlease respond within 2 hours.",
+        "options": {}
+      },
+      "name": "Send Urgent Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1000, 150],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "notifications@company.com",
+        "toEmail": "team@company.com",
+        "subject": "📋 New Form Submission: {{ $json.subject }}",
+        "text": "New form response received.\n\nFrom: {{ $json.respondent_name }} ({{ $json.respondent_email }})\nCategory: {{ $json.category }}\nSubject: {{ $json.subject }}\n\nDetails:\n{{ $json.details }}\n\nRating: {{ $json.rating || 'N/A' }}\nSubmitted: {{ $json.submission_time }}",
+        "options": {}
+      },
+      "name": "Send Normal Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1000, 450],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Form_Responses"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "submission_time": "={{ $json.submission_time }}",
+            "respondent_name": "={{ $json.respondent_name }}",
+            "respondent_email": "={{ $json.respondent_email }}",
+            "category": "={{ $json.category }}",
+            "priority": "={{ $json.priority }}",
+            "subject": "={{ $json.subject }}",
+            "details": "={{ $json.details }}",
+            "rating": "={{ $json.rating }}",
+            "is_urgent": "={{ $json.is_urgent }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_ALERT_CHAT_ID }}",
+        "text": "📬 New Form Response\n\n👤 {{ $json.respondent_name }}\n📂 Category: {{ $json.category }}\n{{ $json.is_urgent ? '🚨 URGENT' : '📋 Normal' }}\n📝 {{ $json.subject }}\n⭐ Rating: {{ $json.rating || 'N/A' }}",
+        "additionalFields": {}
+      },
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1500, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Google Forms Response Processor and Notifier\n\nProcesses Google Forms submissions with conditional routing and multi-channel notifications.\n\n**Flow:**\n1. Receive form submission via webhook\n2. Parse and structure response data\n3. Route by urgency (urgent vs normal)\n4. Send appropriate email notification\n5. Save structured data to Google Sheets\n6. Send Telegram alert\n\n**Urgency Detection:**\n- Priority field = 'urgent' or 'high'\n- Rating ≤ 2 (low satisfaction)\n\n**Setup:**\n1. Configure Google Forms to send webhook on submit\n2. Set up SMTP credentials for email\n3. Configure Telegram bot and chat ID\n4. Create Sheets with matching columns",
+        "width": 440,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Google Forms Webhook": {
+      "main": [
+        [{ "node": "Parse Form Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Form Response": {
+      "main": [
+        [{ "node": "Urgent or Normal?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Urgent or Normal?": {
+      "main": [
+        [{ "node": "Send Urgent Email", "type": "main", "index": 0 }],
+        [{ "node": "Send Normal Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Urgent Email": {
+      "main": [
+        [{ "node": "Save to Google Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Normal Email": {
+      "main": [
+        [{ "node": "Save to Google Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save to Google Sheets": {
+      "main": [
+        [{ "node": "Telegram Alert", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

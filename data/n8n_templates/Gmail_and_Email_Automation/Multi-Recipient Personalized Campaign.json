@@ -1,0 +1,188 @@
+{
+  "name": "Multi-Recipient Personalized Campaign",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "start-campaign",
+        "options": {}
+      },
+      "name": "Webhook - Campaign Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Read Sheets Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const contacts = $input.all();\nconst webhookData = $('Webhook - Campaign Trigger').item.json.body;\nconst template = webhookData.template || '';\nconst subject = webhookData.subject || 'Message for you';\nconst campaignId = webhookData.campaignId || `CAMP-${Date.now()}`;\n\nconst results = [];\nlet index = 0;\n\nfor (const contact of contacts) {\n  const data = contact.json;\n  const email = data.email;\n  const name = data.name || data.firstName || 'there';\n  const company = data.company || '';\n  const role = data.role || '';\n  \n  if (!email) continue;\n  \n  // Personalize template\n  let personalizedBody = template;\n  const vars = { name, email, company, role, ...data };\n  for (const [key, value] of Object.entries(vars)) {\n    if (typeof value === 'string') {\n      const regex = new RegExp(`\\\\{\\\\{\\\\s*${key}\\\\s*\\\\}\\\\}`, 'gi');\n      personalizedBody = personalizedBody.replace(regex, value);\n    }\n  }\n  \n  let personalizedSubject = subject;\n  for (const [key, value] of Object.entries(vars)) {\n    if (typeof value === 'string') {\n      const regex = new RegExp(`\\\\{\\\\{\\\\s*${key}\\\\s*\\\\}\\\\}`, 'gi');\n      personalizedSubject = personalizedSubject.replace(regex, value);\n    }\n  }\n  \n  results.push({\n    json: {\n      to: email,\n      name: name,\n      company: company,\n      subject: personalizedSubject,\n      body: personalizedBody,\n      campaignId: campaignId,\n      index: index,\n      scheduledAt: new Date().toISOString()\n    }\n  });\n  index++;\n}\n\nreturn results;"
+      },
+      "name": "Personalize Each Contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "name": "Rate Limit Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "name": "Gmail Batch Send",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "campaignId", "value": "={{ $json.campaignId }}" },
+              { "column": "recipient", "value": "={{ $json.to }}" },
+              { "column": "name", "value": "={{ $json.name }}" },
+              { "column": "company", "value": "={{ $json.company }}" },
+              { "column": "subject", "value": "={{ $json.subject }}" },
+              { "column": "sentAt", "value": "={{ $now.toISO() }}" },
+              { "column": "status", "value": "sent" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "name": "Sheets Delivery Tracking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Multi-Recipient Personalized Campaign\n\nSends personalized emails to a contact list with rate limiting.\n\n**Flow:**\n1. Webhook triggers campaign with template and subject\n2. Read contacts from Google Sheets\n3. Code personalizes {{variables}} for each contact\n4. Rate limit (2s between sends) to avoid Gmail throttling\n5. Gmail sends personalized email\n6. Track delivery in Sheets\n\n**Webhook payload:**\n```json\n{\n  \"campaignId\": \"CAMP-001\",\n  \"subject\": \"Hi {{name}}, special offer for {{company}}\",\n  \"template\": \"Hi {{name}},\\n\\nAs {{role}} at {{company}}, you might be interested in...\"\n}\n```\n\n**Contact Sheets columns:** email, name, company, role\n**Tracking Sheets columns:** campaignId, recipient, name, company, subject, sentAt, status",
+        "width": 430,
+        "height": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -130]
+    }
+  ],
+  "connections": {
+    "Webhook - Campaign Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Sheets Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sheets Contacts": {
+      "main": [
+        [
+          {
+            "node": "Personalize Each Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalize Each Contact": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Wait": {
+      "main": [
+        [
+          {
+            "node": "Gmail Batch Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Batch Send": {
+      "main": [
+        [
+          {
+            "node": "Sheets Delivery Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

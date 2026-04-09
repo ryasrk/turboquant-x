@@ -1,0 +1,236 @@
+{
+  "name": "WhatsApp Customer Support Ticket Creator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-support",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "WhatsApp Support Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const message = $input.first().json.body;\nconst ticketId = `TKT-${Date.now().toString(36).toUpperCase()}`;\nconst priority = message.message.toLowerCase().includes('urgent') || message.message.toLowerCase().includes('darurat') ? 'HIGH' : 'NORMAL';\n\nconst agents = ['Agent A', 'Agent B', 'Agent C'];\nconst assignedAgent = agents[Math.floor(Math.random() * agents.length)];\n\nconst slaDeadline = new Date();\nslaDeadline.setHours(slaDeadline.getHours() + (priority === 'HIGH' ? 2 : 8));\n\nreturn [{\n  json: {\n    ticket_id: ticketId,\n    customer_phone: message.from,\n    customer_name: message.profile_name || 'Unknown',\n    message: message.message,\n    priority: priority,\n    assigned_agent: assignedAgent,\n    status: 'OPEN',\n    created_at: new Date().toISOString(),\n    sla_deadline: slaDeadline.toISOString()\n  }\n}];"
+      },
+      "name": "Create Ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Support_Tickets"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ticket_id": "={{ $json.ticket_id }}",
+            "customer_phone": "={{ $json.customer_phone }}",
+            "customer_name": "={{ $json.customer_name }}",
+            "message": "={{ $json.message }}",
+            "priority": "={{ $json.priority }}",
+            "assigned_agent": "={{ $json.assigned_agent }}",
+            "status": "={{ $json.status }}",
+            "created_at": "={{ $json.created_at }}",
+            "sla_deadline": "={{ $json.sla_deadline }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Save Ticket to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.priority }}",
+              "operation": "equal",
+              "value2": "HIGH"
+            }
+          ]
+        }
+      },
+      "name": "Check Priority",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [950, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.customer_phone }}"
+            },
+            {
+              "name": "text",
+              "value": "✅ Tiket support Anda telah dibuat!\n\n🎫 ID Tiket: {{ $json.ticket_id }}\n👤 Agent: {{ $json.assigned_agent }}\n⚡ Prioritas: {{ $json.priority }}\n⏰ Target respon: {{ $json.priority === 'HIGH' ? '2 jam' : '8 jam' }}\n\nKami akan segera menghubungi Anda. Terima kasih!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Auto-Acknowledge Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1150, 150]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.customer_phone }}"
+            },
+            {
+              "name": "text",
+              "value": "✅ Tiket support Anda telah dibuat!\n\n🎫 ID Tiket: {{ $json.ticket_id }}\n👤 Agent: {{ $json.assigned_agent }}\n⚡ Prioritas: NORMAL\n⏰ Target respon: 8 jam kerja\n\nTerima kasih atas kesabaran Anda!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Auto-Acknowledge Normal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1150, 450]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.SUPPORT_TEAM_CHAT_ID }}",
+        "text": "🚨 TIKET URGENT BARU!\n\n🎫 {{ $json.ticket_id }}\n👤 Customer: {{ $json.customer_name }}\n📱 Phone: {{ $json.customer_phone }}\n💬 Pesan: {{ $json.message }}\n👨‍💼 Assigned: {{ $json.assigned_agent }}\n⏰ SLA: {{ $json.sla_deadline }}",
+        "additionalFields": {}
+      },
+      "name": "Alert Team - Urgent",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1350, 150],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const ticket = $input.first().json;\nconst now = new Date();\nconst sla = new Date(ticket.sla_deadline);\nconst remainingHours = ((sla - now) / (1000 * 60 * 60)).toFixed(1);\n\nreturn [{\n  json: {\n    ...ticket,\n    sla_remaining_hours: remainingHours,\n    sla_status: remainingHours > 0 ? 'ON_TRACK' : 'BREACHED'\n  }\n}];"
+      },
+      "name": "SLA Tracker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1350, 450]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', ticket_id: $json.ticket_id }) }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1550, 300]
+    },
+    {
+      "parameters": {
+        "content": "## WhatsApp Customer Support Ticket Creator\n\nCreates support tickets from incoming WhatsApp messages with automatic assignment and SLA tracking.\n\n**Flow:**\n1. Receive WhatsApp message via webhook\n2. Generate ticket ID and detect priority (urgent/normal)\n3. Assign to random available agent\n4. Save ticket to Google Sheets\n5. Auto-acknowledge customer via WhatsApp\n6. Alert team for urgent tickets (Telegram)\n7. Track SLA deadline\n\n**Priority Detection:**\n- Keywords 'urgent' or 'darurat' → HIGH (2h SLA)\n- All other → NORMAL (8h SLA)",
+        "width": 420,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "WhatsApp Support Webhook": {
+      "main": [
+        [{ "node": "Create Ticket", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Ticket": {
+      "main": [
+        [{ "node": "Save Ticket to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Ticket to Sheets": {
+      "main": [
+        [{ "node": "Check Priority", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Priority": {
+      "main": [
+        [
+          { "node": "Auto-Acknowledge Customer", "type": "main", "index": 0 },
+          { "node": "Alert Team - Urgent", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Auto-Acknowledge Normal", "type": "main", "index": 0 },
+          { "node": "SLA Tracker", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Auto-Acknowledge Customer": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Auto-Acknowledge Normal": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "name": "Typeform to Email and Database",
+  "nodes": [
+    {
+      "name": "Webhook Typeform Submission",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "typeform-submission",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Transform Submission",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const answers = payload.form_response?.answers || [];\n  const definition = payload.form_response?.definition || {};\n  let score = 0;\n  const fields = {};\n  answers.forEach((answer, idx) => {\n    const fieldTitle = definition.fields?.[idx]?.title || `field_${idx}`;\n    const value = answer.text || answer.email || answer.number || answer.choice?.label || answer.boolean || '';\n    fields[fieldTitle] = value;\n    if (typeof answer.number === 'number') score += answer.number;\n  });\n  return {\n    json: {\n      formId: payload.form_response?.form_id || '',\n      respondentEmail: answers.find(a => a.email)?.email || '',\n      respondentName: answers.find(a => a.text)?.text || '',\n      submittedAt: payload.form_response?.submitted_at || new Date().toISOString(),\n      score: score,\n      answers: JSON.stringify(fields),\n      ...fields\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Database",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 200],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Thank You",
+      "type": "n8n-nodes-base.gmail",
+      "position": [710, 400],
+      "parameters": {
+        "sendTo": "={{ $json.respondentEmail }}",
+        "subject": "Thank you for your submission!",
+        "message": "=Hi {{ $json.respondentName }},\n\nThank you for completing our form. We've received your submission and will review it shortly.\n\nSubmission Date: {{ $json.submittedAt }}\n\nWe'll be in touch soon!",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Check Score",
+      "type": "n8n-nodes-base.if",
+      "position": [940, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 7,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Slack High Score Notify",
+      "type": "n8n-nodes-base.slack",
+      "position": [1170, 300],
+      "parameters": {
+        "channel": "",
+        "text": "=🌟 High-score submission!\n\nName: {{ $json.respondentName }}\nEmail: {{ $json.respondentEmail }}\nScore: {{ $json.score }}\nSubmitted: {{ $json.submittedAt }}",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Typeform to Email and Database\nReceives Typeform submissions, stores in Sheets, sends thank-you email, and notifies Slack for high-scoring responses.\n\n**Setup:**\n1. Configure Typeform webhook to this URL\n2. Connect Google Sheets and Gmail\n3. Set score threshold in the IF node (default: >= 7)\n4. Configure Slack channel for high-score alerts"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Typeform Submission": {
+      "main": [[{ "node": "Transform Submission", "type": "main", "index": 0 }]]
+    },
+    "Transform Submission": {
+      "main": [
+        [
+          { "node": "Sheets Database", "type": "main", "index": 0 },
+          { "node": "Gmail Thank You", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Gmail Thank You": {
+      "main": [[{ "node": "Check Score", "type": "main", "index": 0 }]]
+    },
+    "Check Score": {
+      "main": [
+        [{ "node": "Slack High Score Notify", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

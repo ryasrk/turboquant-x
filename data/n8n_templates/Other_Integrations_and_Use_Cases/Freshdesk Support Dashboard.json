@@ -1,0 +1,105 @@
+{
+  "name": "Freshdesk Support Dashboard",
+  "nodes": [
+    {
+      "name": "Schedule Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "days", "daysInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Fetch Freshdesk Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "https://YOUR_DOMAIN.freshdesk.com/api/v2/tickets",
+        "method": "GET",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "per_page", "value": "100" },
+            { "name": "order_by", "value": "updated_at" },
+            { "name": "order_type", "value": "desc" }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Aggregate Tickets",
+      "type": "n8n-nodes-base.code",
+      "position": [710, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst tickets = items[0]?.json || [];\nconst ticketList = Array.isArray(tickets) ? tickets : [tickets];\n\nconst statusMap = { 2: 'Open', 3: 'Pending', 4: 'Resolved', 5: 'Closed' };\nconst priorityMap = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };\n\nlet byStatus = {};\nlet byPriority = {};\nlet total = ticketList.length;\n\nticketList.forEach(ticket => {\n  const status = statusMap[ticket.status] || 'Unknown';\n  const priority = priorityMap[ticket.priority] || 'Unknown';\n  byStatus[status] = (byStatus[status] || 0) + 1;\n  byPriority[priority] = (byPriority[priority] || 0) + 1;\n});\n\nreturn [{\n  json: {\n    date: new Date().toISOString(),\n    totalTickets: total,\n    open: byStatus['Open'] || 0,\n    pending: byStatus['Pending'] || 0,\n    resolved: byStatus['Resolved'] || 0,\n    closed: byStatus['Closed'] || 0,\n    lowPriority: byPriority['Low'] || 0,\n    mediumPriority: byPriority['Medium'] || 0,\n    highPriority: byPriority['High'] || 0,\n    urgentPriority: byPriority['Urgent'] || 0,\n    statusSummary: JSON.stringify(byStatus),\n    prioritySummary: JSON.stringify(byPriority)\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Dashboard",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Slack Daily Summary",
+      "type": "n8n-nodes-base.slack",
+      "position": [1170, 300],
+      "parameters": {
+        "channel": "",
+        "text": "=📊 *Freshdesk Daily Summary*\n\nTotal Tickets: {{ $json.totalTickets }}\n\n*By Status:*\nOpen: {{ $json.open }}\nPending: {{ $json.pending }}\nResolved: {{ $json.resolved }}\nClosed: {{ $json.closed }}\n\n*By Priority:*\n🔴 Urgent: {{ $json.urgentPriority }}\n🟠 High: {{ $json.highPriority }}\n🟡 Medium: {{ $json.mediumPriority }}\n🟢 Low: {{ $json.lowPriority }}",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Freshdesk Support Dashboard\nDaily fetch of Freshdesk tickets, aggregates by status and priority, logs to Sheets, and posts Slack summary.\n\n**Setup:**\n1. Replace YOUR_DOMAIN in the Freshdesk API URL\n2. Set HTTP Basic Auth (API_KEY:X)\n3. Connect Google Sheets for dashboard data\n4. Set Slack channel for daily summaries"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Daily": {
+      "main": [[{ "node": "Fetch Freshdesk Tickets", "type": "main", "index": 0 }]]
+    },
+    "Fetch Freshdesk Tickets": {
+      "main": [[{ "node": "Aggregate Tickets", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Tickets": {
+      "main": [[{ "node": "Sheets Dashboard", "type": "main", "index": 0 }]]
+    },
+    "Sheets Dashboard": {
+      "main": [[{ "node": "Slack Daily Summary", "type": "main", "index": 0 }]]
+    }
+  }
+}

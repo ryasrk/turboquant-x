@@ -1,0 +1,153 @@
+{
+  "name": "Telegram News Aggregator Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "hours", "hoursInterval": 1 }
+          ]
+        }
+      },
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const feeds = [\n  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/' },\n  { name: 'Hacker News', url: 'https://hnrss.org/newest?points=100' },\n  { name: 'Dev.to', url: 'https://dev.to/feed' }\n];\nreturn feeds.map(f => ({ json: f }));"
+      },
+      "name": "Feed List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "method": "GET",
+        "options": {
+          "response": {
+            "response": { "responseFormat": "text" }
+          }
+        }
+      },
+      "name": "Fetch RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nconst oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);\n\nfor (const item of items) {\n  const text = item.json.data || item.json.body || '';\n  // Simple XML parsing for RSS items\n  const itemRegex = /<item[^>]*>[\\s\\S]*?<\\/item>/g;\n  const titleRegex = /<title[^>]*>(?:<\\!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?<\\/title>/;\n  const linkRegex = /<link[^>]*>(.*?)<\\/link>/;\n  const pubDateRegex = /<pubDate[^>]*>(.*?)<\\/pubDate>/;\n  const descRegex = /<description[^>]*>(?:<\\!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?<\\/description>/;\n  \n  let match;\n  while ((match = itemRegex.exec(text)) !== null) {\n    const itemXml = match[0];\n    const title = (titleRegex.exec(itemXml) || [])[1] || 'No title';\n    const link = (linkRegex.exec(itemXml) || [])[1] || '';\n    const pubDate = (pubDateRegex.exec(itemXml) || [])[1] || '';\n    const desc = (descRegex.exec(itemXml) || [])[1] || '';\n    \n    const date = new Date(pubDate);\n    if (date >= oneHourAgo) {\n      results.push({\n        json: {\n          feedName: item.json.name || 'Unknown',\n          title: title.replace(/<[^>]+>/g, '').substring(0, 200),\n          link,\n          description: desc.replace(/<[^>]+>/g, '').substring(0, 300),\n          pubDate: pubDate,\n          timestamp: new Date().toISOString()\n        }\n      });\n    }\n  }\n}\nreturn results.length > 0 ? results.slice(0, 10) : [{ json: { noNews: true } }];"
+      },
+      "name": "Filter New Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.noNews}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Has News?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=📰 <b>{{$json.feedName}}</b>\n\n📌 <b>{{$json.title}}</b>\n📝 {{$json.description}}\n🔗 <a href=\"{{$json.link}}\">Read more</a>\n🕐 {{$json.pubDate}}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": false
+        }
+      },
+      "name": "Send News",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "NewsArchive" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Archive to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1750, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram News Aggregator Bot\n\nHourly → fetch RSS feeds → filter new articles → send formatted Telegram messages → archive to Sheets.\n\n**Setup:**\n1. Edit Feed List code node with your RSS feed URLs\n2. Set Telegram chat ID in Send News node\n3. Create Google Sheet: feedName, title, link, description, pubDate, timestamp",
+        "width": 420,
+        "height": 200
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [{ "node": "Feed List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Feed List": {
+      "main": [
+        [{ "node": "Fetch RSS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch RSS": {
+      "main": [
+        [{ "node": "Filter New Items", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter New Items": {
+      "main": [
+        [{ "node": "Has News?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has News?": {
+      "main": [
+        [],
+        [{ "node": "Send News", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send News": {
+      "main": [
+        [{ "node": "Archive to Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

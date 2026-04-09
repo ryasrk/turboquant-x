@@ -1,0 +1,164 @@
+{
+  "name": "Automated Report Email with Charts Data",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [1],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Read Sheets Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(i => i.json);\n\nif (rows.length === 0) {\n  return [{ json: { htmlReport: '<p>No data available for this period.</p>', summary: 'Empty' } }];\n}\n\n// Compute summary stats\nconst columns = Object.keys(rows[0]);\nconst numericCols = columns.filter(col => {\n  return rows.some(r => !isNaN(parseFloat(r[col])));\n});\n\nlet summaryRows = '';\nconst stats = {};\nfor (const col of numericCols) {\n  const values = rows.map(r => parseFloat(r[col])).filter(v => !isNaN(v));\n  if (values.length === 0) continue;\n  const sum = values.reduce((a, b) => a + b, 0);\n  const avg = sum / values.length;\n  const min = Math.min(...values);\n  const max = Math.max(...values);\n  stats[col] = { sum, avg, min, max, count: values.length };\n  summaryRows += `<tr><td style=\"padding:8px;border:1px solid #ddd;font-weight:bold;\">${col}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:right;\">${values.length}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:right;\">${sum.toFixed(2)}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:right;\">${avg.toFixed(2)}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:right;\">${min.toFixed(2)}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:right;\">${max.toFixed(2)}</td></tr>`;\n}\n\n// Build data table (first 20 rows)\nlet dataHeaders = columns.map(c => `<th style=\"padding:8px;border:1px solid #ddd;background:#f3f4f6;\">${c}</th>`).join('');\nlet dataRows = '';\nconst displayRows = rows.slice(0, 20);\nfor (const row of displayRows) {\n  dataRows += '<tr>' + columns.map(c => `<td style=\"padding:6px;border:1px solid #ddd;\">${row[c] || ''}</td>`).join('') + '</tr>';\n}\n\nconst htmlReport = `<div style=\"font-family:Arial,sans-serif;max-width:800px;margin:auto;\">\n  <h2 style=\"color:#2563eb;\">Weekly Report</h2>\n  <p style=\"color:#666;\">Generated: ${new Date().toISOString().split('T')[0]} | ${rows.length} records</p>\n  \n  <h3>Summary Statistics</h3>\n  <table style=\"width:100%;border-collapse:collapse;margin:10px 0;\">\n    <thead><tr style=\"background:#2563eb;color:white;\"><th style=\"padding:8px;\">Metric</th><th style=\"padding:8px;\">Count</th><th style=\"padding:8px;\">Sum</th><th style=\"padding:8px;\">Avg</th><th style=\"padding:8px;\">Min</th><th style=\"padding:8px;\">Max</th></tr></thead>\n    <tbody>${summaryRows}</tbody>\n  </table>\n  \n  <h3>Data Preview (first 20 rows)</h3>\n  <table style=\"width:100%;border-collapse:collapse;margin:10px 0;font-size:0.85em;\">\n    <thead><tr>${dataHeaders}</tr></thead>\n    <tbody>${dataRows}</tbody>\n  </table>\n  ${rows.length > 20 ? `<p style=\"color:#999;\">... and ${rows.length - 20} more rows</p>` : ''}\n</div>`;\n\nreturn [{ json: { htmlReport, totalRows: rows.length, metricsCount: Object.keys(stats).length, generatedAt: new Date().toISOString() } }];"
+      },
+      "name": "Generate Summary Tables",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "team@yourcompany.com",
+        "subject": "Weekly Report - {{ $json.totalRows }} records - {{ $json.generatedAt.split('T')[0] }}",
+        "message": "={{ $json.htmlReport }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Gmail HTML Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Send Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Report Email with Charts Data\n\nWeekly automated report with summary statistics.\n\n**Flow:**\n1. Weekly schedule (Monday 8 AM)\n2. Read data from Google Sheets\n3. Code generates summary stats and HTML tables\n4. Gmail sends formatted HTML report\n5. Log send event to Sheets\n\n**Setup:**\n- Connect Gmail and Google Sheets credentials\n- Set data source spreadsheet ID\n- Set report recipient email\n- Set send log spreadsheet",
+        "width": 380,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Sheets Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sheets Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Summary Tables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Summary Tables": {
+      "main": [
+        [
+          {
+            "node": "Gmail HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Sheets Send Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

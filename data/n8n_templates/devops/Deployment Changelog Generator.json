@@ -1,0 +1,237 @@
+{
+  "name": "Deployment Changelog Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "deploy-changelog-webhook",
+        "options": {}
+      },
+      "name": "Webhook on Deploy Tag",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\nlet tag = '';\nlet previousTag = '';\nlet repo = '';\nlet owner = '';\n\nif (body.ref_type === 'tag' || (body.ref && body.ref.startsWith('refs/tags/'))) {\n  // GitHub tag push event\n  tag = body.ref?.replace('refs/tags/', '') || body.release?.tag_name || '';\n  repo = body.repository?.name || '';\n  owner = body.repository?.owner?.login || body.repository?.owner?.name || '';\n} else if (body.tag) {\n  // Direct tag field\n  tag = body.tag;\n  repo = body.repo || body.repository?.name || '';\n  owner = body.owner || body.repository?.owner?.login || '';\n} else {\n  tag = body.release?.tag_name || body.ref || 'unknown';\n  repo = body.repository?.name || 'unknown';\n  owner = body.repository?.owner?.login || 'unknown';\n}\n\nreturn [{\n  json: {\n    tag: tag.replace('refs/tags/', ''),\n    repo,\n    owner,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Parse Deploy Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.owner }}/{{ $json.repo }}/tags",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "5"
+            }
+          ]
+        }
+      },
+      "name": "GitHub Get Tags",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tags = $input.first().json;\nconst currentTag = $('Parse Deploy Event').first().json.tag;\nconst owner = $('Parse Deploy Event').first().json.owner;\nconst repo = $('Parse Deploy Event').first().json.repo;\n\nconst tagList = Array.isArray(tags) ? tags : [];\nconst currentIndex = tagList.findIndex(t => t.name === currentTag);\nconst previousTag = currentIndex >= 0 && currentIndex < tagList.length - 1\n  ? tagList[currentIndex + 1].name\n  : tagList.length > 1 ? tagList[1].name : '';\n\nreturn [{\n  json: {\n    currentTag,\n    previousTag,\n    owner,\n    repo,\n    compareUrl: previousTag\n      ? `https://api.github.com/repos/${owner}/${repo}/compare/${previousTag}...${currentTag}`\n      : `https://api.github.com/repos/${owner}/${repo}/commits?per_page=20`\n  }\n}];"
+      },
+      "name": "Find Previous Tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.compareUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "name": "GitHub Get Commits Since Last Tag",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1140, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst info = $('Find Previous Tag').first().json;\nconst deployInfo = $('Parse Deploy Event').first().json;\n\nconst commits = data.commits || (Array.isArray(data) ? data : []);\n\nconst categories = {\n  feat: [],\n  fix: [],\n  refactor: [],\n  docs: [],\n  test: [],\n  chore: [],\n  perf: [],\n  ci: [],\n  other: []\n};\n\nfor (const commit of commits) {\n  const msg = commit.commit?.message || commit.message || '';\n  const author = commit.commit?.author?.name || commit.author?.login || 'unknown';\n  const sha = (commit.sha || '').substring(0, 7);\n  const firstLine = msg.split('\\n')[0];\n\n  let categorized = false;\n  for (const key of Object.keys(categories)) {\n    if (key !== 'other' && firstLine.toLowerCase().startsWith(key)) {\n      categories[key].push(`- \\`${sha}\\` ${firstLine} (@${author})`);\n      categorized = true;\n      break;\n    }\n  }\n  if (!categorized) {\n    categories.other.push(`- \\`${sha}\\` ${firstLine} (@${author})`);\n  }\n}\n\nlet changelog = `# Changelog: ${info.currentTag}\\n\\n`;\nchangelog += `**Repository:** ${deployInfo.owner}/${deployInfo.repo}\\n`;\nchangelog += `**Tag:** ${info.currentTag}`;\nif (info.previousTag) changelog += ` (from ${info.previousTag})`;\nchangelog += `\\n**Date:** ${deployInfo.timestamp}\\n`;\nchangelog += `**Total Commits:** ${commits.length}\\n\\n`;\n\nconst labels = {\n  feat: '🚀 Features',\n  fix: '🐛 Bug Fixes',\n  refactor: '♻️ Refactoring',\n  docs: '📝 Documentation',\n  test: '✅ Tests',\n  chore: '🔧 Chores',\n  perf: '⚡ Performance',\n  ci: '🔄 CI/CD',\n  other: '📦 Other Changes'\n};\n\nfor (const [key, items] of Object.entries(categories)) {\n  if (items.length > 0) {\n    changelog += `## ${labels[key]}\\n${items.join('\\n')}\\n\\n`;\n  }\n}\n\nreturn [{\n  json: {\n    changelog,\n    currentTag: info.currentTag,\n    previousTag: info.previousTag,\n    commitCount: commits.length,\n    repo: `${deployInfo.owner}/${deployInfo.repo}`,\n    timestamp: deployInfo.timestamp\n  }\n}];"
+      },
+      "name": "Format Changelog Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 300]
+    },
+    {
+      "parameters": {
+        "channel": "",
+        "text": "=:rocket: *Deployment Changelog: {{ $json.currentTag }}*\n\nRepo: `{{ $json.repo }}`\nTag: `{{ $json.currentTag }}`{{ $json.previousTag ? ' (from `' + $json.previousTag + '`)' : '' }}\nCommits: {{ $json.commitCount }}\n\n```\n{{ $json.changelog.substring(0, 2800) }}\n```",
+        "otherOptions": {}
+      },
+      "name": "Post Changelog to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1580, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "DeploymentLog"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "repo": "={{ $json.repo }}",
+            "tag": "={{ $json.currentTag }}",
+            "previous_tag": "={{ $json.previousTag }}",
+            "commit_count": "={{ $json.commitCount }}",
+            "changelog": "={{ $json.changelog.substring(0, 500) }}"
+          }
+        }
+      },
+      "name": "Google Sheets Deployment Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1580, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Deployment Changelog Generator\n\n**Trigger:** Webhook on deploy tag push\n**Function:** Fetches commits between current and previous tag, generates categorized changelog.\n\n**Categories:** feat, fix, refactor, docs, test, chore, perf, ci, other\n**Uses:** Conventional commits format for categorization.\n\n**Output:** \n- Slack: Formatted changelog post\n- Google Sheets: Deployment record\n\n### Setup\n1. Copy webhook URL and configure in GitHub tag/release webhook\n2. Configure GitHub token in HTTP Header Auth (Authorization: Bearer <token>)\n3. Configure Slack credentials and channel\n4. Set Google Sheets document ID",
+        "width": 440,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -80]
+    }
+  ],
+  "connections": {
+    "Webhook on Deploy Tag": {
+      "main": [
+        [
+          {
+            "node": "Parse Deploy Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Deploy Event": {
+      "main": [
+        [
+          {
+            "node": "GitHub Get Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Get Tags": {
+      "main": [
+        [
+          {
+            "node": "Find Previous Tag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Previous Tag": {
+      "main": [
+        [
+          {
+            "node": "GitHub Get Commits Since Last Tag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Get Commits Since Last Tag": {
+      "main": [
+        [
+          {
+            "node": "Format Changelog Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Changelog Markdown": {
+      "main": [
+        [
+          {
+            "node": "Post Changelog to Slack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets Deployment Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

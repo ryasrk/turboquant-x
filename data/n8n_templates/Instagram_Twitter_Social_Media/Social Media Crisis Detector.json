@@ -1,0 +1,159 @@
+{
+  "name": "Social Media Crisis Detector",
+  "nodes": [
+    {
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 15}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Monitor Keywords",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets/search/recent",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "query", "value": "@yourbrand (scam OR fraud OR outage OR down OR hack OR breach OR crisis OR boycott OR lawsuit)"},
+            {"name": "tweet.fields", "value": "created_at,public_metrics,author_id"},
+            {"name": "max_results", "value": "100"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Detect Volume Spike",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst tweets = items[0].json.data || [];\nconst resultCount = items[0].json.meta?.result_count || 0;\n\n// Threshold: more than 10 crisis-related mentions in 15 min\nconst CRISIS_THRESHOLD = 10;\nconst isCrisis = resultCount >= CRISIS_THRESHOLD;\n\nconst topKeywords = {};\nfor (const tweet of tweets) {\n  const crisisWords = ['scam','fraud','outage','down','hack','breach','crisis','boycott','lawsuit'];\n  for (const word of crisisWords) {\n    if (tweet.text.toLowerCase().includes(word)) {\n      topKeywords[word] = (topKeywords[word] || 0) + 1;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    timestamp: new Date().toISOString(),\n    mention_count: resultCount,\n    is_crisis: isCrisis,\n    severity: resultCount >= 50 ? 'CRITICAL' : resultCount >= 20 ? 'HIGH' : resultCount >= 10 ? 'MEDIUM' : 'LOW',\n    top_keywords: JSON.stringify(topKeywords),\n    sample_tweets: tweets.slice(0, 5).map(t => t.text).join(' | ')\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Check Crisis",
+      "type": "n8n-nodes-base.if",
+      "position": [850, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_crisis }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Telegram Crisis Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1080, 200],
+      "parameters": {
+        "chatId": "",
+        "text": "🚨 SOCIAL MEDIA CRISIS ALERT 🚨\n\nSeverity: {{ $json.severity }}\nMentions: {{ $json.mention_count }}\nKeywords: {{ $json.top_keywords }}\n\nSample mentions:\n{{ $json.sample_tweets }}\n\nTake action immediately!",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Email Crisis Alert",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1080, 380],
+      "parameters": {
+        "sendTo": "crisis-team@example.com",
+        "subject": "🚨 [{{ $json.severity }}] Social Media Crisis Detected",
+        "message": "A social media crisis has been detected.\n\nSeverity: {{ $json.severity }}\nMention count: {{ $json.mention_count }}\nTimestamp: {{ $json.timestamp }}\nTop keywords: {{ $json.top_keywords }}\n\nSample mentions: {{ $json.sample_tweets }}\n\nPlease investigate immediately.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1300, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Crisis Log",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 80],
+      "parameters": {
+        "content": "## Social Media Crisis Detector\nRuns every 15 minutes. Monitors Twitter for crisis-related keywords mentioning your brand, detects volume spikes, assigns severity levels, and sends Telegram + email alerts when a crisis threshold is exceeded. All events are logged to Google Sheets."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [[{"node": "Monitor Keywords", "type": "main", "index": 0}]]
+    },
+    "Monitor Keywords": {
+      "main": [[{"node": "Detect Volume Spike", "type": "main", "index": 0}]]
+    },
+    "Detect Volume Spike": {
+      "main": [[{"node": "Check Crisis", "type": "main", "index": 0}]]
+    },
+    "Check Crisis": {
+      "main": [
+        [
+          {"node": "Telegram Crisis Alert", "type": "main", "index": 0},
+          {"node": "Email Crisis Alert", "type": "main", "index": 0}
+        ],
+        []
+      ]
+    },
+    "Telegram Crisis Alert": {
+      "main": [[{"node": "Log to Sheets", "type": "main", "index": 0}]]
+    },
+    "Email Crisis Alert": {
+      "main": [[{"node": "Log to Sheets", "type": "main", "index": 0}]]
+    }
+  }
+}

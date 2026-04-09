@@ -1,0 +1,197 @@
+{
+  "name": "Telegram File Organizer Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const msg = item.json.message || {};\n  const chatId = msg.chat?.id;\n  const username = msg.from?.username || 'unknown';\n  let fileType = 'unknown';\n  let fileId = '';\n  let fileName = '';\n  \n  if (msg.photo) {\n    fileType = 'photo';\n    fileId = msg.photo[msg.photo.length - 1].file_id;\n    fileName = `photo_${Date.now()}.jpg`;\n  } else if (msg.document) {\n    fileType = 'document';\n    fileId = msg.document.file_id;\n    fileName = msg.document.file_name || `doc_${Date.now()}`;\n  } else if (msg.video) {\n    fileType = 'video';\n    fileId = msg.video.file_id;\n    fileName = msg.video.file_name || `video_${Date.now()}.mp4`;\n  } else if (msg.audio) {\n    fileType = 'audio';\n    fileId = msg.audio.file_id;\n    fileName = msg.audio.file_name || `audio_${Date.now()}.mp3`;\n  }\n  \n  results.push({\n    json: {\n      fileType, fileId, fileName, chatId, username,\n      hasFile: fileType !== 'unknown',\n      folder: fileType === 'photo' ? 'Photos' : fileType === 'video' ? 'Videos' : fileType === 'audio' ? 'Audio' : 'Documents',\n      timestamp: new Date().toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Detect File Type",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.hasFile}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Has File?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "❌ No file detected. Please send a photo, document, video, or audio file.",
+        "additionalFields": {}
+      },
+      "name": "No File Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 450],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{$credentials.telegramApi}}/getFile?file_id={{$json.fileId}}",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Get File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/bot{{$credentials.telegramApi}}/{{$json.result.file_path}}",
+        "method": "GET",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "Download File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{$node['Detect File Type'].json.fileName}}",
+        "folderId": "",
+        "options": {}
+      },
+      "name": "Upload to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1500, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "FileLog" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1750, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Detect File Type'].json.chatId}}",
+        "text": "=✅ File organized!\n\n📁 Type: {{$node['Detect File Type'].json.fileType}}\n📄 Name: {{$node['Detect File Type'].json.fileName}}\n📂 Folder: {{$node['Detect File Type'].json.folder}}\n🔗 Link: {{$json.webViewLink || 'Check Google Drive'}}",
+        "additionalFields": {}
+      },
+      "name": "Send Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2000, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram File Organizer Bot\n\nUser sends file → detect type (photo/doc/video/audio) → download → upload to Google Drive folder → reply with link.\n\n**Setup:**\n1. Set Telegram Bot API credentials\n2. Set Google Drive OAuth2 credentials\n3. Create Drive folders: Photos, Videos, Audio, Documents\n4. Set folder IDs in Upload to Drive node\n5. Create Google Sheet for file log",
+        "width": 400,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 530]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Detect File Type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Detect File Type": {
+      "main": [
+        [{ "node": "Has File?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has File?": {
+      "main": [
+        [{ "node": "Get File Path", "type": "main", "index": 0 }],
+        [{ "node": "No File Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get File Path": {
+      "main": [
+        [{ "node": "Download File", "type": "main", "index": 0 }]
+      ]
+    },
+    "Download File": {
+      "main": [
+        [{ "node": "Upload to Drive", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upload to Drive": {
+      "main": [
+        [{ "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log to Sheets": {
+      "main": [
+        [{ "node": "Send Confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

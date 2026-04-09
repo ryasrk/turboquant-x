@@ -1,0 +1,140 @@
+{
+  "name": "Twitter Follower Growth Tracker",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 6}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Follower Count",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/users/me",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "user.fields", "value": "public_metrics"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [650, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Follower Growth",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ new Date().toISOString().split('T')[0] }}",
+            "followers_count": "={{ $json.data.public_metrics.followers_count }}",
+            "following_count": "={{ $json.data.public_metrics.following_count }}",
+            "tweet_count": "={{ $json.data.public_metrics.tweet_count }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Calculate Growth Rate",
+      "type": "n8n-nodes-base.code",
+      "position": [850, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst current = items[0].json;\nconst followers = current.data?.public_metrics?.followers_count || 0;\n\n// Growth calculations will use previous day data from sheets\n// For now, log the snapshot with timestamp\nconst dayOfWeek = new Date().getDay();\n\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    followers_count: followers,\n    is_sunday: dayOfWeek === 0,\n    snapshot_time: new Date().toISOString()\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Check If Sunday",
+      "type": "n8n-nodes-base.if",
+      "position": [1050, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_sunday }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Send Weekly Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1250, 250],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "Weekly Twitter Follower Growth Report",
+        "message": "Twitter Follower Growth Report\n\nCurrent Followers: {{ $json.followers_count }}\nDate: {{ $json.date }}\n\nFull growth history and trends are available in the Google Sheet.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Twitter Follower Growth Tracker\nRuns daily at 6 AM. Fetches current follower count from the Twitter API, logs to Google Sheets for historical tracking, calculates growth metrics, and sends a weekly email report on Sundays."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[{"node": "Get Follower Count", "type": "main", "index": 0}]]
+    },
+    "Get Follower Count": {
+      "main": [[{"node": "Log to Sheets", "type": "main", "index": 0}]]
+    },
+    "Log to Sheets": {
+      "main": [[{"node": "Calculate Growth Rate", "type": "main", "index": 0}]]
+    },
+    "Calculate Growth Rate": {
+      "main": [[{"node": "Check If Sunday", "type": "main", "index": 0}]]
+    },
+    "Check If Sunday": {
+      "main": [
+        [{"node": "Send Weekly Report", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  }
+}

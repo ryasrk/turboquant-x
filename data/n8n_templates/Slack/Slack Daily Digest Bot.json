@@ -1,0 +1,210 @@
+{
+  "name": "Slack Daily Digest Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 17 * * 1-5"
+            }
+          ]
+        }
+      },
+      "name": "5PM Daily Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/{{ $vars.GITHUB_ORG }}/{{ $vars.GITHUB_REPO }}/events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.githubApi.accessToken }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Fetch GitHub Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 220]
+    },
+    {
+      "parameters": {
+        "url": "https://{{ $vars.JIRA_DOMAIN }}.atlassian.net/rest/api/3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "jql",
+              "value": "updated >= -1d ORDER BY updated DESC"
+            },
+            {
+              "name": "maxResults",
+              "value": "20"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Basic {{ $credentials.jiraApi.credentials }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Fetch Jira Updates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst githubData = items[0]?.json || {};\nconst jiraData = items[1]?.json || {};\n\nconst githubEvents = Array.isArray(githubData) ? githubData.slice(0, 10) : [];\nconst jiraIssues = (jiraData.issues || []).slice(0, 10);\n\nlet digest = `:newspaper: *Daily Engineering Digest — ${new Date().toISOString().split('T')[0]}*\\n\\n`;\n\n// GitHub section\ndigest += ':octocat: *GitHub Activity:*\\n';\nif (githubEvents.length > 0) {\n  const pushes = githubEvents.filter(e => e.type === 'PushEvent');\n  const prs = githubEvents.filter(e => e.type === 'PullRequestEvent');\n  digest += `- ${pushes.length} pushes, ${prs.length} PR events\\n`;\n  prs.forEach(pr => {\n    const payload = pr.payload || {};\n    digest += `  • ${payload.action || ''}: ${(payload.pull_request || {}).title || 'PR'}\\n`;\n  });\n} else {\n  digest += '- No GitHub activity today\\n';\n}\n\ndigest += '\\n:jira: *Jira Updates:*\\n';\nif (jiraIssues.length > 0) {\n  jiraIssues.forEach(issue => {\n    const key = issue.key || '';\n    const summary = (issue.fields || {}).summary || '';\n    const status = ((issue.fields || {}).status || {}).name || '';\n    digest += `- *${key}*: ${summary} [${status}]\\n`;\n  });\n} else {\n  digest += '- No Jira updates today\\n';\n}\n\nreturn [{json: {digest, date: new Date().toISOString().split('T')[0], githubCount: githubEvents.length, jiraCount: jiraIssues.length}}];"
+      },
+      "name": "Summarize Activity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#engineering",
+          "mode": "name"
+        },
+        "text": "={{ $json.digest }}",
+        "otherOptions": {}
+      },
+      "name": "Post Digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [960, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Digest Archive",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Archive to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1180, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Daily Digest Bot\n\nAggregate GitHub and Jira activity into a daily digest.\n\n**Flow:**\n1. Trigger at 5PM weekdays\n2. Fetch GitHub events (pushes, PRs)\n3. Fetch Jira updated issues\n4. Code node summarizes into rich message\n5. Post to #engineering\n6. Archive to Google Sheets\n\n**Variables required:**\n- GITHUB_ORG, GITHUB_REPO\n- JIRA_DOMAIN",
+        "width": 340,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "5PM Daily Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch GitHub Events",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Jira Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GitHub Events": {
+      "main": [
+        [
+          {
+            "node": "Summarize Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Jira Updates": {
+      "main": [
+        [
+          {
+            "node": "Summarize Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Activity": {
+      "main": [
+        [
+          {
+            "node": "Post Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Digest": {
+      "main": [
+        [
+          {
+            "node": "Archive to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

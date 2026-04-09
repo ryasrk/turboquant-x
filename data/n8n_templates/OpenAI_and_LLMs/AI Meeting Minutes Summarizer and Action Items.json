@@ -1,0 +1,134 @@
+{
+  "name": "AI Meeting Minutes Summarizer and Action Items",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-transcript",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Receive Transcript",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a professional meeting assistant. Analyze the following meeting transcript and provide:\n\n1. **Meeting Summary** (3-5 bullet points)\n2. **Key Decisions Made**\n3. **Action Items** (with assignee and deadline if mentioned)\n4. **Follow-up Topics**\n\nFormat as structured JSON with keys: summary, decisions, action_items (array of {task, assignee, deadline}), follow_ups.\n\nTranscript:\n{{ $json.body.transcript }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000
+        }
+      },
+      "name": "OpenAI - Summarize Transcript",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { summary: aiResponse, decisions: [], action_items: [], follow_ups: [] };\n}\nconst meetingTitle = items[0].json.body?.meeting_title || 'Untitled Meeting';\nconst attendees = items[0].json.body?.attendees || '';\nconst meetingDate = items[0].json.body?.date || new Date().toISOString().split('T')[0];\n\nconst actionItemsList = (parsed.action_items || []).map(a => `- ${a.task} (Assignee: ${a.assignee || 'TBD'}, Deadline: ${a.deadline || 'TBD'})`).join('\\n');\nconst summaryBullets = Array.isArray(parsed.summary) ? parsed.summary.map(s => `- ${s}`).join('\\n') : parsed.summary;\n\nreturn [{\n  json: {\n    meetingTitle,\n    meetingDate,\n    attendees,\n    summary: summaryBullets,\n    decisions: Array.isArray(parsed.decisions) ? parsed.decisions.join(', ') : (parsed.decisions || ''),\n    actionItems: actionItemsList,\n    followUps: Array.isArray(parsed.follow_ups) ? parsed.follow_ups.join(', ') : (parsed.follow_ups || ''),\n    rawAiResponse: aiResponse\n  }\n}];"
+      },
+      "name": "Code - Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.attendees_email || 'team@example.com' }}",
+        "subject": "=Meeting Minutes: {{ $json.meetingTitle }} - {{ $json.meetingDate }}",
+        "message": "=<h2>Meeting Minutes: {{ $json.meetingTitle }}</h2>\n<p><strong>Date:</strong> {{ $json.meetingDate }}</p>\n<p><strong>Attendees:</strong> {{ $json.attendees }}</p>\n\n<h3>Summary</h3>\n<p>{{ $json.summary }}</p>\n\n<h3>Key Decisions</h3>\n<p>{{ $json.decisions }}</p>\n\n<h3>Action Items</h3>\n<pre>{{ $json.actionItems }}</pre>\n\n<h3>Follow-up Topics</h3>\n<p>{{ $json.followUps }}</p>",
+        "options": {}
+      },
+      "name": "Gmail - Send Minutes",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.meetingDate }}",
+            "Meeting Title": "={{ $json.meetingTitle }}",
+            "Attendees": "={{ $json.attendees }}",
+            "Summary": "={{ $json.summary }}",
+            "Action Items": "={{ $json.actionItems }}",
+            "Decisions": "={{ $json.decisions }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Meeting Title", "type": "string", "display": true },
+            { "id": "Attendees", "type": "string", "display": true },
+            { "id": "Summary", "type": "string", "display": true },
+            { "id": "Action Items", "type": "string", "display": true },
+            { "id": "Decisions", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Log Meeting",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 800,
+        "height": 200,
+        "content": "## AI Meeting Minutes Summarizer & Action Items\n\n**Setup:**\n1. Connect your OpenAI API key\n2. Connect Gmail OAuth2 credentials\n3. Connect Google Sheets OAuth2 and set your spreadsheet ID\n4. POST meeting transcript to webhook with JSON: `{\"transcript\": \"...\", \"meeting_title\": \"...\", \"attendees\": \"...\", \"date\": \"...\", \"attendees_email\": \"...\"}`\n\nThe workflow summarizes the transcript, extracts action items, emails attendees, and logs to Google Sheets."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Receive Transcript": {
+      "main": [[{ "node": "OpenAI - Summarize Transcript", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Summarize Transcript": {
+      "main": [[{ "node": "Code - Parse AI Response", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse AI Response": {
+      "main": [[
+        { "node": "Gmail - Send Minutes", "type": "main", "index": 0 },
+        { "node": "Google Sheets - Log Meeting", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

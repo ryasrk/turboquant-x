@@ -1,0 +1,110 @@
+{
+  "name": "Google Sheets API Rate Limiter",
+  "nodes": [
+    {
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [300, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sheets-rate-limiter",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "typeVersion": 2,
+      "webhookId": "rate-limiter"
+    },
+    {
+      "name": "Read Config Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Config" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Batch with Delays",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst config = items[0]?.json || {};\nconst batchSize = Number(config.batchSize) || 10;\nconst delayMs = Number(config.delayMs) || 1000;\n\n// Get the operations from webhook body\nconst operations = items.map(i => i.json);\nconst batches = [];\n\nfor (let i = 0; i < operations.length; i += batchSize) {\n  batches.push({\n    batchIndex: Math.floor(i / batchSize),\n    items: operations.slice(i, i + batchSize),\n    delayMs: delayMs\n  });\n}\n\nreturn [{ json: { totalOperations: operations.length, totalBatches: batches.length, batchSize, delayMs, batches, startedAt: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Process Batch",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Data" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Wait Between Batches",
+      "type": "n8n-nodes-base.wait",
+      "position": [1180, 300],
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "name": "Write Process Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1400, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "ProcessLog" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ new Date().toISOString() }}",
+            "operationsProcessed": "={{ $json.totalOperations }}",
+            "batchesUsed": "={{ $json.totalBatches }}",
+            "status": "completed"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1300,
+        "height": 100,
+        "content": "### Google Sheets API Rate Limiter\nWebhook-triggered workflow for bulk Sheet operations. Reads batch config, splits operations into rate-limited batches with delays, processes them, and logs results."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Read Config Sheet", "type": "main", "index": 0 }]] },
+    "Read Config Sheet": { "main": [[{ "node": "Batch with Delays", "type": "main", "index": 0 }]] },
+    "Batch with Delays": { "main": [[{ "node": "Process Batch", "type": "main", "index": 0 }]] },
+    "Process Batch": { "main": [[{ "node": "Wait Between Batches", "type": "main", "index": 0 }]] },
+    "Wait Between Batches": { "main": [[{ "node": "Write Process Log", "type": "main", "index": 0 }]] }
+  }
+}

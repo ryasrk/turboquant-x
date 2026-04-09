@@ -1,0 +1,135 @@
+{
+  "name": "AI Survey Analysis Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "range": "A:Z",
+        "options": {}
+      },
+      "name": "Read Survey Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze these survey responses and extract the main themes. Group responses by theme and provide sentiment for each.\n\nSurvey data (sample of responses):\n{{ JSON.stringify($input.all().slice(0, 50).map(i => i.json), null, 2) }}\n\nReturn a JSON array:\n[{\"theme\": \"...\", \"sentiment\": \"positive|negative|neutral|mixed\", \"frequency\": N, \"example_quotes\": [\"...\"], \"summary\": \"...\"}]"
+            }
+          ]
+        },
+        "options": { "temperature": 0.2, "maxTokens": 2500 }
+      },
+      "name": "OpenAI Theme Extraction",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst content = items[0].json.message.content;\n\nlet themes;\ntry {\n  const jsonMatch = content.match(/\\[.*\\]/s);\n  themes = jsonMatch ? JSON.parse(jsonMatch[0]) : [];\n} catch (e) {\n  themes = [{ theme: 'Parse Error', summary: content }];\n}\n\nconst totalResponses = themes.reduce((sum, t) => sum + (t.frequency || 0), 0);\n\nconst quantified = themes.map(t => ({\n  ...t,\n  percentage: totalResponses > 0 ? ((t.frequency || 0) / totalResponses * 100).toFixed(1) + '%' : '0%'\n}));\n\nconst sentimentBreakdown = {\n  positive: themes.filter(t => t.sentiment === 'positive').length,\n  negative: themes.filter(t => t.sentiment === 'negative').length,\n  neutral: themes.filter(t => t.sentiment === 'neutral').length,\n  mixed: themes.filter(t => t.sentiment === 'mixed').length\n};\n\nreturn [{\n  json: {\n    themeCount: themes.length,\n    totalResponses,\n    sentimentBreakdown,\n    themes: quantified,\n    reportDate: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Quantify Themes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "report_date": "={{ $json.reportDate }}",
+            "theme_count": "={{ $json.themeCount }}",
+            "total_responses": "={{ $json.totalResponses }}",
+            "sentiment_positive": "={{ $json.sentimentBreakdown.positive }}",
+            "sentiment_negative": "={{ $json.sentimentBreakdown.negative }}",
+            "themes_json": "={{ JSON.stringify($json.themes) }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Report to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1130, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Survey Analysis Report — {{ $json.themeCount }} themes, {{ $json.totalResponses }} responses",
+        "message": "=Survey Analysis Report\n\nDate: {{ $json.reportDate }}\nThemes Found: {{ $json.themeCount }}\nTotal Responses Analyzed: {{ $json.totalResponses }}\n\nSentiment Breakdown:\n- Positive: {{ $json.sentimentBreakdown.positive }}\n- Negative: {{ $json.sentimentBreakdown.negative }}\n- Neutral: {{ $json.sentimentBreakdown.neutral }}\n- Mixed: {{ $json.sentimentBreakdown.mixed }}\n\nDetailed Themes:\n{{ $json.themes.map(t => `\\n## ${t.theme} (${t.percentage})\\nSentiment: ${t.sentiment}\\n${t.summary}\\nExamples: ${(t.example_quotes || []).join('; ')}`).join('\\n') }}",
+        "options": {}
+      },
+      "name": "Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 300],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Survey Analysis Pipeline\n\nReads survey responses from Google Sheets, uses OpenAI to extract themes and sentiment, quantifies results, saves a report to Sheets, and emails a summary.\n\n**Setup:**\n1. Configure Google Sheets with survey responses\n2. Add OpenAI and Gmail credentials\n3. Set email recipient in Email Report node\n4. Adjust schedule frequency"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{ "node": "Read Survey Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Survey Data": {
+      "main": [
+        [{ "node": "OpenAI Theme Extraction", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Theme Extraction": {
+      "main": [
+        [{ "node": "Quantify Themes", "type": "main", "index": 0 }]
+      ]
+    },
+    "Quantify Themes": {
+      "main": [
+        [{ "node": "Write Report to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write Report to Sheets": {
+      "main": [
+        [{ "node": "Email Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

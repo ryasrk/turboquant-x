@@ -1,0 +1,135 @@
+{
+  "name": "AI Content Gap Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-gap-analysis",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.body.url }}/sitemap.xml",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } },
+          "timeout": 15000
+        }
+      },
+      "name": "Fetch Sitemap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst xml = (items[0].json.data || items[0].json.body || '').toString();\nconst baseUrl = $('Webhook').item.json.body.url || '';\n\n// Extract URLs from sitemap XML\nconst urlMatches = xml.match(/<loc>(.*?)<\\/loc>/gi) || [];\nconst urls = urlMatches.map(m => m.replace(/<\\/?loc>/gi, '').trim());\n\n// Categorize pages by URL path\nconst pages = urls.map(url => {\n  const path = url.replace(baseUrl, '').replace(/^\\//,'');\n  const segments = path.split('/').filter(Boolean);\n  const category = segments[0] || 'root';\n  const slug = segments[segments.length - 1] || 'index';\n  \n  // Infer topic from URL slug\n  const topic = slug.replace(/[-_]/g, ' ').replace(/\\.(html|php|aspx)$/i, '').trim();\n\n  return { url, path, category, slug, topic };\n});\n\n// Group by category\nconst categories = {};\nfor (const page of pages) {\n  if (!categories[page.category]) categories[page.category] = [];\n  categories[page.category].push(page);\n}\n\nconst categorySummary = Object.entries(categories).map(([cat, pages]) => ({\n  category: cat,\n  pageCount: pages.length,\n  topics: pages.map(p => p.topic).slice(0, 20)\n}));\n\nreturn [{\n  json: {\n    baseUrl,\n    totalPages: pages.length,\n    categoryCount: categorySummary.length,\n    categories: categorySummary,\n    allTopics: pages.map(p => p.topic).slice(0, 100),\n    industry: $('Webhook').item.json.body.industry || 'general'\n  }\n}];"
+      },
+      "name": "Catalog Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this website's content coverage for the {{ $json.industry }} industry and identify content gaps:\n\nSite: {{ $json.baseUrl }}\nTotal Pages: {{ $json.totalPages }}\n\nExisting Content Categories:\n{{ JSON.stringify($json.categories, null, 2) }}\n\nAll Topics Covered:\n{{ $json.allTopics.join(', ') }}\n\nProvide:\n1. **Coverage Assessment** — how comprehensive is current content\n2. **Missing Topics** — essential topics not covered (list 10-15)\n3. **Thin Categories** — categories that need more content\n4. **Competitor-Expected Content** — what similar sites typically have\n5. **Content Priority Matrix** — rank missing content by:\n   - Search demand (high/medium/low)\n   - Competition level (high/medium/low)\n   - Business impact (high/medium/low)\n6. **Quick Wins** — topics that could be added quickly with high impact\n\nReturn structured analysis."
+            }
+          ]
+        },
+        "options": { "temperature": 0.3, "maxTokens": 2500 }
+      },
+      "name": "OpenAI Identify Gaps",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [910, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $('Catalog Pages').item.json.baseUrl }}",
+            "total_pages": "={{ $('Catalog Pages').item.json.totalPages }}",
+            "categories": "={{ $('Catalog Pages').item.json.categoryCount }}",
+            "industry": "={{ $('Catalog Pages').item.json.industry }}",
+            "gap_analysis": "={{ $json.message.content }}",
+            "analyzed_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save Gap Report",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1130, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').item.json.body.email || '' }}",
+        "subject": "=Content Gap Analysis: {{ $('Catalog Pages').item.json.baseUrl }} — {{ $('Catalog Pages').item.json.totalPages }} pages analyzed",
+        "message": "={{ $json.message.content }}",
+        "options": {}
+      },
+      "name": "Email Gap Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1130, 400],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Content Gap Analyzer\n\nFetches a website's sitemap, catalogs all pages by category and topic, then uses OpenAI to identify missing content topics and prioritize them by impact.\n\n**Setup:**\n1. Add OpenAI, Google Sheets, Gmail credentials\n2. POST: `{\"url\": \"https://example.com\", \"industry\": \"saas\", \"email\": \"user@example.com\"}`\n3. Site must have a sitemap.xml at /sitemap.xml"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Fetch Sitemap", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Sitemap": {
+      "main": [
+        [{ "node": "Catalog Pages", "type": "main", "index": 0 }]
+      ]
+    },
+    "Catalog Pages": {
+      "main": [
+        [{ "node": "OpenAI Identify Gaps", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Identify Gaps": {
+      "main": [
+        [
+          { "node": "Save Gap Report", "type": "main", "index": 0 },
+          { "node": "Email Gap Report", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

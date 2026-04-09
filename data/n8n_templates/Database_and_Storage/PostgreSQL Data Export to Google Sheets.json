@@ -1,0 +1,155 @@
+{
+  "name": "PostgreSQL Data Export to Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weekday": 1,
+              "hour": 6,
+              "minute": 0
+            }
+          ]
+        }
+      },
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  department,\n  COUNT(*) AS total_records,\n  SUM(revenue) AS total_revenue,\n  AVG(performance_score) AS avg_score\nFROM reports\nWHERE created_at >= NOW() - INTERVAL '7 days'\nGROUP BY department\nORDER BY total_revenue DESC;",
+        "options": {}
+      },
+      "name": "Query PostgreSQL Reports",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const items = $input.all();\nconst now = new Date().toISOString().split('T')[0];\n\nreturn items.map(item => {\n  return {\n    json: {\n      Department: item.json.department,\n      'Total Records': item.json.total_records,\n      'Total Revenue': `$${Number(item.json.total_revenue).toLocaleString()}`,\n      'Avg Score': Number(item.json.avg_score).toFixed(2),\n      'Report Date': now\n    }\n  };\n});"
+      },
+      "name": "Format Data for Sheets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Weekly Reports"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Export to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "reports@yourcompany.com",
+        "toEmail": "team@yourcompany.com",
+        "subject": "=Weekly PostgreSQL Report Export - {{ $now.format('yyyy-MM-dd') }}",
+        "emailType": "text",
+        "message": "=Weekly data export completed successfully.\n\nRows exported: {{ $input.all().length }}\nSpreadsheet: https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID\n\nThis is an automated notification.",
+        "options": {}
+      },
+      "name": "Email Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PostgreSQL Data Export to Google Sheets\n\n**Schedule:** Weekly on Monday at 6:00 AM\n\n**Flow:**\n1. Query PostgreSQL for weekly report data\n2. Format and clean results\n3. Append to Google Sheets\n4. Send email notification\n\n**Setup:**\n- Configure PostgreSQL credentials\n- Set Google Sheets OAuth2 credentials\n- Update spreadsheet ID and sheet name\n- Configure SMTP for email notifications",
+        "height": 320,
+        "width": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -60]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Query PostgreSQL Reports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query PostgreSQL Reports": {
+      "main": [
+        [
+          {
+            "node": "Format Data for Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Data for Sheets": {
+      "main": [
+        [
+          {
+            "node": "Export to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "name": "Email Approval Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "request-approval",
+        "options": {}
+      },
+      "name": "Webhook - Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.approverEmail }}",
+        "subject": "Approval Required: {{ $json.body.requestTitle }}",
+        "message": "Hi {{ $json.body.approverName }},\n\nA new approval request has been submitted:\n\n- **Request:** {{ $json.body.requestTitle }}\n- **Requested By:** {{ $json.body.requesterName }}\n- **Details:** {{ $json.body.details }}\n- **Amount:** {{ $json.body.amount || 'N/A' }}\n\nPlease click one of the links below:\n\n✅ **Approve:** {{ $json.body.webhookBaseUrl }}/webhook/approval-response?requestId={{ $json.body.requestId }}&decision=approved\n\n❌ **Reject:** {{ $json.body.webhookBaseUrl }}/webhook/approval-response?requestId={{ $json.body.requestId }}&decision=rejected\n\nThank you.",
+        "options": {}
+      },
+      "name": "Gmail to Approver",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "requestId", "value": "={{ $('Webhook - Request').item.json.body.requestId }}" },
+              { "column": "requestTitle", "value": "={{ $('Webhook - Request').item.json.body.requestTitle }}" },
+              { "column": "requesterName", "value": "={{ $('Webhook - Request').item.json.body.requesterName }}" },
+              { "column": "requesterEmail", "value": "={{ $('Webhook - Request').item.json.body.requesterEmail }}" },
+              { "column": "approverEmail", "value": "={{ $('Webhook - Request').item.json.body.approverEmail }}" },
+              { "column": "status", "value": "pending" },
+              { "column": "requestedAt", "value": "={{ $now.toISO() }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "name": "Sheets Log Request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "approval-response",
+        "options": {},
+        "responseMode": "responseNode"
+      },
+      "name": "Webhook - Approval Response",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "requestId", "value": "={{ $json.query.requestId }}" },
+              { "column": "status", "value": "={{ $json.query.decision }}" },
+              { "column": "decidedAt", "value": "={{ $now.toISO() }}" }
+            ]
+          }
+        },
+        "options": {
+          "columnToMatchOn": "requestId"
+        }
+      },
+      "name": "Update Sheets Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {
+          "column": "requestId",
+          "value": "={{ $('Webhook - Approval Response').item.json.query.requestId }}"
+        },
+        "options": {}
+      },
+      "name": "Read Request Details",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.requesterEmail }}",
+        "subject": "Your request '{{ $json.requestTitle }}' has been {{ $('Webhook - Approval Response').item.json.query.decision }}",
+        "message": "Hi {{ $json.requesterName }},\n\nYour approval request has been processed:\n\n- **Request:** {{ $json.requestTitle }}\n- **Decision:** {{ $('Webhook - Approval Response').item.json.query.decision }}\n- **Decided At:** {{ $now.toISO() }}\n\nThank you.",
+        "options": {}
+      },
+      "name": "Gmail Notify Requester",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 600],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=Thank you! The request has been {{ $('Webhook - Approval Response').item.json.query.decision }}.",
+        "options": {}
+      },
+      "name": "Respond to Approver",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1250, 600]
+    },
+    {
+      "parameters": {
+        "content": "## Email Approval Workflow\n\nTwo-webhook system for email-based approval flows.\n\n**Request Flow (top):**\n1. Webhook receives approval request\n2. Gmail sends approval email with approve/reject links\n3. Log request to Sheets (status: pending)\n\n**Response Flow (bottom):**\n4. Approver clicks approve/reject link → second webhook\n5. Update Sheets status\n6. Read request details\n7. Gmail notifies requester of decision\n8. Respond to approver with confirmation\n\n**Request payload:**\n```json\n{\n  \"requestId\": \"REQ-001\",\n  \"requestTitle\": \"Budget Increase\",\n  \"requesterName\": \"John\",\n  \"requesterEmail\": \"john@example.com\",\n  \"approverName\": \"Manager\",\n  \"approverEmail\": \"manager@example.com\",\n  \"details\": \"Need $5000 for...\",\n  \"amount\": \"$5000\",\n  \"webhookBaseUrl\": \"https://your-n8n.com\"\n}\n```",
+        "width": 420,
+        "height": 460
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -170]
+    }
+  ],
+  "connections": {
+    "Webhook - Request": {
+      "main": [
+        [
+          {
+            "node": "Gmail to Approver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail to Approver": {
+      "main": [
+        [
+          {
+            "node": "Sheets Log Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Approval Response": {
+      "main": [
+        [
+          {
+            "node": "Update Sheets Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sheets Status": {
+      "main": [
+        [
+          {
+            "node": "Read Request Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Request Details": {
+      "main": [
+        [
+          {
+            "node": "Gmail Notify Requester",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Notify Requester": {
+      "main": [
+        [
+          {
+            "node": "Respond to Approver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

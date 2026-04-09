@@ -1,0 +1,161 @@
+{
+  "name": "Notion Recipe Database Builder",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Recipe Database Builder\nSave recipes from URLs — fetches page, parses ingredients/steps, creates Notion recipe page.\n\n**Setup:**\n1. Configure webhook path\n2. Set Notion recipe database ID\n3. Configure Telegram bot for confirmation"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook Recipe URL",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "save-recipe",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "HTTP Fetch Recipe Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 400],
+      "parameters": {
+        "url": "={{ $json.body.url || $json.url }}",
+        "method": "GET",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Parse Recipe",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const html = item.json.data || item.json.body || '';\n  const url = $('Webhook Recipe URL').first().json.body?.url || $('Webhook Recipe URL').first().json.url || '';\n\n  // Extract title\n  const titleMatch = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\n  let title = titleMatch ? titleMatch[1].trim() : 'Untitled Recipe';\n  title = title.split(' - ')[0].split(' | ')[0].trim();\n\n  // Try to find JSON-LD recipe schema\n  const schemaMatch = html.match(/<script[^>]*type=[\"']application\\/ld\\+json[\"'][^>]*>([\\s\\S]*?)<\\/script>/gi);\n  let ingredients = [];\n  let instructions = [];\n  let prepTime = '';\n  let cookTime = '';\n  let servings = '';\n  let category = '';\n  let description = '';\n\n  if (schemaMatch) {\n    for (const match of schemaMatch) {\n      try {\n        const jsonStr = match.replace(/<\\/?script[^>]*>/gi, '');\n        const schema = JSON.parse(jsonStr);\n        const recipe = schema['@type'] === 'Recipe' ? schema\n          : (Array.isArray(schema['@graph']) ? schema['@graph'].find(s => s['@type'] === 'Recipe') : null);\n        if (recipe) {\n          title = recipe.name || title;\n          ingredients = recipe.recipeIngredient || [];\n          instructions = (recipe.recipeInstructions || []).map(i =>\n            typeof i === 'string' ? i : i.text || i.name || ''\n          );\n          prepTime = recipe.prepTime || '';\n          cookTime = recipe.cookTime || '';\n          servings = recipe.recipeYield ? String(recipe.recipeYield) : '';\n          category = recipe.recipeCategory || '';\n          description = recipe.description || '';\n          break;\n        }\n      } catch (e) { /* skip invalid JSON */ }\n    }\n  }\n\n  return {\n    json: {\n      title,\n      url,\n      description: description.substring(0, 500),\n      ingredients: ingredients.join('\\n'),\n      instructions: instructions.map((s, i) => `${i + 1}. ${s}`).join('\\n'),\n      prepTime,\n      cookTime,\n      servings,\n      category\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Recipe Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.title }}"
+            },
+            {
+              "name": "Source URL",
+              "type": "url",
+              "url": "={{ $json.url }}"
+            },
+            {
+              "name": "Category",
+              "type": "select",
+              "select": "={{ $json.category || 'Uncategorized' }}"
+            },
+            {
+              "name": "Prep Time",
+              "type": "rich_text",
+              "richText": "={{ $json.prepTime }}"
+            },
+            {
+              "name": "Cook Time",
+              "type": "rich_text",
+              "richText": "={{ $json.cookTime }}"
+            },
+            {
+              "name": "Servings",
+              "type": "rich_text",
+              "richText": "={{ $json.servings }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "={{ $json.description }}\n\n## Ingredients\n{{ $json.ingredients }}\n\n## Instructions\n{{ $json.instructions }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Telegram Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1120, 400],
+      "parameters": {
+        "chatId": "",
+        "text": "=🍳 *Recipe Saved!*\n\n*{{ $('Parse Recipe').item.json.title }}*\n{{ $('Parse Recipe').item.json.category ? '📂 ' + $('Parse Recipe').item.json.category : '' }}\n{{ $('Parse Recipe').item.json.servings ? '🍽 Serves: ' + $('Parse Recipe').item.json.servings : '' }}\n{{ $('Parse Recipe').item.json.prepTime ? '⏱ Prep: ' + $('Parse Recipe').item.json.prepTime : '' }}\n{{ $('Parse Recipe').item.json.cookTime ? '🔥 Cook: ' + $('Parse Recipe').item.json.cookTime : '' }}\n\nSource: {{ $('Parse Recipe').item.json.url }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.2
+    }
+  ],
+  "connections": {
+    "Webhook Recipe URL": {
+      "main": [
+        [{ "node": "HTTP Fetch Recipe Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Fetch Recipe Page": {
+      "main": [
+        [{ "node": "Parse Recipe", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Recipe": {
+      "main": [
+        [{ "node": "Notion Create Recipe Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Recipe Page": {
+      "main": [
+        [{ "node": "Telegram Confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

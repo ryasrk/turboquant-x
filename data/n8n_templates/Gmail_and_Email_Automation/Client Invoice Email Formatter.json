@@ -1,0 +1,120 @@
+{
+  "name": "Client Invoice Email Formatter",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-invoice",
+        "options": {}
+      },
+      "name": "Webhook - Invoice Data",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const d = item.json.body;\n  const invoiceNumber = d.invoiceNumber || `INV-${Date.now()}`;\n  const clientName = d.clientName || 'Client';\n  const clientEmail = d.clientEmail || '';\n  const items_list = d.items || [];\n  const dueDate = d.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];\n  const currency = d.currency || 'USD';\n  \n  let subtotal = 0;\n  let tableRows = '';\n  for (const lineItem of items_list) {\n    const lineTotal = (lineItem.quantity || 1) * (lineItem.price || 0);\n    subtotal += lineTotal;\n    tableRows += `<tr><td style=\"padding:8px;border:1px solid #ddd;\">${lineItem.description || ''}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:center;\">${lineItem.quantity || 1}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:right;\">${currency} ${(lineItem.price || 0).toFixed(2)}</td><td style=\"padding:8px;border:1px solid #ddd;text-align:right;\">${currency} ${lineTotal.toFixed(2)}</td></tr>`;\n  }\n  \n  const tax = d.taxRate ? subtotal * (d.taxRate / 100) : 0;\n  const total = subtotal + tax;\n  \n  const html = `<div style=\"font-family:Arial,sans-serif;max-width:600px;margin:auto;\">\n    <div style=\"background:#2563eb;color:white;padding:20px;text-align:center;\">\n      <h1 style=\"margin:0;\">INVOICE</h1>\n      <p style=\"margin:5px 0 0;\">${invoiceNumber}</p>\n    </div>\n    <div style=\"padding:20px;\">\n      <p><strong>Bill To:</strong> ${clientName}</p>\n      <p><strong>Due Date:</strong> ${dueDate}</p>\n      <table style=\"width:100%;border-collapse:collapse;margin:20px 0;\">\n        <thead><tr style=\"background:#f3f4f6;\"><th style=\"padding:8px;border:1px solid #ddd;text-align:left;\">Description</th><th style=\"padding:8px;border:1px solid #ddd;\">Qty</th><th style=\"padding:8px;border:1px solid #ddd;text-align:right;\">Price</th><th style=\"padding:8px;border:1px solid #ddd;text-align:right;\">Total</th></tr></thead>\n        <tbody>${tableRows}</tbody>\n      </table>\n      <div style=\"text-align:right;margin-top:10px;\">\n        <p>Subtotal: ${currency} ${subtotal.toFixed(2)}</p>\n        ${tax > 0 ? `<p>Tax (${d.taxRate}%): ${currency} ${tax.toFixed(2)}</p>` : ''}\n        <p style=\"font-size:1.2em;font-weight:bold;\">Total: ${currency} ${total.toFixed(2)}</p>\n      </div>\n    </div>\n  </div>`;\n  \n  results.push({\n    json: {\n      clientEmail: clientEmail,\n      clientName: clientName,\n      invoiceNumber: invoiceNumber,\n      htmlBody: html,\n      total: total,\n      currency: currency,\n      dueDate: dueDate,\n      sentAt: new Date().toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Generate HTML Invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.clientEmail }}",
+        "subject": "Invoice {{ $json.invoiceNumber }} - {{ $json.currency }} {{ $json.total }}",
+        "message": "={{ $json.htmlBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Gmail Send Invoice",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Client Invoice Email Formatter\n\nGenerates and sends professional HTML invoices via email.\n\n**Flow:**\n1. Webhook receives invoice data (client, items, amounts)\n2. Code generates formatted HTML invoice\n3. Gmail sends invoice to client\n4. Logs sent invoice to Google Sheets\n\n**Webhook payload:**\n```json\n{\n  \"clientName\": \"Acme Corp\",\n  \"clientEmail\": \"billing@acme.com\",\n  \"invoiceNumber\": \"INV-001\",\n  \"dueDate\": \"2025-02-15\",\n  \"currency\": \"USD\",\n  \"taxRate\": 10,\n  \"items\": [\n    {\"description\": \"Consulting\", \"quantity\": 10, \"price\": 150}\n  ]\n}\n```",
+        "width": 400,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -120]
+    }
+  ],
+  "connections": {
+    "Webhook - Invoice Data": {
+      "main": [
+        [
+          {
+            "node": "Generate HTML Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate HTML Invoice": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send Invoice": {
+      "main": [
+        [
+          {
+            "node": "Sheets Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

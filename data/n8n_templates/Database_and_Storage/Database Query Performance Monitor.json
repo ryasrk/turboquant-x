@@ -1,0 +1,235 @@
+{
+  "name": "Database Query Performance Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Monitored Queries"
+        },
+        "options": {}
+      },
+      "name": "Read Query List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {{ $json.sql_query }}",
+        "options": {}
+      },
+      "name": "Run EXPLAIN ANALYZE",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const items = $input.all();\nconst queryMeta = $('Read Query List').first().json;\nconst baselineMs = parseFloat(queryMeta.baseline_ms) || 100;\nconst queryName = queryMeta.query_name || 'unknown';\n\nconst results = items.map(item => {\n  const plan = item.json['QUERY PLAN'] || item.json;\n  let executionTime = 0;\n  let planningTime = 0;\n  let nodeType = 'Unknown';\n\n  if (Array.isArray(plan)) {\n    const p = plan[0];\n    executionTime = p['Execution Time'] || p.executionTime || 0;\n    planningTime = p['Planning Time'] || p.planningTime || 0;\n    nodeType = p.Plan ? p.Plan['Node Type'] : 'Unknown';\n  } else if (typeof plan === 'object') {\n    executionTime = plan['Execution Time'] || plan.executionTime || 0;\n    planningTime = plan['Planning Time'] || plan.planningTime || 0;\n  }\n\n  const totalTime = executionTime + planningTime;\n  const ratio = totalTime / baselineMs;\n  const degraded = ratio > 2.0;\n\n  return {\n    json: {\n      query_name: queryName,\n      execution_time_ms: executionTime.toFixed(2),\n      planning_time_ms: planningTime.toFixed(2),\n      total_time_ms: totalTime.toFixed(2),\n      baseline_ms: baselineMs,\n      ratio_to_baseline: ratio.toFixed(2),\n      node_type: nodeType,\n      is_degraded: degraded,\n      status: degraded ? 'DEGRADED' : (ratio > 1.5 ? 'WARNING' : 'OK'),\n      measured_at: new Date().toISOString()\n    }\n  };\n});\n\nreturn results;"
+      },
+      "name": "Track Execution Times",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "degraded-check",
+              "leftValue": "={{ $json.is_degraded }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Performance Degraded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_DBA_CHAT_ID",
+        "text": "=🐌 *Query Performance Degraded*\n\n*Query:* {{ $json.query_name }}\n*Status:* {{ $json.status }}\n\n*Current:* {{ $json.total_time_ms }}ms\n*Baseline:* {{ $json.baseline_ms }}ms\n*Ratio:* {{ $json.ratio_to_baseline }}x slower\n\n*Execution:* {{ $json.execution_time_ms }}ms\n*Planning:* {{ $json.planning_time_ms }}ms\n*Node Type:* {{ $json.node_type }}\n\n_Investigate: check for missing indexes, table bloat, or lock contention._",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Alert on Degradation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1360, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Performance History"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1360, 420],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Database Query Performance Monitor\n\n**Schedule:** Every 30 minutes\n\n**Flow:**\n1. Read monitored queries from Google Sheets\n2. Run EXPLAIN ANALYZE on each query\n3. Extract execution/planning times\n4. Compare against baseline (>2x = degraded)\n5. Alert via Telegram on degradation\n6. Log all measurements to Sheets history\n\n**Monitored Queries Sheet columns:**\nquery_name, sql_query, baseline_ms\n\n**Alert thresholds:**\n- OK: ≤1.5x baseline\n- WARNING: 1.5x-2x baseline\n- DEGRADED: >2x baseline (triggers alert)\n\n**Setup:**\n- PostgreSQL credentials\n- Google Sheets with query definitions\n- Telegram bot for alerts\n- Set realistic baselines per query",
+        "height": 380,
+        "width": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -120]
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Read Query List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Query List": {
+      "main": [
+        [
+          {
+            "node": "Run EXPLAIN ANALYZE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run EXPLAIN ANALYZE": {
+      "main": [
+        [
+          {
+            "node": "Track Execution Times",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Execution Times": {
+      "main": [
+        [
+          {
+            "node": "Performance Degraded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Performance Degraded?": {
+      "main": [
+        [
+          {
+            "node": "Alert on Degradation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log to Sheets History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert on Degradation": {
+      "main": [
+        [
+          {
+            "node": "Log to Sheets History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "name": "Email Marketing Campaign Scheduler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "name": "Weekly Campaign Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Subscribers" },
+        "options": {}
+      },
+      "name": "Read Subscriber List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const subscribers = $input.all();\nconst segments = {\n  vip: [],\n  regular: [],\n  new_subscriber: [],\n  inactive: []\n};\n\nfor (const sub of subscribers) {\n  const tags = (sub.json.Tags || '').toLowerCase();\n  const status = (sub.json.Status || '').toLowerCase();\n  \n  if (status !== 'active') continue;\n  \n  if (tags.includes('vip')) {\n    segments.vip.push(sub.json);\n  } else if (tags.includes('new')) {\n    segments.new_subscriber.push(sub.json);\n  } else if (tags.includes('inactive')) {\n    segments.inactive.push(sub.json);\n  } else {\n    segments.regular.push(sub.json);\n  }\n}\n\nreturn Object.entries(segments).map(([segment, subs]) => ({\n  json: {\n    segment,\n    subscriberCount: subs.length,\n    subscribers: subs,\n    scheduledAt: new Date().toISOString()\n  }\n}));"
+      },
+      "name": "Segment by Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const segment = $input.first().json;\nconst templates = {\n  vip: {\n    subject: '🌟 Exclusive VIP Offer Just for You',\n    body: '<h2>Dear VIP Member,</h2><p>As a valued VIP customer, you get exclusive early access to our latest collection with <strong>20% off</strong>!</p><p>Use code: <strong>VIP20</strong></p>'\n  },\n  regular: {\n    subject: '🛍️ This Week\\'s Best Picks',\n    body: '<h2>Hi there!</h2><p>Check out this week\\'s trending products, curated just for you.</p><p>Shop now and enjoy free shipping on orders over $50!</p>'\n  },\n  new_subscriber: {\n    subject: '👋 Welcome! Here\\'s 15% Off Your First Order',\n    body: '<h2>Welcome to the family!</h2><p>We\\'re excited to have you. Enjoy <strong>15% off</strong> your first purchase.</p><p>Use code: <strong>WELCOME15</strong></p>'\n  },\n  inactive: {\n    subject: '💝 We Miss You! Come Back for a Special Deal',\n    body: '<h2>We\\'ve missed you!</h2><p>It\\'s been a while since your last visit. Here\\'s <strong>25% off</strong> to welcome you back.</p><p>Use code: <strong>MISSYOU25</strong></p>'\n  }\n};\n\nconst template = templates[segment.segment] || templates.regular;\nconst sendHour = { vip: 10, regular: 11, new_subscriber: 14, inactive: 18 };\n\nreturn [{\n  json: {\n    ...segment,\n    emailSubject: template.subject,\n    emailBody: template.body,\n    optimalSendHour: sendHour[segment.segment] || 11\n  }\n}];"
+      },
+      "name": "Select Template and Optimal Time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst results = [];\nconst batchSize = 10;\nconst delayMs = 2000;\n\nfor (let i = 0; i < data.subscribers.length; i++) {\n  const sub = data.subscribers[i];\n  results.push({\n    email: sub.Email,\n    name: sub.Name || 'Valued Customer',\n    segment: data.segment,\n    subject: data.emailSubject,\n    body: data.emailBody,\n    batchNumber: Math.floor(i / batchSize) + 1,\n    sendOrder: i + 1\n  });\n}\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "name": "Rate Limited Batch Sender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.body }}<p style=\"margin-top:30px;font-size:12px;color:#666;\">You're receiving this because you subscribed. <a href=\"#\">Unsubscribe</a></p>",
+        "options": {
+          "senderName": "Your Store Newsletter"
+        }
+      },
+      "name": "Send Campaign Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Campaign Log" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $now.toISO() }}",
+            "Recipient": "={{ $json.email }}",
+            "Segment": "={{ $json.segment }}",
+            "Subject": "={{ $json.subject }}",
+            "Batch": "={{ $json.batchNumber }}",
+            "Status": "Sent"
+          }
+        },
+        "options": {}
+      },
+      "name": "Track Sends in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1570, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email Marketing Campaign Scheduler\n\n**How to use:**\n1. Create a Google Sheets with 'Subscribers' tab: Name, Email, Tags, Status columns\n2. Tags: 'vip', 'new', 'inactive' (or blank for regular)\n3. Status: 'active' for subscribers to email\n4. Create 'Campaign Log' tab for tracking\n5. Set up Gmail OAuth2 credentials\n6. Adjust schedule (default: Monday 9am)\n\n**Segments & Timing:**\n- VIP → 10am, exclusive offers (20% off)\n- Regular → 11am, weekly picks\n- New → 2pm, welcome discount (15% off)\n- Inactive → 6pm, win-back offer (25% off)\n\n**Rate Limiting:** Emails sent in batches of 10 with 2s delay to avoid Gmail limits.\n\n**Important:** Update coupon codes to match your store's actual coupons. Add proper unsubscribe link.",
+        "width": 420,
+        "height": 360
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -100]
+    }
+  ],
+  "connections": {
+    "Weekly Campaign Trigger": {
+      "main": [
+        [{ "node": "Read Subscriber List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Subscriber List": {
+      "main": [
+        [{ "node": "Segment by Tags", "type": "main", "index": 0 }]
+      ]
+    },
+    "Segment by Tags": {
+      "main": [
+        [{ "node": "Select Template and Optimal Time", "type": "main", "index": 0 }]
+      ]
+    },
+    "Select Template and Optimal Time": {
+      "main": [
+        [{ "node": "Rate Limited Batch Sender", "type": "main", "index": 0 }]
+      ]
+    },
+    "Rate Limited Batch Sender": {
+      "main": [
+        [{ "node": "Send Campaign Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Campaign Email": {
+      "main": [
+        [{ "node": "Track Sends in Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

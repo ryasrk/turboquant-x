@@ -1,0 +1,280 @@
+{
+  "name": "Customer Loyalty Points Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "loyalty-purchase",
+        "responseMode": "lastNode",
+        "responseData": "allEntries"
+      },
+      "name": "Purchase Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "customerId", "value": "={{ $json.body.customer_id }}" },
+            { "name": "customerName", "value": "={{ $json.body.customer_name }}" },
+            { "name": "customerEmail", "value": "={{ $json.body.customer_email }}" },
+            { "name": "orderTotal", "value": "={{ $json.body.order_total }}" },
+            { "name": "orderId", "value": "={{ $json.body.order_id }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract Purchase Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Loyalty Members" },
+        "options": {}
+      },
+      "name": "Read Current Points",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const purchase = $('Extract Purchase Data').first().json;\nconst members = $('Read Current Points').all();\n\nconst earnedPoints = Math.floor(parseFloat(purchase.orderTotal));\nconst member = members.find(m => m.json['Customer ID'] === purchase.customerId);\n\nconst previousPoints = member ? parseInt(member.json['Total Points'] || 0) : 0;\nconst previousTier = member ? (member.json.Tier || 'Bronze') : 'Bronze';\nconst newTotalPoints = previousPoints + earnedPoints;\n\nlet newTier = 'Bronze';\nif (newTotalPoints >= 5000) newTier = 'Platinum';\nelse if (newTotalPoints >= 2000) newTier = 'Gold';\nelse if (newTotalPoints >= 500) newTier = 'Silver';\n\nconst tierUpgraded = newTier !== previousTier && \n  ['Silver', 'Gold', 'Platinum'].indexOf(newTier) > ['Silver', 'Gold', 'Platinum'].indexOf(previousTier);\n\nconst tierBenefits = {\n  Bronze: 'Earn 1 point per $1',\n  Silver: '1.5x points + free shipping',\n  Gold: '2x points + free shipping + early access',\n  Platinum: '3x points + free shipping + early access + personal shopper'\n};\n\nreturn [{\n  json: {\n    customerId: purchase.customerId,\n    customerName: purchase.customerName,\n    customerEmail: purchase.customerEmail,\n    orderId: purchase.orderId,\n    orderTotal: purchase.orderTotal,\n    earnedPoints,\n    previousPoints,\n    newTotalPoints,\n    previousTier,\n    newTier,\n    tierUpgraded,\n    tierBenefits: tierBenefits[newTier],\n    isNewMember: !member,\n    updatedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Calculate Points and Tier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Points History" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.updatedAt }}",
+            "Customer ID": "={{ $json.customerId }}",
+            "Customer Name": "={{ $json.customerName }}",
+            "Order ID": "={{ $json.orderId }}",
+            "Order Total": "={{ $json.orderTotal }}",
+            "Points Earned": "={{ $json.earnedPoints }}",
+            "Total Points": "={{ $json.newTotalPoints }}",
+            "Tier": "={{ $json.newTier }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Points Transaction",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [910, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.tierUpgraded }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Tier Upgraded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1130, 400]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customerEmail }}",
+        "subject": "🎉 Congratulations! You've reached {{ $json.newTier }} status!",
+        "emailType": "html",
+        "message": "<div style=\"max-width:600px;margin:0 auto;font-family:Arial,sans-serif;text-align:center;\"><h1 style=\"color:#FFD700;\">🏆 {{ $json.newTier }} Member!</h1><h2>Congratulations, {{ $json.customerName }}!</h2><p>You've been upgraded from <strong>{{ $json.previousTier }}</strong> to <strong>{{ $json.newTier }}</strong>!</p><div style=\"background:#f8f8f8;padding:20px;border-radius:8px;margin:20px 0;\"><p style=\"font-size:24px;margin:0;\">{{ $json.newTotalPoints }} Points</p><p style=\"color:#666;\">Total earned to date</p></div><h3>Your {{ $json.newTier }} Benefits:</h3><p>{{ $json.tierBenefits }}</p><p style=\"margin-top:20px;\"><a href=\"#\" style=\"background:#FFD700;color:#333;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;\">View My Rewards</a></p></div>",
+        "options": {
+          "senderName": "Loyalty Rewards"
+        }
+      },
+      "name": "Send Tier Upgrade Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🏆 *Tier Upgrade!*\n\n👤 {{ $json.customerName }}\n📧 {{ $json.customerEmail }}\n⬆️ {{ $json.previousTier }} → *{{ $json.newTier }}*\n💰 Total Points: {{ $json.newTotalPoints }}\n🎁 Benefits: {{ $json.tierBenefits }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Tier Upgrade Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1570, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 1 * *"
+            }
+          ]
+        }
+      },
+      "name": "Monthly Summary Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Loyalty Members" },
+        "options": {}
+      },
+      "name": "Read All Members",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const members = $input.all();\nconst tierCounts = { Bronze: 0, Silver: 0, Gold: 0, Platinum: 0 };\nlet totalPoints = 0;\n\nfor (const m of members) {\n  const tier = m.json.Tier || 'Bronze';\n  tierCounts[tier] = (tierCounts[tier] || 0) + 1;\n  totalPoints += parseInt(m.json['Total Points'] || 0);\n}\n\nconst summary = `Total Members: ${members.length}\\nBronze: ${tierCounts.Bronze}\\nSilver: ${tierCounts.Silver}\\nGold: ${tierCounts.Gold}\\nPlatinum: ${tierCounts.Platinum}\\nTotal Points Issued: ${totalPoints}`;\n\nreturn members.map(m => ({\n  json: {\n    email: m.json.Email,\n    name: m.json.Name || 'Valued Customer',\n    points: m.json['Total Points'] || 0,\n    tier: m.json.Tier || 'Bronze',\n    monthlySummaryText: summary\n  }\n}));"
+      },
+      "name": "Generate Monthly Summaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 700]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "📊 Your Monthly Loyalty Points Summary",
+        "emailType": "html",
+        "message": "<h2>Hi {{ $json.name }}!</h2><p>Here's your monthly loyalty summary:</p><div style=\"background:#f0f0f0;padding:20px;border-radius:8px;text-align:center;\"><h1>{{ $json.points }} Points</h1><p>Current Tier: <strong>{{ $json.tier }}</strong></p></div><p>Keep shopping to earn more points and unlock better rewards!</p>",
+        "options": {
+          "senderName": "Loyalty Rewards"
+        }
+      },
+      "name": "Send Monthly Points Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 700],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Customer Loyalty Points Tracker\n\n**How to use:**\n1. Set up the Purchase Webhook in your e-commerce platform (fires on each purchase)\n2. Create Google Sheets with tabs:\n   - 'Loyalty Members': Customer ID, Name, Email, Total Points, Tier\n   - 'Points History': auto-populated transaction log\n3. Configure Gmail and Telegram credentials\n\n**Purchase webhook payload:**\n```json\n{\n  \"customer_id\": \"CUST001\",\n  \"customer_name\": \"Jane Doe\",\n  \"customer_email\": \"jane@example.com\",\n  \"order_id\": \"ORD-12345\",\n  \"order_total\": \"85.50\"\n}\n```\n\n**Points System:** 1 point per $1 spent (floor)\n\n**Tier Thresholds:**\n- Bronze: 0-499 points (1x earn)\n- Silver: 500-1999 points (1.5x + free shipping)\n- Gold: 2000-4999 points (2x + early access)\n- Platinum: 5000+ points (3x + personal shopper)\n\n**Monthly Summary:** Sent on 1st of each month at 10am to all members.",
+        "width": 440,
+        "height": 420
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -160]
+    }
+  ],
+  "connections": {
+    "Purchase Webhook": {
+      "main": [
+        [
+          { "node": "Extract Purchase Data", "type": "main", "index": 0 },
+          { "node": "Read Current Points", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Extract Purchase Data": {
+      "main": [
+        [{ "node": "Calculate Points and Tier", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Current Points": {
+      "main": [
+        [{ "node": "Calculate Points and Tier", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Points and Tier": {
+      "main": [
+        [{ "node": "Log Points Transaction", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Points Transaction": {
+      "main": [
+        [{ "node": "Tier Upgraded?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Tier Upgraded?": {
+      "main": [
+        [{ "node": "Send Tier Upgrade Email", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Send Tier Upgrade Email": {
+      "main": [
+        [{ "node": "Telegram Tier Upgrade Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monthly Summary Trigger": {
+      "main": [
+        [{ "node": "Read All Members", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read All Members": {
+      "main": [
+        [{ "node": "Generate Monthly Summaries", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Monthly Summaries": {
+      "main": [
+        [{ "node": "Send Monthly Points Email", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

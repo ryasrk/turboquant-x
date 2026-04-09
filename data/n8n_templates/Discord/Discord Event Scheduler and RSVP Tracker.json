@@ -1,0 +1,386 @@
+{
+  "name": "Discord Event Scheduler and RSVP Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "discord-create-event",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Create Event Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body;\n\nconst eventId = `EVT-${Date.now().toString(36).toUpperCase()}`;\n\nconst event = {\n  event_id: eventId,\n  title: body.title || 'Untitled Event',\n  description: body.description || '',\n  date: body.date,\n  time: body.time || '19:00',\n  duration_hours: body.duration_hours || 2,\n  organizer: body.organizer || 'Admin',\n  max_attendees: body.max_attendees || 0,\n  channel_id: body.channel_id || '',\n  created_at: new Date().toISOString()\n};\n\nconst reminderTime = new Date(`${event.date}T${event.time}:00`);\nreminderTime.setHours(reminderTime.getHours() - 1);\nevent.reminder_at = reminderTime.toISOString();\n\nreturn [{ json: event }];"
+      },
+      "name": "Prepare Event Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ $json.channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: '📅 **NEW EVENT**\\n\\nReact to RSVP!\\n✅ = Attending\\n❓ = Maybe\\n❌ = Can\\'t make it', embeds: [{ title: $json.title, description: $json.description, color: 3447003, fields: [{ name: '📆 Date', value: $json.date, inline: true }, { name: '🕐 Time', value: $json.time, inline: true }, { name: '⏱ Duration', value: $json.duration_hours + ' hours', inline: true }, { name: '👤 Organizer', value: $json.organizer, inline: true }, { name: '👥 Max Attendees', value: $json.max_attendees > 0 ? String($json.max_attendees) : 'Unlimited', inline: true }, { name: '🆔 Event ID', value: $json.event_id, inline: true }], footer: { text: 'React below to RSVP!' }, timestamp: new Date().toISOString() }] }) }}",
+        "options": {}
+      },
+      "name": "Post Event to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://discord.com/api/v10/channels/{{ $json.channel_id }}/messages/{{ $json.id }}/reactions/%E2%9C%85/@me",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Add Check Reaction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1000, 150]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://discord.com/api/v10/channels/{{ $json.channel_id }}/messages/{{ $json.id }}/reactions/%E2%9D%93/@me",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Add Maybe Reaction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://discord.com/api/v10/channels/{{ $json.channel_id }}/messages/{{ $json.id }}/reactions/%E2%9D%8C/@me",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Add Decline Reaction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1000, 450]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Events"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $('Prepare Event Data').item.json.event_id }}",
+            "title": "={{ $('Prepare Event Data').item.json.title }}",
+            "date": "={{ $('Prepare Event Data').item.json.date }}",
+            "time": "={{ $('Prepare Event Data').item.json.time }}",
+            "duration_hours": "={{ $('Prepare Event Data').item.json.duration_hours }}",
+            "organizer": "={{ $('Prepare Event Data').item.json.organizer }}",
+            "max_attendees": "={{ $('Prepare Event Data').item.json.max_attendees }}",
+            "channel_id": "={{ $('Prepare Event Data').item.json.channel_id }}",
+            "message_id": "={{ $json.id }}",
+            "status": "active",
+            "created_at": "={{ $('Prepare Event Data').item.json.created_at }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Save Event to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "*/15 * * * *" }]
+        }
+      },
+      "name": "RSVP Poll Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 650]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Events"
+        },
+        "filters": {
+          "values": [
+            {
+              "lookupValue": "active",
+              "lookupColumn": "status"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Read Active Events",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [500, 650],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://discord.com/api/v10/channels/{{ $json.channel_id }}/messages/{{ $json.message_id }}/reactions/%E2%9C%85",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Get RSVP Reactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [750, 650]
+    },
+    {
+      "parameters": {
+        "functionCode": "const event = $('Read Active Events').item.json;\nconst attendees = $input.first().json;\n\nconst attendeeList = Array.isArray(attendees) \n  ? attendees.filter(u => !u.bot).map(u => u.username)\n  : [];\n\nconst eventDate = new Date(`${event.date}T${event.time}:00`);\nconst now = new Date();\nconst hoursUntil = (eventDate - now) / (1000 * 60 * 60);\nconst needsReminder = hoursUntil > 0 && hoursUntil <= 1;\n\nreturn [{\n  json: {\n    event_id: event.event_id,\n    title: event.title,\n    channel_id: event.channel_id,\n    message_id: event.message_id,\n    attendee_count: attendeeList.length,\n    attendees: attendeeList.join(', '),\n    needs_reminder: needsReminder,\n    hours_until: hoursUntil.toFixed(1)\n  }\n}];"
+      },
+      "name": "Track RSVP Responses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1000, 650]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "RSVP_Tracking"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $json.event_id }}",
+            "checked_at": "={{ $now.toISO() }}",
+            "attendee_count": "={{ $json.attendee_count }}",
+            "attendees": "={{ $json.attendees }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Update RSVP in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1250, 650],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needs_reminder }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Send Reminder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1500, 650]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ $json.channel_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: '⏰ **EVENT REMINDER**\\n\\n📅 **' + $json.title + '** starts in about 1 hour!\\n\\n👥 ' + $json.attendee_count + ' people confirmed so far.\\n\\nSee you there! 🎉' }) }}",
+        "options": {}
+      },
+      "name": "Send Event Reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1750, 550]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', event_id: $('Prepare Event Data').item.json.event_id, message: 'Event created and posted to Discord' }) }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "content": "## Discord Event Scheduler and RSVP Tracker\n\nCreate events via webhook, post to Discord with reaction-based RSVP, track responses.\n\n**Event Creation Flow:**\n1. POST webhook with event details (title, date, time, etc.)\n2. Post formatted event embed to Discord channel\n3. Add reaction buttons: ✅ ❓ ❌\n4. Save event to Google Sheets\n\n**RSVP Tracking Flow (every 15 min):**\n1. Read active events from Sheets\n2. Fetch reaction counts from Discord\n3. Update RSVP tracking sheet\n4. Send reminder 1h before event\n\n**Webhook payload:**\n```json\n{ \"title\": \"Game Night\",\n  \"description\": \"Weekly gaming session\",\n  \"date\": \"2025-01-15\",\n  \"time\": \"19:00\",\n  \"channel_id\": \"123456789\",\n  \"organizer\": \"Admin\" }\n```",
+        "width": 460,
+        "height": 420
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Create Event Webhook": {
+      "main": [
+        [{ "node": "Prepare Event Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Event Data": {
+      "main": [
+        [{ "node": "Post Event to Discord", "type": "main", "index": 0 }]
+      ]
+    },
+    "Post Event to Discord": {
+      "main": [
+        [
+          { "node": "Add Check Reaction", "type": "main", "index": 0 },
+          { "node": "Add Maybe Reaction", "type": "main", "index": 0 },
+          { "node": "Add Decline Reaction", "type": "main", "index": 0 },
+          { "node": "Save Event to Sheets", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Save Event to Sheets": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "RSVP Poll Schedule": {
+      "main": [
+        [{ "node": "Read Active Events", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Active Events": {
+      "main": [
+        [{ "node": "Get RSVP Reactions", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get RSVP Reactions": {
+      "main": [
+        [{ "node": "Track RSVP Responses", "type": "main", "index": 0 }]
+      ]
+    },
+    "Track RSVP Responses": {
+      "main": [
+        [{ "node": "Update RSVP in Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update RSVP in Sheets": {
+      "main": [
+        [{ "node": "Send Reminder?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Reminder?": {
+      "main": [
+        [{ "node": "Send Event Reminder", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

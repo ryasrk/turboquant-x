@@ -1,0 +1,138 @@
+{
+  "name": "Invoice PDF Generator with Google Sheets and Email",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1}]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Invoices"},
+        "options": {
+          "range": "A:J"
+        }
+      },
+      "name": "Read Invoice Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": ""},
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "pending",
+              "operator": {"type": "string", "operation": "equals"}
+            }
+          ]
+        }
+      },
+      "name": "Filter Pending Invoices",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "invoice_html",
+              "value": "=<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;margin:40px}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{border:1px solid #ddd;padding:10px;text-align:left}th{background:#2563eb;color:#fff}.header{text-align:center;margin-bottom:30px}.total{font-size:18px;font-weight:bold;text-align:right;margin:20px 0}.footer{margin-top:40px;font-size:12px;color:#666;border-top:1px solid #ddd;padding-top:10px}</style></head><body><div class='header'><h1>INVOICE</h1><p>No: {{ $json.invoice_number }}</p><p>Tanggal: {{ $json.date }}</p></div><div><strong>Kepada:</strong><br>{{ $json.customer_name }}<br>{{ $json.customer_address }}</div><table><thead><tr><th>Deskripsi</th><th>Qty</th><th>Harga Satuan</th><th>Total</th></tr></thead><tbody><tr><td>{{ $json.item_description }}</td><td>{{ $json.quantity }}</td><td>Rp {{ $json.unit_price }}</td><td>Rp {{ $json.total_amount }}</td></tr></tbody></table><div class='total'>Total: Rp {{ $json.total_amount }}</div><div><strong>Pembayaran:</strong><br>Bank {{ $json.bank_name || 'BCA' }}<br>No. Rekening: {{ $json.bank_account || '123-456-789' }}<br>a.n. {{ $json.company_name || 'PT Company' }}</div><div class='footer'><p>Terima kasih atas kepercayaan Anda.</p></div></body></html>",
+              "type": "string"
+            },
+            {
+              "name": "filename",
+              "value": "=Invoice_{{ $json.invoice_number }}_{{ $json.customer_name }}.pdf",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "name": "Generate Invoice HTML",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "options": {
+          "fileName": "={{ $json.filename }}"
+        }
+      },
+      "name": "Convert to PDF",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customer_email }}",
+        "subject": "=Invoice {{ $json.invoice_number }} - {{ $json.company_name }}",
+        "message": "=Yth. {{ $json.customer_name }},\n\nTerlampir invoice {{ $json.invoice_number }} dengan total Rp {{ $json.total_amount }}.\n\nMohon untuk melakukan pembayaran sebelum tanggal jatuh tempo.\n\nTerima kasih.",
+        "options": {
+          "attachments": "data"
+        }
+      },
+      "name": "Send Invoice Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 300],
+      "credentials": {
+        "gmailOAuth2": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Invoices"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {"status": "sent", "sent_date": "={{ $now.format('yyyy-MM-dd') }}"}
+        }
+      },
+      "name": "Update Status to Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1570, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Invoice PDF Generator\n\n### Flow:\n1. **Schedule** — Runs daily to check for pending invoices\n2. **Read** — Pulls invoice data from Google Sheets\n3. **Filter** — Only processes invoices with status 'pending'\n4. **Generate** — Creates HTML invoice with Indonesian format (Rupiah)\n5. **Convert** — HTML to PDF\n6. **Email** — Sends invoice to customer via Gmail\n7. **Update** — Marks invoice as 'sent' in the spreadsheet\n\n### Google Sheet Columns:\n`invoice_number | date | customer_name | customer_address | customer_email | item_description | quantity | unit_price | total_amount | status`"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 100]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {"main": [[{"node": "Read Invoice Data", "type": "main", "index": 0}]]},
+    "Read Invoice Data": {"main": [[{"node": "Filter Pending Invoices", "type": "main", "index": 0}]]},
+    "Filter Pending Invoices": {"main": [[{"node": "Generate Invoice HTML", "type": "main", "index": 0}]]},
+    "Generate Invoice HTML": {"main": [[{"node": "Convert to PDF", "type": "main", "index": 0}]]},
+    "Convert to PDF": {"main": [[{"node": "Send Invoice Email", "type": "main", "index": 0}]]},
+    "Send Invoice Email": {"main": [[{"node": "Update Status to Sent", "type": "main", "index": 0}]]}
+  }
+}

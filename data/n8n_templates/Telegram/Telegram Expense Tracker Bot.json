@@ -1,0 +1,176 @@
+{
+  "name": "Telegram Expense Tracker Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = item.json.message?.text || '';\n  const match = text.match(/^(.+?)\\s+(\\d+)$/);\n  if (match) {\n    results.push({\n      json: {\n        category: match[1].trim(),\n        amount: parseInt(match[2]),\n        userId: item.json.message?.from?.id,\n        username: item.json.message?.from?.username || 'unknown',\n        chatId: item.json.message?.chat?.id,\n        timestamp: new Date().toISOString(),\n        date: new Date().toISOString().split('T')[0]\n      }\n    });\n  } else {\n    results.push({\n      json: {\n        error: true,\n        chatId: item.json.message?.chat?.id,\n        text: text\n      }\n    });\n  }\n}\nreturn results;"
+      },
+      "name": "Parse Expense",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.error}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Check Valid Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "❌ Format salah. Gunakan: <kategori> <jumlah>\nContoh: makan 50000",
+        "additionalFields": {}
+      },
+      "name": "Send Error Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 450],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Expenses" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 150],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Expenses" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get All Expenses",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 150],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst expenses = items.map(i => i.json);\nconst today = new Date().toISOString().split('T')[0];\nconst todayExpenses = expenses.filter(e => e.date === today);\nconst todayTotal = todayExpenses.reduce((sum, e) => sum + parseInt(e.amount || 0), 0);\nconst monthTotal = expenses.reduce((sum, e) => sum + parseInt(e.amount || 0), 0);\nreturn [{\n  json: {\n    todayTotal,\n    monthTotal,\n    todayCount: todayExpenses.length,\n    totalCount: expenses.length\n  }\n}];"
+      },
+      "name": "Calculate Totals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 150]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Expense'].json.chatId}}",
+        "text": "=✅ Tercatat!\n📝 {{$node['Parse Expense'].json.category}}: Rp {{$node['Parse Expense'].json.amount}}\n\n📊 Total hari ini: Rp {{$json.todayTotal}} ({{$json.todayCount}} transaksi)\n💰 Total bulan ini: Rp {{$json.monthTotal}} ({{$json.totalCount}} transaksi)",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Send Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1750, 150],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Expense Tracker Bot\n\nUser sends expense like \"makan 50000\" → parse category + amount → log to Google Sheets → reply with running total.\n\n**Setup:**\n1. Set Telegram Bot API credentials\n2. Create Google Sheet with columns: category, amount, userId, username, chatId, timestamp, date\n3. Set Sheet document ID in both Google Sheets nodes",
+        "width": 400,
+        "height": 250
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Expense", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Expense": {
+      "main": [
+        [{ "node": "Check Valid Input", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Valid Input": {
+      "main": [
+        [{ "node": "Send Error Reply", "type": "main", "index": 0 }],
+        [{ "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log to Sheets": {
+      "main": [
+        [{ "node": "Get All Expenses", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get All Expenses": {
+      "main": [
+        [{ "node": "Calculate Totals", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Totals": {
+      "main": [
+        [{ "node": "Send Confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

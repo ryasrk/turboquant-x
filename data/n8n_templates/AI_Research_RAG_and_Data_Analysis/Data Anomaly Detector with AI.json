@@ -1,0 +1,122 @@
+{
+  "name": "Data Anomaly Detector with AI",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 6 }] }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "range": "A:Z",
+        "options": {}
+      },
+      "name": "Read Metrics from Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Extract numeric values for each metric column\nconst metrics = {};\nconst metricKeys = Object.keys(items[0].json).filter(k => !isNaN(parseFloat(items[0].json[k])));\n\nfor (const key of metricKeys) {\n  const values = items.map(item => parseFloat(item.json[key])).filter(v => !isNaN(v));\n  if (values.length < 3) continue;\n\n  const mean = values.reduce((a, b) => a + b, 0) / values.length;\n  const stdDev = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length);\n  const latest = values[values.length - 1];\n  const zScore = stdDev > 0 ? (latest - mean) / stdDev : 0;\n\n  metrics[key] = { mean: mean.toFixed(2), stdDev: stdDev.toFixed(2), latest, zScore: zScore.toFixed(2), isAnomaly: Math.abs(zScore) > 2.5 };\n}\n\nconst anomalies = Object.entries(metrics).filter(([_, v]) => v.isAnomaly).map(([k, v]) => ({ metric: k, ...v }));\n\nreturn [{\n  json: {\n    totalMetrics: metricKeys.length,\n    anomalyCount: anomalies.length,\n    anomalies,\n    allMetrics: metrics,\n    hasAnomalies: anomalies.length > 0,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Statistical Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            { "value1": "={{ $json.hasAnomalies }}", "value2": true }
+          ]
+        }
+      },
+      "name": "Has Anomalies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze these data anomalies and provide likely explanations:\n\n{{ JSON.stringify($json.anomalies, null, 2) }}\n\nFor each anomaly, provide:\n1. Possible cause\n2. Severity (low/medium/high/critical)\n3. Recommended action"
+            }
+          ]
+        },
+        "options": { "temperature": 0.3 }
+      },
+      "name": "OpenAI Explain Anomalies",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1130, 200],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 *Anomaly Alert*\n\n{{ $json.message.content }}\n\nDetected: {{ $('Statistical Analysis').item.json.anomalyCount }} anomalies at {{ $('Statistical Analysis').item.json.timestamp }}"
+      },
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1350, 200],
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Data Anomaly Detector with AI\n\nRuns on a schedule to read metrics from Google Sheets, performs statistical analysis (z-score), and if anomalies are detected, uses OpenAI to explain them and sends a Telegram alert.\n\n**Setup:**\n1. Configure Google Sheets with numeric metric columns\n2. Add OpenAI API key and Telegram bot credentials\n3. Adjust schedule interval and z-score threshold (default: 2.5)"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{ "node": "Read Metrics from Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Metrics from Sheets": {
+      "main": [
+        [{ "node": "Statistical Analysis", "type": "main", "index": 0 }]
+      ]
+    },
+    "Statistical Analysis": {
+      "main": [
+        [{ "node": "Has Anomalies?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Anomalies?": {
+      "main": [
+        [{ "node": "OpenAI Explain Anomalies", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "OpenAI Explain Anomalies": {
+      "main": [
+        [{ "node": "Telegram Alert", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

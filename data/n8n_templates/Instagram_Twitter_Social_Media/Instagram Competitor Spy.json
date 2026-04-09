@@ -1,0 +1,182 @@
+{
+  "name": "Instagram Competitor Spy",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 7}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Competitor Profile 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 180],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.competitor1_ig_id }}",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "fields", "value": "id,username,media_count,followers_count"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Get Competitor Profile 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 420],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.competitor2_ig_id }}",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "fields", "value": "id,username,media_count,followers_count"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Merge Profiles",
+      "type": "n8n-nodes-base.merge",
+      "position": [700, 300],
+      "parameters": {
+        "mode": "append"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Extract Metrics",
+      "type": "n8n-nodes-base.code",
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst date = new Date().toISOString().split('T')[0];\n\nreturn items.map(item => {\n  const profile = item.json;\n  return {\n    json: {\n      date,\n      username: profile.username || 'unknown',\n      followers_count: profile.followers_count || 0,\n      media_count: profile.media_count || 0,\n      avg_engagement_estimate: profile.followers_count > 0 ? (profile.media_count / Math.max(profile.followers_count, 1) * 100).toFixed(2) : '0'\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save to History",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1100, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Competitor History",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Check If Sunday",
+      "type": "n8n-nodes-base.if",
+      "position": [1300, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ new Date().getDay() }}",
+              "value2": "0",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Weekly Comparison Email",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1500, 250],
+      "parameters": {
+        "sendTo": "marketing@example.com",
+        "subject": "Weekly Instagram Competitor Report",
+        "message": "Your weekly competitor analysis report is ready.\n\nCheck the Google Sheet for follower trends, post frequency, and engagement comparisons.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 80],
+      "parameters": {
+        "content": "## Instagram Competitor Spy\nRuns daily. Fetches competitor Instagram profiles in parallel via the Graph API, extracts follower count, post count, and engagement estimates, stores history in Google Sheets, and sends a weekly comparison email."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [
+          {"node": "Get Competitor Profile 1", "type": "main", "index": 0},
+          {"node": "Get Competitor Profile 2", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Get Competitor Profile 1": {
+      "main": [[{"node": "Merge Profiles", "type": "main", "index": 0}]]
+    },
+    "Get Competitor Profile 2": {
+      "main": [[{"node": "Merge Profiles", "type": "main", "index": 0}]]
+    },
+    "Merge Profiles": {
+      "main": [[{"node": "Extract Metrics", "type": "main", "index": 0}]]
+    },
+    "Extract Metrics": {
+      "main": [[{"node": "Save to History", "type": "main", "index": 0}]]
+    },
+    "Save to History": {
+      "main": [[{"node": "Check If Sunday", "type": "main", "index": 0}]]
+    },
+    "Check If Sunday": {
+      "main": [
+        [{"node": "Weekly Comparison Email", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  }
+}

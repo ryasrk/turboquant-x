@@ -1,0 +1,144 @@
+{
+  "name": "AI Invoice Data Extractor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "extract-invoice",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Invoice Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an expert invoice data extraction AI. Extract ALL structured data from this invoice.\n\nReturn ONLY valid JSON:\n{\n  \"vendor_name\": \"\",\n  \"vendor_address\": \"\",\n  \"invoice_number\": \"\",\n  \"invoice_date\": \"\",\n  \"due_date\": \"\",\n  \"currency\": \"\",\n  \"subtotal\": 0,\n  \"tax_amount\": 0,\n  \"total_amount\": 0,\n  \"payment_terms\": \"\",\n  \"line_items\": [\n    {\"description\": \"\", \"quantity\": 0, \"unit_price\": 0, \"amount\": 0}\n  ],\n  \"notes\": \"\",\n  \"confidence\": \"high/medium/low\"\n}\n\nInvoice content:\n{{ $json.body.invoice_text }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 2000
+        }
+      },
+      "name": "OpenAI - Extract Invoice Data",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { vendor_name: 'Parse Error', total_amount: 0, confidence: 'low' };\n}\nconst lineItemsSummary = (parsed.line_items || []).map(li => `${li.description}: ${li.quantity}x ${li.unit_price} = ${li.amount}`).join(' | ');\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    vendorName: parsed.vendor_name || '',\n    vendorAddress: parsed.vendor_address || '',\n    invoiceNumber: parsed.invoice_number || '',\n    invoiceDate: parsed.invoice_date || '',\n    dueDate: parsed.due_date || '',\n    currency: parsed.currency || 'USD',\n    subtotal: parsed.subtotal || 0,\n    taxAmount: parsed.tax_amount || 0,\n    totalAmount: parsed.total_amount || 0,\n    paymentTerms: parsed.payment_terms || '',\n    lineItems: lineItemsSummary,\n    confidence: parsed.confidence || 'unknown',\n    notes: parsed.notes || ''\n  }\n}];"
+      },
+      "name": "Code - Parse Invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Processed Date": "={{ $json.date }}",
+            "Vendor": "={{ $json.vendorName }}",
+            "Invoice #": "={{ $json.invoiceNumber }}",
+            "Invoice Date": "={{ $json.invoiceDate }}",
+            "Due Date": "={{ $json.dueDate }}",
+            "Currency": "={{ $json.currency }}",
+            "Subtotal": "={{ $json.subtotal }}",
+            "Tax": "={{ $json.taxAmount }}",
+            "Total": "={{ $json.totalAmount }}",
+            "Line Items": "={{ $json.lineItems }}",
+            "Confidence": "={{ $json.confidence }}"
+          },
+          "schema": [
+            { "id": "Processed Date", "type": "string", "display": true },
+            { "id": "Vendor", "type": "string", "display": true },
+            { "id": "Invoice #", "type": "string", "display": true },
+            { "id": "Invoice Date", "type": "string", "display": true },
+            { "id": "Due Date", "type": "string", "display": true },
+            { "id": "Currency", "type": "string", "display": true },
+            { "id": "Subtotal", "type": "string", "display": true },
+            { "id": "Tax", "type": "string", "display": true },
+            { "id": "Total", "type": "string", "display": true },
+            { "id": "Line Items", "type": "string", "display": true },
+            { "id": "Confidence", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Accounting",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.notify_email || 'accounting@example.com' }}",
+        "subject": "=Invoice Extracted: {{ $json.vendorName }} - {{ $json.currency }} {{ $json.totalAmount }}",
+        "message": "=<h2>Invoice Data Extracted</h2>\n<p><strong>Vendor:</strong> {{ $json.vendorName }}</p>\n<p><strong>Invoice #:</strong> {{ $json.invoiceNumber }}</p>\n<p><strong>Date:</strong> {{ $json.invoiceDate }} | <strong>Due:</strong> {{ $json.dueDate }}</p>\n<p><strong>Total:</strong> {{ $json.currency }} {{ $json.totalAmount }}</p>\n<p><strong>Subtotal:</strong> {{ $json.subtotal }} | <strong>Tax:</strong> {{ $json.taxAmount }}</p>\n<p><strong>Terms:</strong> {{ $json.paymentTerms }}</p>\n<p><strong>Line Items:</strong> {{ $json.lineItems }}</p>\n<p><strong>Confidence:</strong> {{ $json.confidence }}</p>\n<p><em>Data saved to accounting spreadsheet.</em></p>",
+        "options": {}
+      },
+      "name": "Gmail - Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 800,
+        "height": 200,
+        "content": "## AI Invoice Data Extractor\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set spreadsheet ID for accounting ledger\n3. POST to webhook: `{\"invoice_text\": \"full invoice text or OCR output...\", \"notify_email\": \"accounting@company.com\"}`\n\nExtracts vendor, amounts, dates, line items from invoice text using GPT-4o, logs to Sheets, and sends confirmation email."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Invoice Input": {
+      "main": [[{ "node": "OpenAI - Extract Invoice Data", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Extract Invoice Data": {
+      "main": [[{ "node": "Code - Parse Invoice", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Invoice": {
+      "main": [[
+        { "node": "Google Sheets - Accounting", "type": "main", "index": 0 },
+        { "node": "Gmail - Confirmation", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

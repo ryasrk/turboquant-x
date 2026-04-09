@@ -1,0 +1,149 @@
+{
+  "name": "Document Approval Workflow with PDF",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "approval-request",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-request",
+      "name": "Webhook Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.approverEmail }}",
+        "subject": "=Document Approval Required: {{ $json.body.documentName }}",
+        "message": "=A document requires your review and approval.\n\nDocument: {{ $json.body.documentName }}\nSubmitted by: {{ $json.body.submittedBy }}\nDate: {{ $json.body.submitDate || new Date().toISOString() }}\n\nPlease review the attached PDF and respond:\n- Approve: POST to {{ $json.headers.host }}/webhook/approval-decision with { decision: 'approved', documentId: '{{ $json.body.documentId }}' }\n- Reject: POST with { decision: 'rejected', reason: '...' }",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{}]
+          }
+        }
+      },
+      "id": "gmail-review",
+      "name": "Gmail Send PDF for Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [460, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "approval-decision",
+        "options": {}
+      },
+      "id": "webhook-decision",
+      "name": "Webhook Approve/Reject",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const decision = item.json.body.decision;\n  const documentId = item.json.body.documentId;\n  const approver = item.json.body.approverName || 'Reviewer';\n  const reason = item.json.body.reason || '';\n  const stampText = decision === 'approved'\n    ? `APPROVED by ${approver} on ${new Date().toISOString()}`\n    : `REJECTED by ${approver} on ${new Date().toISOString()} - Reason: ${reason}`;\n  results.push({\n    json: {\n      documentId,\n      decision,\n      approver,\n      reason,\n      stampText,\n      timestamp: new Date().toISOString(),\n      status: decision === 'approved' ? 'FINAL' : 'RETURNED'\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "stamp-approval",
+      "name": "Code Stamp Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 520]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "={{ $json.documentId }}_{{ $json.status }}",
+        "options": {}
+      },
+      "id": "drive-save",
+      "name": "Drive Save",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [680, 520],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Sheets Approval Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Document Approval Workflow with PDF\n\nTwo-phase workflow:\n1. Request phase: Webhook receives doc → Gmail sends PDF to approver\n2. Decision phase: Approver hits webhook → Code stamps decision → Drive save → Sheets log\n\n**Setup:**\n1. Set Gmail credentials\n2. Set Google Drive folder for approved/rejected docs\n3. Set Google Sheets for audit log\n4. Phase 1: POST { documentName, approverEmail, submittedBy, documentId } + binary\n5. Phase 2: POST { decision, documentId, approverName, reason }"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Request": {
+      "main": [
+        [{ "node": "Gmail Send PDF for Review", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook Approve/Reject": {
+      "main": [
+        [{ "node": "Code Stamp Approval", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Stamp Approval": {
+      "main": [
+        [{ "node": "Drive Save", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Save": {
+      "main": [
+        [{ "node": "Sheets Approval Log", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

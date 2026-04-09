@@ -1,0 +1,199 @@
+{
+  "name": "Discord Server Welcome and Role Assignment Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "guildMemberAdd",
+        "options": {}
+      },
+      "name": "Discord Member Join Trigger",
+      "type": "n8n-nodes-base.discordTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "discordBotApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/users/{{ $json.user.id }}/channels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipient_id: $json.user.id }) }}",
+        "options": {}
+      },
+      "name": "Create DM Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ $json.id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: '👋 Selamat datang di server kami, ' + $('Discord Member Join Trigger').item.json.user.username + '!\\n\\n📜 Silakan baca #rules terlebih dahulu\\n💬 Perkenalkan diri Anda di #introductions\\n❓ Ada pertanyaan? Tanya di #general\\n\\nSemoga betah! 🎉', embeds: [{ title: 'Quick Links', description: '• [Rules](#rules)\\n• [FAQ](#faq)\\n• [Introductions](#introductions)', color: 5814783 }] }) }}",
+        "options": {}
+      },
+      "name": "Send Welcome DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [750, 200]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://discord.com/api/v10/guilds/{{ $json.guild_id }}/members/{{ $json.user.id }}/roles/{{ $env.DEFAULT_ROLE_ID }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Assign Default Role",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [500, 450]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ $env.WELCOME_CHANNEL_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: '🎉 Welcome <@' + $json.user.id + '> to our server!\\n\\nPlease introduce yourself and tell us what brings you here! 👋', embeds: [{ title: 'New Member', description: $json.user.username + ' just joined!', color: 3066993, thumbnail: { url: 'https://cdn.discordapp.com/avatars/' + $json.user.id + '/' + $json.user.avatar + '.png' }, timestamp: new Date().toISOString() }] }) }}",
+        "options": {}
+      },
+      "name": "Post Welcome in Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [750, 450]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Member_Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "joined_at": "={{ $now.toISO() }}",
+            "user_id": "={{ $json.user.id }}",
+            "username": "={{ $json.user.username }}",
+            "guild_id": "={{ $json.guild_id }}",
+            "role_assigned": "default"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Log New Member",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Discord Server Welcome and Role Assignment Bot\n\nAutomatically welcomes new members and assigns default roles.\n\n**Flow:**\n1. Triggered on new member join (guildMemberAdd)\n2. Send personalized welcome DM with server links\n3. Assign default role via Discord API\n4. Post welcome message in #welcome channel\n5. Log new member to Google Sheets\n\n**Setup:**\n1. Create Discord bot with GUILD_MEMBERS intent\n2. Set env vars: DISCORD_BOT_TOKEN, DEFAULT_ROLE_ID, WELCOME_CHANNEL_ID\n3. Bot needs 'Manage Roles' and 'Send Messages' permissions\n4. Create Google Sheets with Member_Log sheet",
+        "width": 440,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Discord Member Join Trigger": {
+      "main": [
+        [
+          { "node": "Create DM Channel", "type": "main", "index": 0 },
+          { "node": "Assign Default Role", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Create DM Channel": {
+      "main": [
+        [{ "node": "Send Welcome DM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Welcome DM": {
+      "main": [
+        [{ "node": "Log New Member", "type": "main", "index": 0 }]
+      ]
+    },
+    "Assign Default Role": {
+      "main": [
+        [{ "node": "Post Welcome in Channel", "type": "main", "index": 0 }]
+      ]
+    },
+    "Post Welcome in Channel": {
+      "main": [
+        [{ "node": "Log New Member", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

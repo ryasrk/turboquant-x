@@ -1,0 +1,153 @@
+{
+  "name": "Automated Invoice Numbering System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-invoice",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {
+          "range": "A:B"
+        }
+      },
+      "id": "sheets-read",
+      "name": "Read Sheets Last Number",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(i => i.json);\nconst lastRow = rows[rows.length - 1] || {};\nconst lastNumber = parseInt(lastRow.invoiceNumber || lastRow.InvoiceNumber || '0', 10);\nconst newNumber = lastNumber + 1;\nconst prefix = $('Webhook Trigger').item.json.body.prefix || 'INV';\nconst year = new Date().getFullYear();\nconst invoiceId = `${prefix}-${year}-${String(newNumber).padStart(5, '0')}`;\nreturn [{\n  json: {\n    invoiceId,\n    invoiceNumber: newNumber,\n    prefix,\n    year,\n    previousNumber: lastNumber,\n    generatedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "increment",
+      "name": "Code Increment Number",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "InvoiceNumber", "value": "={{ $json.invoiceNumber }}" },
+              { "column": "InvoiceId", "value": "={{ $json.invoiceId }}" },
+              { "column": "GeneratedAt", "value": "={{ $json.generatedAt }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-update",
+      "name": "Sheets Update",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.pdfgeneratorapi.com/v3/documents/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template: 'invoice', data: { invoiceId: $json.invoiceId, ...$('Webhook Trigger').item.json.body }, output: 'pdf' }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "generate-invoice-pdf",
+      "name": "HTTP Generate Numbered Invoice PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Invoice Numbering System\n\nWebhook trigger → reads last invoice number from Sheets →\nCode increments and formats (e.g., INV-2025-00042) →\nSheets updated → PDF generated with number.\n\n**Format:** PREFIX-YEAR-NNNNN (e.g., INV-2025-00001)\n\n**Setup:**\n1. Create numbering sheet with columns: InvoiceNumber, InvoiceId, GeneratedAt\n2. Seed first row with starting number\n3. Configure PDF generation API\n4. POST { prefix: 'INV', customerName, items, ... } to webhook"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Read Sheets Last Number", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sheets Last Number": {
+      "main": [
+        [{ "node": "Code Increment Number", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Increment Number": {
+      "main": [
+        [{ "node": "Sheets Update", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Update": {
+      "main": [
+        [{ "node": "HTTP Generate Numbered Invoice PDF", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

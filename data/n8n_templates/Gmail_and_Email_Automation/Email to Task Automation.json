@@ -1,0 +1,130 @@
+{
+  "name": "Email to Task Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const subject = item.json.subject || '';\n  const body = item.json.snippet || item.json.textPlain || '';\n  const from = item.json.from || '';\n  const date = item.json.date || new Date().toISOString();\n  \n  // Parse task priority from subject\n  let priority = 'normal';\n  if (subject.toLowerCase().includes('urgent') || subject.toLowerCase().includes('asap')) {\n    priority = 'high';\n  } else if (subject.toLowerCase().includes('fyi') || subject.toLowerCase().includes('low')) {\n    priority = 'low';\n  }\n  \n  // Extract action items from body\n  const actionMatch = body.match(/action:?\\s*(.+)/i);\n  const action = actionMatch ? actionMatch[1].trim() : subject;\n  \n  results.push({\n    json: {\n      taskTitle: action,\n      description: body.substring(0, 500),\n      priority: priority,\n      source: from,\n      emailSubject: subject,\n      createdAt: date,\n      status: 'open'\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Email to Task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Create Task in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Gmail Trigger').item.json.from }}",
+        "subject": "Task Created: {{ $('Parse Email to Task').item.json.taskTitle }}",
+        "message": "Hi,\n\nYour email has been converted to a task:\n\n- Title: {{ $json.taskTitle }}\n- Priority: {{ $json.priority }}\n- Status: Open\n\nWe'll get back to you soon.\n\nBest regards",
+        "options": {}
+      },
+      "name": "Reply Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email to Task Automation\n\nConverts incoming emails into tasks tracked in Google Sheets.\n\n**Flow:**\n1. Gmail trigger on new email\n2. Parse subject/body for task details and priority\n3. Create task row in Google Sheets\n4. Reply with confirmation\n\n**Setup:**\n- Connect Gmail OAuth2 credentials\n- Connect Google Sheets credentials\n- Set your task tracking spreadsheet ID and sheet name",
+        "width": 380,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Email to Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Email to Task": {
+      "main": [
+        [
+          {
+            "node": "Create Task in Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Task in Sheets": {
+      "main": [
+        [
+          {
+            "node": "Reply Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

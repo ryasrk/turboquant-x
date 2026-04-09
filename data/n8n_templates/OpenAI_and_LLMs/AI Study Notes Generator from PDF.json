@@ -1,0 +1,94 @@
+{
+  "name": "AI Study Notes Generator from PDF",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-study-notes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Text Content Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an expert educator. Create comprehensive study materials from this content.\n\nGenerate:\n1. **Structured Notes** — Organized by topic with headers, key concepts, and explanations\n2. **Flashcards** — 10-15 Q&A pairs for memorization\n3. **Quiz Questions** — 5 multiple choice + 3 short answer questions\n\nReturn JSON:\n{\n  \"title\": \"topic title\",\n  \"structured_notes\": [\n    {\"topic\": \"...\", \"key_concepts\": [\"...\"], \"explanation\": \"...\", \"examples\": [\"...\"]}\n  ],\n  \"flashcards\": [\n    {\"front\": \"question\", \"back\": \"answer\"}\n  ],\n  \"quiz_multiple_choice\": [\n    {\"question\": \"...\", \"options\": [\"A...\", \"B...\", \"C...\", \"D...\"], \"correct\": \"A\", \"explanation\": \"...\"}\n  ],\n  \"quiz_short_answer\": [\n    {\"question\": \"...\", \"model_answer\": \"...\"}\n  ],\n  \"summary\": \"3-sentence overview of the material\"\n}\n\nContent:\n{{ $json.body.text_content }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5,
+          "maxTokens": 4000
+        }
+      },
+      "name": "OpenAI - Generate Study Materials",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { title: 'Study Notes', structured_notes: [], flashcards: [], quiz_multiple_choice: [], quiz_short_answer: [], summary: aiResponse };\n}\n\n// Format notes\nconst notesHtml = (parsed.structured_notes || []).map(n => {\n  const concepts = (n.key_concepts || []).map(c => `<li>${c}</li>`).join('');\n  const examples = (n.examples || []).map(e => `<li><em>${e}</em></li>`).join('');\n  return `<h3>${n.topic}</h3><p>${n.explanation}</p><strong>Key Concepts:</strong><ul>${concepts}</ul>${examples ? '<strong>Examples:</strong><ul>' + examples + '</ul>' : ''}`;\n}).join('\\n');\n\n// Format flashcards\nconst flashcardsHtml = (parsed.flashcards || []).map((f, i) => `<p><strong>Q${i+1}:</strong> ${f.front}<br><strong>A:</strong> ${f.back}</p>`).join('\\n');\n\n// Format quiz\nconst mcHtml = (parsed.quiz_multiple_choice || []).map((q, i) => {\n  const opts = (q.options || []).map(o => `<li>${o}</li>`).join('');\n  return `<p><strong>${i+1}.</strong> ${q.question}</p><ul>${opts}</ul><p><em>Answer: ${q.correct} — ${q.explanation}</em></p>`;\n}).join('\\n');\n\nconst saHtml = (parsed.quiz_short_answer || []).map((q, i) => `<p><strong>${i+1}.</strong> ${q.question}<br><em>Model answer: ${q.model_answer}</em></p>`).join('\\n');\n\nreturn [{\n  json: {\n    title: parsed.title || 'Study Notes',\n    summary: parsed.summary || '',\n    notesHtml,\n    flashcardsHtml,\n    mcQuizHtml: mcHtml,\n    saQuizHtml: saHtml,\n    flashcardCount: (parsed.flashcards || []).length,\n    quizCount: (parsed.quiz_multiple_choice || []).length + (parsed.quiz_short_answer || []).length\n  }\n}];"
+      },
+      "name": "Code - Format Materials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.email || 'student@example.com' }}",
+        "subject": "=📚 Study Notes: {{ $json.title }}",
+        "message": "=<h1>{{ $json.title }}</h1>\n<p><em>{{ $json.summary }}</em></p>\n\n<h2>📝 Structured Notes</h2>\n{{ $json.notesHtml }}\n\n<h2>🃏 Flashcards ({{ $json.flashcardCount }})</h2>\n{{ $json.flashcardsHtml }}\n\n<h2>📋 Quiz — Multiple Choice</h2>\n{{ $json.mcQuizHtml }}\n\n<h2>✍️ Quiz — Short Answer</h2>\n{{ $json.saQuizHtml }}",
+        "options": {}
+      },
+      "name": "Gmail - Send Study Notes",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 800,
+        "height": 200,
+        "content": "## AI Study Notes Generator from PDF Text\n\n**Setup:**\n1. Connect OpenAI API and Gmail OAuth2\n2. POST to webhook: `{\"text_content\": \"paste PDF text here...\", \"email\": \"student@example.com\"}`\n\nGenerates structured notes, flashcards, and quiz questions from text content. Sends a beautifully formatted email with all study materials."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Text Content Input": {
+      "main": [[{ "node": "OpenAI - Generate Study Materials", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Generate Study Materials": {
+      "main": [[{ "node": "Code - Format Materials", "type": "main", "index": 0 }]]
+    },
+    "Code - Format Materials": {
+      "main": [[{ "node": "Gmail - Send Study Notes", "type": "main", "index": 0 }]]
+    }
+  }
+}

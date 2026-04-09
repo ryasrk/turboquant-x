@@ -1,0 +1,132 @@
+{
+  "name": "Expense Report Automation with Receipt OCR",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "expense-receipt",
+        "options": {"rawBody": true}
+      },
+      "name": "Receipt Upload Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "expense-receipt"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an Indonesian receipt/expense OCR expert. Extract structured data from the receipt image. Always respond in valid JSON with these fields: {\"merchant\": \"\", \"date\": \"YYYY-MM-DD\", \"items\": [{\"name\": \"\", \"qty\": 1, \"price\": 0}], \"subtotal\": 0, \"tax_ppn\": 0, \"service_charge\": 0, \"total\": 0, \"payment_method\": \"\", \"npwp\": \"\", \"category\": \"\"} Categories: meals, transport, office_supplies, accommodation, entertainment, utilities, other. PPN is usually 11%. Amounts in Rupiah."
+            },
+            {
+              "role": "user",
+              "content": "Extract data from this receipt image. Return ONLY valid JSON."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "OCR with GPT-4 Vision",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [470, 300],
+      "credentials": {
+        "openAiApi": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.message?.content || $input.first().json.text || '';\ntry {\n  const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);\n  const data = JSON.parse(jsonMatch[0]);\n  data.employee_name = $('Receipt Upload Webhook').first().json.body?.employee_name || 'Unknown';\n  data.department = $('Receipt Upload Webhook').first().json.body?.department || 'General';\n  data.receipt_id = 'RCP-' + Date.now().toString(36).toUpperCase();\n  return [data];\n} catch(e) {\n  return [{error: 'Failed to parse receipt', raw: text}];\n}"
+      },
+      "name": "Parse OCR Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Expenses"},
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "name": "Save to Expense Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.total }}",
+              "rightValue": 500000,
+              "operator": {"type": "number", "operation": "gt"}
+            }
+          ]
+        }
+      },
+      "name": "Check Amount > 500K",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "=finance@company.co.id",
+        "subject": "=⚠ Expense Approval Needed: {{ $json.receipt_id }} - Rp {{ $json.total }}",
+        "message": "=Expense claim memerlukan approval:\n\n- Receipt ID: {{ $json.receipt_id }}\n- Employee: {{ $json.employee_name }}\n- Department: {{ $json.department }}\n- Merchant: {{ $json.merchant }}\n- Category: {{ $json.category }}\n- Total: Rp {{ $json.total.toLocaleString('id-ID') }}\n- PPN: Rp {{ $json.tax_ppn.toLocaleString('id-ID') }}\n- Date: {{ $json.date }}\n\nMohon approve atau reject di dashboard."
+      },
+      "name": "Notify Finance for Approval",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1400, 200],
+      "credentials": {
+        "gmailOAuth2": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.employee_email || 'employee@company.co.id' }}",
+        "subject": "=✅ Expense Recorded: {{ $json.receipt_id }}",
+        "message": "=Expense claim Anda telah tercatat:\n\n- Receipt ID: {{ $json.receipt_id }}\n- Merchant: {{ $json.merchant }}\n- Total: Rp {{ $json.total.toLocaleString('id-ID') }}\n- Category: {{ $json.category }}\n\nExpense di bawah Rp 500.000 otomatis disetujui."
+      },
+      "name": "Auto-Approve Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1400, 420],
+      "credentials": {
+        "gmailOAuth2": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Expense Report Automation (Indonesia)\n\n### Flow:\n1. **Webhook** — Employee uploads receipt photo\n2. **OCR** — GPT-4 Vision extracts data (merchant, items, PPN, total in Rupiah)\n3. **Parse** — Structured JSON with receipt ID\n4. **Save** — Logs to Google Sheets expense tracker\n5. **Route** — Amount > Rp 500K → needs approval; ≤ Rp 500K → auto-approved\n6. **Notify** — Email to finance team or employee\n\n### PPN Note:\nIndonesian VAT (PPN) is 11% since April 2022. OCR model is trained to extract this."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Receipt Upload Webhook": {"main": [[{"node": "OCR with GPT-4 Vision", "type": "main", "index": 0}]]},
+    "OCR with GPT-4 Vision": {"main": [[{"node": "Parse OCR Result", "type": "main", "index": 0}]]},
+    "Parse OCR Result": {"main": [[{"node": "Save to Expense Sheet", "type": "main", "index": 0}]]},
+    "Save to Expense Sheet": {"main": [[{"node": "Check Amount > 500K", "type": "main", "index": 0}]]},
+    "Check Amount > 500K": {"main": [
+      [{"node": "Notify Finance for Approval", "type": "main", "index": 0}],
+      [{"node": "Auto-Approve Notification", "type": "main", "index": 0}]
+    ]}
+  }
+}

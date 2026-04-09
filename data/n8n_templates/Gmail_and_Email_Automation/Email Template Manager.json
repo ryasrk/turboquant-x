@@ -1,0 +1,119 @@
+{
+  "name": "Email Template Manager",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-template-email",
+        "options": {}
+      },
+      "name": "Webhook - Template Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {
+          "column": "template_id",
+          "value": "={{ $json.body.template_id }}"
+        },
+        "options": {}
+      },
+      "name": "Read Template Library",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst webhookData = $('Webhook - Template Request').item.json.body;\nconst variables = webhookData.variables || {};\nconst recipientEmail = webhookData.email;\nconst recipientName = webhookData.name || '';\n\nif (items.length === 0) {\n  return [{ json: { error: 'Template not found', template_id: webhookData.template_id } }];\n}\n\nconst template = items[0].json;\nlet subject = template.subject || 'No Subject';\nlet body = template.body || '';\n\n// Replace all {{variable}} placeholders\nconst allVars = { name: recipientName, email: recipientEmail, ...variables };\nfor (const [key, value] of Object.entries(allVars)) {\n  const regex = new RegExp(`\\\\{\\\\{\\\\s*${key}\\\\s*\\\\}\\\\}`, 'gi');\n  subject = subject.replace(regex, value);\n  body = body.replace(regex, value);\n}\n\n// Replace any remaining unreplaced variables with empty\nsubject = subject.replace(/\\{\\{\\s*\\w+\\s*\\}\\}/g, '');\nbody = body.replace(/\\{\\{\\s*\\w+\\s*\\}\\}/g, '');\n\nreturn [{\n  json: {\n    to: recipientEmail,\n    subject: subject,\n    body: body,\n    template_id: webhookData.template_id,\n    template_name: template.template_name || '',\n    sentAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Fill Template Variables",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "name": "Gmail Send Personalized",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email Template Manager\n\nSend personalized emails using templates stored in Google Sheets.\n\n**Flow:**\n1. Webhook receives template_id, email, name, and variables\n2. Read matching template from Sheets library\n3. Code fills {{variable}} placeholders\n4. Gmail sends personalized email\n\n**Template Sheets columns:** template_id, template_name, subject, body\n\n**Webhook payload:**\n```json\n{\n  \"template_id\": \"welcome-01\",\n  \"email\": \"user@example.com\",\n  \"name\": \"John\",\n  \"variables\": {\n    \"company\": \"Acme\",\n    \"plan\": \"Premium\"\n  }\n}\n```",
+        "width": 400,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -90]
+    }
+  ],
+  "connections": {
+    "Webhook - Template Request": {
+      "main": [
+        [
+          {
+            "node": "Read Template Library",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Template Library": {
+      "main": [
+        [
+          {
+            "node": "Fill Template Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fill Template Variables": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Personalized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

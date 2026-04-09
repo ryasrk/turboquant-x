@@ -1,0 +1,164 @@
+{
+  "name": "PDF Invoice Batch Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-batch-upload",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-upload",
+      "name": "Webhook Upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const binaryKeys = Object.keys(item.binary || {});\n  for (const key of binaryKeys) {\n    const bin = item.binary[key];\n    if (bin.mimeType === 'application/pdf' || bin.fileName.endsWith('.pdf')) {\n      results.push({ json: { fileKey: key, fileName: bin.fileName, mimeType: bin.mimeType } });\n    }\n  }\n}\nif (results.length === 0) {\n  results.push({ json: { error: 'No PDF files detected in upload' } });\n}\nreturn results;"
+      },
+      "id": "detect-files",
+      "name": "Detect Multiple Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/image",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "={{ $json.fileKey }}"
+            },
+            {
+              "name": "language",
+              "value": "eng"
+            },
+            {
+              "name": "isTable",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "ocr-api",
+      "name": "HTTP OCR API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = item.json.ParsedResults?.[0]?.ParsedText || '';\n  const invoiceNum = (text.match(/Invoice\\s*#?\\s*:?\\s*(\\S+)/i) || [])[1] || 'UNKNOWN';\n  const dateMatch = (text.match(/(\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{2,4})/) || [])[1] || 'UNKNOWN';\n  const totalMatch = (text.match(/Total\\s*:?\\s*\\$?([\\d,]+\\.?\\d*)/) || [])[1] || '0';\n  const vendorMatch = (text.match(/From\\s*:?\\s*(.+)/i) || [])[1] || 'UNKNOWN';\n  results.push({\n    json: {\n      invoiceNumber: invoiceNum,\n      date: dateMatch,\n      total: parseFloat(totalMatch.replace(/,/g, '')),\n      vendor: vendorMatch.trim(),\n      rawText: text.substring(0, 500),\n      fileName: item.json.fileName || 'unknown.pdf'\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "extract-fields",
+      "name": "Extract Invoice Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Sheets Per Invoice",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1120, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipientEmail || 'finance@company.com' }}",
+        "subject": "Invoice Batch Processing Summary",
+        "message": "=Batch processing complete.\n\nTotal invoices processed: {{ $('Extract Invoice Fields').all().length }}\n\nInvoice: {{ $json.invoiceNumber }}\nVendor: {{ $json.vendor }}\nDate: {{ $json.date }}\nTotal: ${{ $json.total }}\n\nAll data has been logged to Google Sheets.",
+        "options": {}
+      },
+      "id": "gmail-summary",
+      "name": "Gmail Summary",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1340, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PDF Invoice Batch Processor\n\nUpload multiple PDF invoices via webhook.\nOCR extracts text, Code node parses invoice fields (number, date, total, vendor).\nResults logged to Google Sheets, summary emailed via Gmail.\n\n**Setup:**\n1. Configure OCR API credentials (e.g., ocr.space API key)\n2. Set Google Sheets document ID\n3. Set Gmail credentials\n4. POST PDFs to webhook URL"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Upload": {
+      "main": [
+        [{ "node": "Detect Multiple Files", "type": "main", "index": 0 }]
+      ]
+    },
+    "Detect Multiple Files": {
+      "main": [
+        [{ "node": "HTTP OCR API", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP OCR API": {
+      "main": [
+        [{ "node": "Extract Invoice Fields", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Invoice Fields": {
+      "main": [
+        [{ "node": "Sheets Per Invoice", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Per Invoice": {
+      "main": [
+        [{ "node": "Gmail Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

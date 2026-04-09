@@ -1,0 +1,138 @@
+{
+  "name": "AI SEO Meta Tag Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-seo-tags",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Page Content Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an expert SEO specialist. Generate optimized meta tags for this web page.\n\nPage URL: {{ $json.body.url || 'Not provided' }}\nPage Content: {{ $json.body.content }}\nTarget Keywords: {{ $json.body.target_keywords || 'Auto-detect' }}\nBrand Name: {{ $json.body.brand || '' }}\n\nGenerate:\n1. SEO Title (50-60 chars, include primary keyword)\n2. Meta Description (150-160 chars, compelling with CTA)\n3. Primary Keywords (5-8 relevant keywords)\n4. Secondary Keywords (5-10 long-tail keywords)\n5. Open Graph tags (og:title, og:description, og:type)\n6. Twitter Card tags\n7. Schema.org structured data suggestion\n\nReturn JSON:\n{\n  \"seo_title\": \"\",\n  \"meta_description\": \"\",\n  \"primary_keywords\": [],\n  \"secondary_keywords\": [],\n  \"og_title\": \"\",\n  \"og_description\": \"\",\n  \"og_type\": \"article\",\n  \"twitter_title\": \"\",\n  \"twitter_description\": \"\",\n  \"twitter_card\": \"summary_large_image\",\n  \"canonical_url\": \"\",\n  \"schema_type\": \"Article\",\n  \"h1_suggestion\": \"\",\n  \"alt_text_suggestions\": [\"for any images\"],\n  \"internal_link_suggestions\": [\"related topics to link to\"],\n  \"readability_score\": \"A/B/C/D\",\n  \"seo_score\": 85\n}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 1500
+        }
+      },
+      "name": "OpenAI - Generate SEO Tags",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { seo_title: 'Error', meta_description: aiResponse, seo_score: 0 };\n}\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    pageUrl: items[0].json.body?.url || '',\n    seoTitle: parsed.seo_title || '',\n    metaDescription: parsed.meta_description || '',\n    primaryKeywords: Array.isArray(parsed.primary_keywords) ? parsed.primary_keywords.join(', ') : '',\n    secondaryKeywords: Array.isArray(parsed.secondary_keywords) ? parsed.secondary_keywords.join(', ') : '',\n    ogTitle: parsed.og_title || '',\n    ogDescription: parsed.og_description || '',\n    ogType: parsed.og_type || 'article',\n    twitterTitle: parsed.twitter_title || '',\n    twitterDescription: parsed.twitter_description || '',\n    twitterCard: parsed.twitter_card || 'summary_large_image',\n    h1Suggestion: parsed.h1_suggestion || '',\n    seoScore: parsed.seo_score || 0,\n    readabilityScore: parsed.readability_score || '',\n    internalLinks: Array.isArray(parsed.internal_link_suggestions) ? parsed.internal_link_suggestions.join(', ') : '',\n    altTexts: Array.isArray(parsed.alt_text_suggestions) ? parsed.alt_text_suggestions.join(', ') : ''\n  }\n}];"
+      },
+      "name": "Code - Parse Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Page URL": "={{ $json.pageUrl }}",
+            "SEO Title": "={{ $json.seoTitle }}",
+            "Meta Description": "={{ $json.metaDescription }}",
+            "Primary Keywords": "={{ $json.primaryKeywords }}",
+            "OG Title": "={{ $json.ogTitle }}",
+            "SEO Score": "={{ $json.seoScore }}",
+            "H1 Suggestion": "={{ $json.h1Suggestion }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Page URL", "type": "string", "display": true },
+            { "id": "SEO Title", "type": "string", "display": true },
+            { "id": "Meta Description", "type": "string", "display": true },
+            { "id": "Primary Keywords", "type": "string", "display": true },
+            { "id": "OG Title", "type": "string", "display": true },
+            { "id": "SEO Score", "type": "string", "display": true },
+            { "id": "H1 Suggestion", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - SEO Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.marketing_email || 'marketing@example.com' }}",
+        "subject": "=SEO Tags Ready: {{ $json.pageUrl }} (Score: {{ $json.seoScore }}/100)",
+        "message": "=<h2>SEO Meta Tags Generated</h2>\n<p><strong>Page:</strong> {{ $json.pageUrl }}</p>\n<p><strong>SEO Score:</strong> {{ $json.seoScore }}/100 | <strong>Readability:</strong> {{ $json.readabilityScore }}</p>\n\n<h3>📝 Meta Tags</h3>\n<p><strong>Title:</strong> {{ $json.seoTitle }}</p>\n<p><strong>Description:</strong> {{ $json.metaDescription }}</p>\n<p><strong>H1:</strong> {{ $json.h1Suggestion }}</p>\n\n<h3>🔑 Keywords</h3>\n<p><strong>Primary:</strong> {{ $json.primaryKeywords }}</p>\n<p><strong>Secondary:</strong> {{ $json.secondaryKeywords }}</p>\n\n<h3>📱 Social Tags</h3>\n<p><strong>OG Title:</strong> {{ $json.ogTitle }}</p>\n<p><strong>OG Description:</strong> {{ $json.ogDescription }}</p>\n<p><strong>Twitter Card:</strong> {{ $json.twitterCard }}</p>\n\n<h3>💡 Suggestions</h3>\n<p><strong>Internal Links:</strong> {{ $json.internalLinks }}</p>\n<p><strong>Alt Texts:</strong> {{ $json.altTexts }}</p>",
+        "options": {}
+      },
+      "name": "Gmail - Send to Marketing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 200,
+        "content": "## AI SEO Meta Tag Generator\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set spreadsheet ID for SEO log\n3. POST to webhook: `{\"url\": \"https://example.com/page\", \"content\": \"page text content\", \"target_keywords\": \"keyword1, keyword2\", \"brand\": \"YourBrand\", \"marketing_email\": \"team@company.com\"}`\n\nGenerates SEO title, meta description, keywords, OG tags, Twitter cards, and implementation suggestions. Logs to Sheets and emails marketing team."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Page Content Input": {
+      "main": [[{ "node": "OpenAI - Generate SEO Tags", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Generate SEO Tags": {
+      "main": [[{ "node": "Code - Parse Tags", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Tags": {
+      "main": [[
+        { "node": "Google Sheets - SEO Log", "type": "main", "index": 0 },
+        { "node": "Gmail - Send to Marketing", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

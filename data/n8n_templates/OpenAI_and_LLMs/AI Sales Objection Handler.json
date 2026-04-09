@@ -1,0 +1,136 @@
+{
+  "name": "AI Sales Objection Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "handle-objection",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Objection Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a senior sales coach. Analyze this sales objection and provide a strategic response.\n\nContext:\n- Product/Service: {{ $json.body.product || 'Not specified' }}\n- Prospect Industry: {{ $json.body.industry || 'Not specified' }}\n- Sales Stage: {{ $json.body.stage || 'Not specified' }}\n\nReturn JSON:\n{\n  \"objection_category\": \"price/timing/competition/authority/need/trust\",\n  \"objection_severity\": \"high/medium/low\",\n  \"root_cause\": \"underlying reason for objection\",\n  \"recommended_response\": \"full response script the rep should use\",\n  \"follow_up_questions\": [\"probing questions to ask\"],\n  \"do_not_say\": [\"phrases to avoid\"],\n  \"success_probability\": 75,\n  \"alternative_approaches\": [\"other strategies to try\"]\n}\n\nObjection:\n{{ $json.body.objection_text }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5,
+          "maxTokens": 1500
+        }
+      },
+      "name": "OpenAI - Analyze Objection",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { objection_category: 'unknown', recommended_response: aiResponse, success_probability: 0 };\n}\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    objectionText: items[0].json.body?.objection_text || '',\n    product: items[0].json.body?.product || '',\n    category: parsed.objection_category || '',\n    severity: parsed.objection_severity || '',\n    rootCause: parsed.root_cause || '',\n    response: parsed.recommended_response || '',\n    followUpQuestions: Array.isArray(parsed.follow_up_questions) ? parsed.follow_up_questions.join('\\n') : '',\n    doNotSay: Array.isArray(parsed.do_not_say) ? parsed.do_not_say.join('; ') : '',\n    successProbability: parsed.success_probability || 0,\n    alternatives: Array.isArray(parsed.alternative_approaches) ? parsed.alternative_approaches.join('\\n') : '',\n    salesRep: items[0].json.body?.sales_rep || ''\n  }\n}];"
+      },
+      "name": "Code - Parse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Objection": "={{ $json.objectionText }}",
+            "Category": "={{ $json.category }}",
+            "Severity": "={{ $json.severity }}",
+            "Root Cause": "={{ $json.rootCause }}",
+            "Recommended Response": "={{ $json.response }}",
+            "Success Probability": "={{ $json.successProbability }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Objection", "type": "string", "display": true },
+            { "id": "Category", "type": "string", "display": true },
+            { "id": "Severity", "type": "string", "display": true },
+            { "id": "Root Cause", "type": "string", "display": true },
+            { "id": "Recommended Response", "type": "string", "display": true },
+            { "id": "Success Probability", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Objection Playbook",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.sales_rep_email || 'sales@example.com' }}",
+        "subject": "=💡 Objection Response: {{ $json.category }} ({{ $json.severity }} severity)",
+        "message": "=<h2>Sales Objection Handler</h2>\n<p><strong>Objection:</strong> {{ $json.objectionText }}</p>\n<p><strong>Category:</strong> {{ $json.category }} | <strong>Severity:</strong> {{ $json.severity }}</p>\n<p><strong>Root Cause:</strong> {{ $json.rootCause }}</p>\n\n<h3>✅ Recommended Response</h3>\n<p>{{ $json.response }}</p>\n\n<h3>❓ Follow-up Questions to Ask</h3>\n<pre>{{ $json.followUpQuestions }}</pre>\n\n<h3>🚫 Avoid Saying</h3>\n<p>{{ $json.doNotSay }}</p>\n\n<h3>🔄 Alternative Approaches</h3>\n<pre>{{ $json.alternatives }}</pre>\n\n<p><strong>Estimated Success Probability:</strong> {{ $json.successProbability }}%</p>",
+        "options": {}
+      },
+      "name": "Gmail - Send to Sales Rep",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 200,
+        "content": "## AI Sales Objection Handler\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set spreadsheet ID for objection playbook\n3. POST to webhook: `{\"objection_text\": \"It's too expensive...\", \"product\": \"SaaS Platform\", \"industry\": \"Tech\", \"stage\": \"Demo\", \"sales_rep\": \"John\", \"sales_rep_email\": \"john@company.com\"}`\n\nCategorizes objections, generates strategic responses, builds a playbook in Sheets, and emails the sales rep with a full response guide."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Objection Input": {
+      "main": [[{ "node": "OpenAI - Analyze Objection", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Analyze Objection": {
+      "main": [[{ "node": "Code - Parse Response", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Response": {
+      "main": [[
+        { "node": "Google Sheets - Objection Playbook", "type": "main", "index": 0 },
+        { "node": "Gmail - Send to Sales Rep", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

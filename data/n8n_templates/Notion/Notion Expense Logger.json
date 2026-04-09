@@ -1,0 +1,256 @@
+{
+  "name": "Notion Expense Logger",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Expense Logger\nLog expenses via Telegram, store in Notion, backup to Sheets, and send monthly summaries.\n\n**Setup:**\n1. Configure Telegram bot trigger\n2. Set Notion expenses database ID\n3. Set Google Sheet ID for backup\n4. Format: send amount and description, e.g. \"25.50 lunch meeting\""
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "name": "Parse Expense",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const text = item.json.message?.text || '';\n\n  // Parse: \"25.50 lunch meeting\" or \"$25.50 lunch meeting\" or \"lunch 25.50\"\n  const amountMatch = text.match(/\\$?([\\d]+\\.?[\\d]*)/);\n  const amount = amountMatch ? parseFloat(amountMatch[1]) : 0;\n\n  // Description is everything except the amount\n  const description = text.replace(/\\$?[\\d]+\\.?[\\d]*/, '').trim() || 'Uncategorized';\n\n  // Auto-categorize based on keywords\n  const descLower = description.toLowerCase();\n  let category = 'Other';\n  if (descLower.match(/food|lunch|dinner|breakfast|coffee|restaurant|eat/)) category = 'Food & Dining';\n  else if (descLower.match(/uber|taxi|gas|fuel|parking|transit|bus|train/)) category = 'Transportation';\n  else if (descLower.match(/rent|electric|water|internet|phone|utility/)) category = 'Bills & Utilities';\n  else if (descLower.match(/grocery|supermarket|market/)) category = 'Groceries';\n  else if (descLower.match(/movie|netflix|spotify|entertainment|game/)) category = 'Entertainment';\n  else if (descLower.match(/doctor|pharmacy|medicine|health|gym/)) category = 'Health';\n  else if (descLower.match(/shirt|shoes|clothes|shop/)) category = 'Shopping';\n\n  return {\n    json: {\n      amount,\n      description,\n      category,\n      date: new Date().toISOString(),\n      chatId: item.json.message?.chat?.id || ''\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Add Expense",
+      "type": "n8n-nodes-base.notion",
+      "position": [680, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.description }}"
+            },
+            {
+              "name": "Amount",
+              "type": "number",
+              "number": "={{ $json.amount }}"
+            },
+            {
+              "name": "Category",
+              "type": "select",
+              "select": "={{ $json.category }}"
+            },
+            {
+              "name": "Date",
+              "type": "date",
+              "date": "={{ $json.date }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Google Sheets Backup",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [900, 400],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Expenses"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Description": "={{ $json.description }}",
+            "Amount": "={{ $json.amount }}",
+            "Category": "={{ $json.category }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "name": "Telegram Confirm",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1120, 400],
+      "parameters": {
+        "chatId": "={{ $('Parse Expense').item.json.chatId }}",
+        "text": "=💰 *Expense Logged*\n\n{{ $('Parse Expense').item.json.description }}: ${{ $('Parse Expense').item.json.amount.toFixed(2) }}\n📂 {{ $('Parse Expense').item.json.category }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Monthly Summary Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 660],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 1 * *"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query Monthly Expenses",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 660],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Date|date",
+              "condition": "past_month",
+              "returnType": "date"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Calculate Monthly Summary",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 660],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst byCategory = {};\nlet total = 0;\n\nitems.forEach(item => {\n  const props = item.json.properties || {};\n  const amount = props['Amount']?.number || 0;\n  const category = props['Category']?.select?.name || 'Other';\n  byCategory[category] = (byCategory[category] || 0) + amount;\n  total += amount;\n});\n\nconst breakdown = Object.entries(byCategory)\n  .sort((a, b) => b[1] - a[1])\n  .map(([cat, amt]) => `${cat}: $${amt.toFixed(2)} (${Math.round(amt / total * 100)}%)`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    total: total.toFixed(2),\n    count: items.length,\n    breakdown,\n    month: $now.minus({ months: 1 }).format('MMMM yyyy')\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Telegram Monthly Summary",
+      "type": "n8n-nodes-base.telegram",
+      "position": [900, 660],
+      "parameters": {
+        "chatId": "",
+        "text": "=📊 *Monthly Expense Summary — {{ $json.month }}*\n\nTotal: ${{ $json.total }}\nTransactions: {{ $json.count }}\n\n📂 *Breakdown:*\n{{ $json.breakdown }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.2
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Expense", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Expense": {
+      "main": [
+        [{ "node": "Notion Add Expense", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Add Expense": {
+      "main": [
+        [{ "node": "Google Sheets Backup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Sheets Backup": {
+      "main": [
+        [{ "node": "Telegram Confirm", "type": "main", "index": 0 }]
+      ]
+    },
+    "Monthly Summary Schedule": {
+      "main": [
+        [{ "node": "Notion Query Monthly Expenses", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query Monthly Expenses": {
+      "main": [
+        [{ "node": "Calculate Monthly Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Monthly Summary": {
+      "main": [
+        [{ "node": "Telegram Monthly Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

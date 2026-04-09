@@ -1,0 +1,114 @@
+{
+  "name": "Social Media Content Recycler",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "weeks", "weeksInterval": 1, "triggerAtDay": 1, "triggerAtHour": 9}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Read Past Popular Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [450, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": "",
+        "sheetName": "Post History",
+        "options": {
+          "range": "A:H"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Select and Adapt Posts",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Filter posts older than 30 days with high engagement\nconst thirtyDaysAgo = new Date();\nthirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);\n\nconst eligible = items.filter(item => {\n  const postDate = new Date(item.json.posted_date);\n  const engagement = parseInt(item.json.engagement_score || '0');\n  return postDate < thirtyDaysAgo && engagement > 50 && item.json.recycled !== 'true';\n});\n\n// Sort by engagement and pick top 3\nconst topPosts = eligible\n  .sort((a, b) => (parseInt(b.json.engagement_score) || 0) - (parseInt(a.json.engagement_score) || 0))\n  .slice(0, 3);\n\nreturn topPosts.map(post => {\n  const prefixes = ['Icymi:', 'Throwback:', 'In case you missed it:'];\n  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];\n  return {\n    json: {\n      original_text: post.json.text,\n      recycled_text: `${prefix} ${post.json.text}`,\n      platform: post.json.platform,\n      original_date: post.json.posted_date,\n      original_engagement: post.json.engagement_score,\n      row_number: post.json.row_number\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Schedule Repost",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "text", "value": "={{ $json.recycled_text }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Log Recycled Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1050, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Recycle Log",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Social Media Content Recycler\nRuns weekly on Monday. Reads past popular posts from Google Sheets (older than 30 days, high engagement), adapts them with throwback prefixes, reposts via the Twitter API, and logs recycled posts."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [[{"node": "Read Past Popular Posts", "type": "main", "index": 0}]]
+    },
+    "Read Past Popular Posts": {
+      "main": [[{"node": "Select and Adapt Posts", "type": "main", "index": 0}]]
+    },
+    "Select and Adapt Posts": {
+      "main": [[{"node": "Schedule Repost", "type": "main", "index": 0}]]
+    },
+    "Schedule Repost": {
+      "main": [[{"node": "Log Recycled Posts", "type": "main", "index": 0}]]
+    }
+  }
+}

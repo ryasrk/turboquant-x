@@ -1,0 +1,79 @@
+{
+  "name": "Zapier to n8n Migration Helper",
+  "nodes": [
+    {
+      "name": "Webhook Receive Zap Data",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "zapier-migration",
+        "httpMethod": "POST",
+        "responseMode": "lastNode"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Transform to n8n Format",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const zapData = item.json.body || item.json;\n  const zapName = zapData.name || zapData.zapName || 'Untitled Zap';\n  const steps = zapData.steps || zapData.actions || [];\n  const triggerApp = zapData.trigger?.app || steps[0]?.app || 'unknown';\n  const triggerEvent = zapData.trigger?.event || steps[0]?.event || 'unknown';\n  \n  const nodeMapping = {\n    'gmail': 'n8n-nodes-base.gmail',\n    'google_sheets': 'n8n-nodes-base.googleSheets',\n    'slack': 'n8n-nodes-base.slack',\n    'trello': 'n8n-nodes-base.trello',\n    'airtable': 'n8n-nodes-base.airtable',\n    'mailchimp': 'n8n-nodes-base.mailchimp',\n    'hubspot': 'n8n-nodes-base.hubspot',\n    'asana': 'n8n-nodes-base.asana',\n    'github': 'n8n-nodes-base.github',\n    'jira': 'n8n-nodes-base.jira'\n  };\n  \n  const n8nNodes = steps.map((step, idx) => ({\n    app: step.app || 'unknown',\n    n8nEquivalent: nodeMapping[step.app?.toLowerCase()] || 'n8n-nodes-base.httpRequest',\n    action: step.action || step.event || 'unknown',\n    migrationNotes: nodeMapping[step.app?.toLowerCase()] ? 'Direct equivalent available' : 'Use HTTP Request node or search n8n integrations'\n  }));\n  \n  return {\n    json: {\n      originalZapName: zapName,\n      triggerApp: triggerApp,\n      triggerEvent: triggerEvent,\n      totalSteps: steps.length,\n      mappedNodes: JSON.stringify(n8nNodes),\n      migrationStatus: 'mapped',\n      timestamp: new Date().toISOString(),\n      recommendations: n8nNodes.filter(n => n.n8nEquivalent === 'n8n-nodes-base.httpRequest').length > 0\n        ? 'Some nodes require HTTP Request — check n8n integrations for native nodes'\n        : 'All nodes have direct n8n equivalents'\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Mapping Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Migration Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [940, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Migration Report: {{ $json.originalZapName }}",
+        "message": "=Zapier to n8n Migration Report\n\nOriginal Zap: {{ $json.originalZapName }}\nTrigger: {{ $json.triggerApp }} ({{ $json.triggerEvent }})\nTotal Steps: {{ $json.totalSteps }}\nStatus: {{ $json.migrationStatus }}\n\nNode Mappings:\n{{ $json.mappedNodes }}\n\nRecommendations: {{ $json.recommendations }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Zapier to n8n Migration Helper\nReceives Zapier workflow data, maps Zap steps to n8n node equivalents, logs the mapping to Sheets, and emails a migration report.\n\n**Setup:**\n1. Export your Zap configuration and POST it to this webhook\n2. Connect Google Sheets for migration tracking\n3. Configure Gmail for report delivery\n\n**Supported mappings:** Gmail, Sheets, Slack, Trello, Airtable, Mailchimp, HubSpot, Asana, GitHub, Jira"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Receive Zap Data": {
+      "main": [[{ "node": "Transform to n8n Format", "type": "main", "index": 0 }]]
+    },
+    "Transform to n8n Format": {
+      "main": [[{ "node": "Sheets Mapping Log", "type": "main", "index": 0 }]]
+    },
+    "Sheets Mapping Log": {
+      "main": [[{ "node": "Gmail Migration Report", "type": "main", "index": 0 }]]
+    }
+  }
+}

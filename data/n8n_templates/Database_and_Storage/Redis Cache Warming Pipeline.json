@@ -1,0 +1,227 @@
+{
+  "name": "Redis Cache Warming Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Off-Peak Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Popular Queries"
+        },
+        "options": {}
+      },
+      "name": "Read Popular Queries",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql_query }}",
+        "options": {}
+      },
+      "name": "Execute Query Against DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const items = $input.all();\nconst cacheKey = $('Read Popular Queries').first().json.cache_key;\nconst ttl = $('Read Popular Queries').first().json.ttl_seconds || 3600;\n\nreturn [{\n  json: {\n    cache_key: cacheKey,\n    cache_value: JSON.stringify(items.map(i => i.json)),\n    ttl: ttl\n  }\n}];"
+      },
+      "name": "Prepare Cache Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://your-redis-api:6380/api/cache/{{ $json.cache_key }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_REDIS_API_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "value",
+              "value": "={{ $json.cache_value }}"
+            },
+            {
+              "name": "ttl",
+              "value": "={{ $json.ttl }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Populate Redis Cache",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const items = $input.all();\nconst results = items.map(item => ({\n  json: {\n    cache_key: item.json.cache_key || 'unknown',\n    status: item.json.statusCode === 200 ? 'SUCCESS' : 'FAILED',\n    response_code: item.json.statusCode,\n    warmed_at: new Date().toISOString()\n  }\n}));\nreturn results;"
+      },
+      "name": "Process Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Cache Warming Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Log Results to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1560, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Redis Cache Warming Pipeline\n\n**Schedule:** Daily at 2:00 AM (off-peak)\n\n**Flow:**\n1. Read popular query definitions from Google Sheets\n2. Execute each query against PostgreSQL\n3. Prepare JSON payload with TTL\n4. PUT to Redis HTTP API to warm cache\n5. Log results back to Sheets\n\n**Setup:**\n- Google Sheets with columns: cache_key, sql_query, ttl_seconds\n- PostgreSQL credentials\n- Redis HTTP API endpoint and token\n- Adjust schedule for your off-peak hours",
+        "height": 320,
+        "width": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -60]
+    }
+  ],
+  "connections": {
+    "Off-Peak Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Popular Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Popular Queries": {
+      "main": [
+        [
+          {
+            "node": "Execute Query Against DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Query Against DB": {
+      "main": [
+        [
+          {
+            "node": "Prepare Cache Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Cache Payload": {
+      "main": [
+        [
+          {
+            "node": "Populate Redis Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Populate Redis Cache": {
+      "main": [
+        [
+          {
+            "node": "Process Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Results": {
+      "main": [
+        [
+          {
+            "node": "Log Results to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

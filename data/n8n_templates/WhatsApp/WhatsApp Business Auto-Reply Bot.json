@@ -1,0 +1,290 @@
+{
+  "name": "WhatsApp Business Auto-Reply Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-incoming",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.message.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "harga"
+            },
+            {
+              "value1": "={{ $json.body.message.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "price"
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "name": "Check Price Keyword",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.message.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "lokasi"
+            },
+            {
+              "value1": "={{ $json.body.message.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "location"
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "name": "Check Location Keyword",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.message.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "jam"
+            },
+            {
+              "value1": "={{ $json.body.message.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "hours"
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "name": "Check Hours Keyword",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 800]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.body.from }}"
+            },
+            {
+              "name": "text",
+              "value": "Terima kasih atas pertanyaan Anda! Berikut daftar harga kami:\n\n📋 Paket Basic: Rp 150.000\n📋 Paket Standard: Rp 300.000\n📋 Paket Premium: Rp 500.000\n\nUntuk info lebih lanjut, ketik 'detail [paket]'"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Reply Price Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [750, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.body.from }}"
+            },
+            {
+              "name": "text",
+              "value": "📍 Lokasi kami:\n\nJl. Sudirman No. 123, Jakarta Pusat\nGoogle Maps: https://maps.google.com/?q=lokasi\n\nJam operasional: Senin-Jumat 08:00-17:00"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Reply Location Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [750, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.body.from }}"
+            },
+            {
+              "name": "text",
+              "value": "🕐 Jam Operasional:\n\nSenin - Jumat: 08:00 - 17:00 WIB\nSabtu: 09:00 - 14:00 WIB\nMinggu & Hari Libur: Tutup\n\nDi luar jam kerja, pesan Anda akan dibalas keesokan harinya."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Reply Hours Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [750, 700]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "from_number": "={{ $json.body.from }}",
+            "message": "={{ $json.body.message }}",
+            "keyword_matched": "={{ $json.body.message.toLowerCase().includes('harga') || $json.body.message.toLowerCase().includes('price') ? 'price' : $json.body.message.toLowerCase().includes('lokasi') || $json.body.message.toLowerCase().includes('location') ? 'location' : $json.body.message.toLowerCase().includes('jam') || $json.body.message.toLowerCase().includes('hours') ? 'hours' : 'none' }}",
+            "replied": "true"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', message: 'Auto-reply sent' }) }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "content": "## WhatsApp Business Auto-Reply Bot\n\nThis workflow automatically responds to incoming WhatsApp messages based on keyword matching.\n\n**Supported keywords:**\n- harga / price → Product pricing info\n- lokasi / location → Business location\n- jam / hours → Operating hours\n\n**Setup:**\n1. Configure WhatsApp Business API token in environment variables\n2. Set up Google Sheets for conversation logging\n3. Customize reply messages for your business",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "WhatsApp Webhook": {
+      "main": [
+        [
+          { "node": "Check Price Keyword", "type": "main", "index": 0 },
+          { "node": "Check Location Keyword", "type": "main", "index": 0 },
+          { "node": "Check Hours Keyword", "type": "main", "index": 0 },
+          { "node": "Log to Google Sheets", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Check Price Keyword": {
+      "main": [
+        [{ "node": "Reply Price Info", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Check Location Keyword": {
+      "main": [
+        [{ "node": "Reply Location Info", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Check Hours Keyword": {
+      "main": [
+        [{ "node": "Reply Hours Info", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

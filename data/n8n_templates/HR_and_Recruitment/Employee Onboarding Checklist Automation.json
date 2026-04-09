@@ -1,0 +1,215 @@
+{
+  "name": "Employee Onboarding Checklist Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "rowAdded",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "New Hires"
+        },
+        "options": {}
+      },
+      "name": "Trigger - New Hire Added",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const hire = $input.first().json;\nconst startDate = hire.startDate || new Date().toISOString();\nconst checklist = [\n  { task: 'Create company email account', assignee: 'IT', dueOffset: -3, status: 'pending' },\n  { task: 'Set up workstation/laptop', assignee: 'IT', dueOffset: -2, status: 'pending' },\n  { task: 'Create access badges', assignee: 'Security', dueOffset: -1, status: 'pending' },\n  { task: 'Prepare employment contract', assignee: 'HR', dueOffset: -5, status: 'pending' },\n  { task: 'Set up payroll', assignee: 'Finance', dueOffset: -3, status: 'pending' },\n  { task: 'Assign mentor/buddy', assignee: 'Manager', dueOffset: -1, status: 'pending' },\n  { task: 'Schedule orientation session', assignee: 'HR', dueOffset: 0, status: 'pending' },\n  { task: 'Provide office tour', assignee: 'HR', dueOffset: 0, status: 'pending' },\n  { task: 'Complete tax forms', assignee: 'Employee', dueOffset: 1, status: 'pending' },\n  { task: 'Review company handbook', assignee: 'Employee', dueOffset: 3, status: 'pending' }\n];\nreturn [{ json: { ...hire, checklist, startDate } }];"
+      },
+      "name": "Create Onboarding Checklist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=Welcome to the Team, {{$json.name}}!",
+        "emailType": "html",
+        "message": "=<h2>Welcome, {{$json.name}}!</h2><p>We're thrilled to have you join us as <strong>{{$json.position}}</strong>.</p><p>Your start date is <strong>{{$json.startDate}}</strong>. Here's what to expect:</p><ul><li>An orientation session on your first day</li><li>You'll meet your assigned buddy/mentor</li><li>HR will guide you through required paperwork</li><li>IT will have your workstation ready</li></ul><p>Please bring a valid ID and any required documents on your first day.</p><p>Looking forward to working with you!</p><p>Best regards,<br>HR Team</p>",
+        "options": {}
+      },
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [690, 160],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "it-team@company.com",
+        "subject": "=New Hire Equipment Request - {{$json.name}}",
+        "emailType": "text",
+        "message": "=Hi IT Team,\n\nNew employee starting: {{$json.name}}\nPosition: {{$json.position}}\nStart Date: {{$json.startDate}}\n\nPlease prepare:\n- Company email account\n- Laptop/workstation setup\n- Required software installations\n- VPN and network access\n- Access badges\n\nPlease have everything ready 1 day before the start date.\n\nThanks,\nHR Automation",
+        "options": {}
+      },
+      "name": "Notify IT - Equipment",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [690, 340],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "hr-docs@company.com",
+        "subject": "=New Hire Documents Required - {{$json.name}}",
+        "emailType": "text",
+        "message": "=Hi HR Documents Team,\n\nNew employee: {{$json.name}}\nPosition: {{$json.position}}\nStart Date: {{$json.startDate}}\n\nPlease prepare the following documents:\n- Employment contract\n- NDA/Confidentiality agreement\n- Benefits enrollment forms\n- Tax withholding forms\n- Emergency contact form\n- Company handbook acknowledgment\n\nAll documents should be ready for signing on the first day.\n\nThanks,\nHR Automation",
+        "options": {}
+      },
+      "name": "Notify HR - Documents",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [690, 520],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Onboarding Tracker"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employeeName": "={{$json.name}}",
+            "position": "={{$json.position}}",
+            "startDate": "={{$json.startDate}}",
+            "welcomeEmailSent": "yes",
+            "itNotified": "yes",
+            "hrDocsNotified": "yes",
+            "checklistCreated": "yes",
+            "overallStatus": "in_progress",
+            "createdAt": "={{$now.toISO()}}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Track Completion",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [940, 340],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Employee Onboarding Checklist Automation\n\n**Trigger:** New hire row added to Google Sheets\n**Process:**\n1. Generate onboarding checklist with tasks and assignees\n2. Send welcome email to new employee\n3. Notify IT team for equipment/accounts setup\n4. Notify HR docs team for paperwork preparation\n5. Track progress in Onboarding Tracker sheet\n\n**Setup:**\n- 'New Hires' sheet with columns: name, email, position, startDate\n- 'Onboarding Tracker' sheet for status tracking\n- Gmail credentials configured\n- Update team email addresses in notification nodes",
+        "width": 420,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -60]
+    }
+  ],
+  "connections": {
+    "Trigger - New Hire Added": {
+      "main": [
+        [
+          {
+            "node": "Create Onboarding Checklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Onboarding Checklist": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify IT - Equipment",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify HR - Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome Email": {
+      "main": [
+        [
+          {
+            "node": "Track Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify IT - Equipment": {
+      "main": [
+        [
+          {
+            "node": "Track Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify HR - Documents": {
+      "main": [
+        [
+          {
+            "node": "Track Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

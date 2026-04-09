@@ -1,0 +1,175 @@
+{
+  "name": "PDF Page Splitter and Merger",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pdf-split-merge",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-instructions",
+      "name": "Webhook Instructions",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.pdfblocks.com/v1/split_merge",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "operation",
+              "value": "={{ $json.body.operation || 'split' }}"
+            },
+            {
+              "name": "pages",
+              "value": "={{ $json.body.pages || '1-5' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "split-merge-api",
+      "name": "HTTP Split/Merge Pages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "={{ $('Webhook Instructions').item.json.body.outputName || 'processed_output' }}.pdf",
+        "options": {}
+      },
+      "id": "drive-save",
+      "name": "Drive Save Output",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [680, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "Operation", "value": "={{ $('Webhook Instructions').item.json.body.operation }}" },
+              { "column": "Pages", "value": "={{ $('Webhook Instructions').item.json.body.pages }}" },
+              { "column": "OutputName", "value": "={{ $('Webhook Instructions').item.json.body.outputName }}" },
+              { "column": "Timestamp", "value": "={{ new Date().toISOString() }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-tracking",
+      "name": "Sheets Page Tracking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook Instructions').item.json.body.notifyEmail || 'user@company.com' }}",
+        "subject": "=PDF {{ $('Webhook Instructions').item.json.body.operation || 'split' }} Complete",
+        "message": "=Your PDF operation is complete.\n\nOperation: {{ $('Webhook Instructions').item.json.body.operation }}\nPages: {{ $('Webhook Instructions').item.json.body.pages }}\nOutput: {{ $('Webhook Instructions').item.json.body.outputName }}.pdf\n\nFile saved to Google Drive.",
+        "options": {}
+      },
+      "id": "gmail-notify",
+      "name": "Gmail Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PDF Page Splitter and Merger\n\nUpload PDF with split/merge instructions via webhook →\nHTTP API processes pages → saved to Drive → tracked in Sheets → email notification.\n\n**Operations:**\n- Split: Extract specific pages (e.g., pages '1-5')\n- Merge: Combine multiple PDFs\n\n**Setup:**\n1. Configure PDF processing API\n2. Set Google Drive folder\n3. Set Google Sheets tracking document\n4. Set Gmail credentials\n5. POST { operation: 'split', pages: '1-5', outputName: 'extract', notifyEmail } + binary"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Instructions": {
+      "main": [
+        [{ "node": "HTTP Split/Merge Pages", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Split/Merge Pages": {
+      "main": [
+        [{ "node": "Drive Save Output", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Save Output": {
+      "main": [
+        [{ "node": "Sheets Page Tracking", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Page Tracking": {
+      "main": [
+        [{ "node": "Gmail Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

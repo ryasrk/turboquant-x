@@ -1,0 +1,141 @@
+{
+  "name": "Notion Habit Tracker Dashboard",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Habit Tracker Dashboard\nDaily streak calculation from habits DB, update metrics page, and send Telegram summary.\n\n**Setup:**\n1. Set Notion habits database ID\n2. Set Notion metrics page ID\n3. Configure Telegram bot and chat ID\n4. Schedule runs daily at 10 PM"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Daily 10PM Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 * * *"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query Habits DB",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Calculate Streaks",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\n\nconst habits = items.map(item => {\n  const props = item.json.properties || {};\n  const name = props['Name']?.title?.map(t => t.plain_text).join('') || 'Unknown';\n  const completed = props['Completed']?.checkbox || false;\n  const streak = props['Streak']?.number || 0;\n  const lastDate = props['Last Completed']?.date?.start || '';\n\n  let newStreak = streak;\n  if (completed) {\n    if (lastDate === today || !lastDate) {\n      newStreak = streak + 1;\n    }\n  } else {\n    newStreak = 0;\n  }\n\n  return { name, completed, streak: newStreak, previousStreak: streak, pageId: item.json.id };\n});\n\nconst totalHabits = habits.length;\nconst completedToday = habits.filter(h => h.completed).length;\nconst completionRate = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;\nconst longestStreak = Math.max(...habits.map(h => h.streak), 0);\nconst bestHabit = habits.reduce((best, h) => h.streak > (best?.streak || 0) ? h : best, habits[0]);\n\nconst summary = habits.map(h =>\n  `${h.completed ? '✅' : '❌'} ${h.name}: ${h.streak} day streak`\n).join('\\n');\n\nreturn [{\n  json: {\n    date: today,\n    totalHabits,\n    completedToday,\n    completionRate,\n    longestStreak,\n    bestHabit: bestHabit?.name || 'None',\n    summary,\n    habits\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Update Metrics Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 400],
+      "parameters": {
+        "resource": "page",
+        "operation": "update",
+        "pageId": "",
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "=Habit Metrics — {{ $json.date }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=## Daily Report — {{ $json.date }}\n\nCompletion Rate: {{ $json.completionRate }}%\nCompleted: {{ $json.completedToday }}/{{ $json.totalHabits }}\nLongest Streak: {{ $json.longestStreak }} days ({{ $json.bestHabit }})\n\n### Habits\n{{ $json.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1120, 400],
+      "parameters": {
+        "chatId": "",
+        "text": "=🏆 *Daily Habit Report*\n\n📊 Completion: {{ $json.completedToday }}/{{ $json.totalHabits }} ({{ $json.completionRate }}%)\n🔥 Longest Streak: {{ $json.longestStreak }} days — {{ $json.bestHabit }}\n\n{{ $json.summary }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.2
+    }
+  ],
+  "connections": {
+    "Daily 10PM Schedule": {
+      "main": [
+        [{ "node": "Notion Query Habits DB", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query Habits DB": {
+      "main": [
+        [{ "node": "Calculate Streaks", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Streaks": {
+      "main": [
+        [{ "node": "Notion Update Metrics Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Update Metrics Page": {
+      "main": [
+        [{ "node": "Telegram Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

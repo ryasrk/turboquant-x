@@ -1,0 +1,114 @@
+{
+  "name": "Instagram UGC Collector",
+  "nodes": [
+    {
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 2}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Search Tagged Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.hashtag_id }}/recent_media",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "fields", "value": "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count"},
+            {"name": "user_id", "value": "{{ $json.ig_user_id }}"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Filter Quality Content",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst posts = items[0].json.data || [];\n\n// Quality filters\nconst MIN_LIKES = 10;\nconst MIN_CAPTION_LENGTH = 20;\n\nconst quality = posts.filter(post => {\n  const likes = post.like_count || 0;\n  const captionLen = (post.caption || '').length;\n  const isImage = post.media_type === 'IMAGE' || post.media_type === 'CAROUSEL_ALBUM';\n  return likes >= MIN_LIKES && captionLen >= MIN_CAPTION_LENGTH && isImage;\n});\n\nreturn quality.map(post => ({\n  json: {\n    post_id: post.id,\n    caption: post.caption,\n    media_url: post.media_url,\n    permalink: post.permalink,\n    like_count: post.like_count,\n    comments_count: post.comments_count,\n    media_type: post.media_type,\n    timestamp: post.timestamp,\n    collected_at: new Date().toISOString(),\n    status: 'pending_approval'\n  }\n}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save to UGC Database",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [850, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "UGC Database",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Email Marketing for Approval",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1050, 300],
+      "parameters": {
+        "sendTo": "marketing@example.com",
+        "subject": "New UGC Content for Approval ({{ $json.like_count }} likes)",
+        "message": "New user-generated content found!\n\nCaption: {{ $json.caption }}\nLikes: {{ $json.like_count }}\nComments: {{ $json.comments_count }}\nLink: {{ $json.permalink }}\n\nPlease review and approve in the Google Sheet.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Instagram UGC Collector\nRuns every 2 hours. Searches for posts tagged with your brand hashtag, filters for quality (min likes, caption length, image type), saves to a Google Sheets UGC database, and emails marketing for approval."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [[{"node": "Search Tagged Posts", "type": "main", "index": 0}]]
+    },
+    "Search Tagged Posts": {
+      "main": [[{"node": "Filter Quality Content", "type": "main", "index": 0}]]
+    },
+    "Filter Quality Content": {
+      "main": [[{"node": "Save to UGC Database", "type": "main", "index": 0}]]
+    },
+    "Save to UGC Database": {
+      "main": [[{"node": "Email Marketing for Approval", "type": "main", "index": 0}]]
+    }
+  }
+}

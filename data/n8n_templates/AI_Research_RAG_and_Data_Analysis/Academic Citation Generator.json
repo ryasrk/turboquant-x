@@ -1,0 +1,91 @@
+{
+  "name": "Academic Citation Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-citation",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.crossref.org/works?query={{ encodeURIComponent($json.body.title || $json.body.doi || '') }}&rows=5",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "CrossRef API Lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0].json;\nconst works = (data.message && data.message.items) || [];\nconst requestedFormat = $('Webhook').item.json.body.format || 'all';\n\nconst citations = works.map(work => {\n  const authors = (work.author || []).map(a => ({\n    last: a.family || '',\n    first: a.given || '',\n    full: `${a.family || ''}, ${a.given || ''}`\n  }));\n  const year = work.issued && work.issued['date-parts'] && work.issued['date-parts'][0] ? work.issued['date-parts'][0][0] : 'n.d.';\n  const title = (work.title && work.title[0]) || 'Untitled';\n  const journal = (work['container-title'] && work['container-title'][0]) || '';\n  const volume = work.volume || '';\n  const issue = work.issue || '';\n  const pages = work.page || '';\n  const doi = work.DOI || '';\n\n  // APA 7th\n  const authorApa = authors.length > 0 ? authors.map(a => `${a.last}, ${a.first.charAt(0)}.`).join(', ') : 'Unknown';\n  const apa = `${authorApa} (${year}). ${title}. *${journal}*${volume ? `, *${volume}*` : ''}${issue ? `(${issue})` : ''}${pages ? `, ${pages}` : ''}.${doi ? ` https://doi.org/${doi}` : ''}`;\n\n  // MLA 9th\n  const authorMla = authors.length > 0 ? `${authors[0].last}, ${authors[0].first}` + (authors.length > 1 ? ', et al.' : '') : 'Unknown';\n  const mla = `${authorMla}. \"${title}.\" *${journal}*${volume ? `, vol. ${volume}` : ''}${issue ? `, no. ${issue}` : ''}, ${year}${pages ? `, pp. ${pages}` : ''}.${doi ? ` https://doi.org/${doi}` : ''}`;\n\n  // Chicago\n  const authorChicago = authors.length > 0 ? authors.map(a => `${a.last}, ${a.first}`).join(', ') : 'Unknown';\n  const chicago = `${authorChicago}. \"${title}.\" *${journal}* ${volume}${issue ? `, no. ${issue}` : ''} (${year})${pages ? `: ${pages}` : ''}.${doi ? ` https://doi.org/${doi}` : ''}`;\n\n  return { title, authors: authors.map(a => a.full), year, doi, apa, mla, chicago, score: work.score || 0 };\n});\n\nreturn [{\n  json: {\n    query: $('Webhook').item.json.body.title || $('Webhook').item.json.body.doi || '',\n    resultCount: citations.length,\n    format: requestedFormat,\n    citations\n  }\n}];"
+      },
+      "name": "Format Citations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $json.query }}",
+            "title": "={{ $json.citations[0] ? $json.citations[0].title : '' }}",
+            "apa": "={{ $json.citations[0] ? $json.citations[0].apa : '' }}",
+            "mla": "={{ $json.citations[0] ? $json.citations[0].mla : '' }}",
+            "chicago": "={{ $json.citations[0] ? $json.citations[0].chicago : '' }}",
+            "doi": "={{ $json.citations[0] ? $json.citations[0].doi : '' }}",
+            "date": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save to Bibliography",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Academic Citation Generator\n\nLooks up paper details via CrossRef API and formats citations in APA, MLA, and Chicago styles. Results are saved to a Google Sheets bibliography.\n\n**Setup:**\n1. Configure Google Sheets credentials\n2. POST: `{\"title\": \"paper title\", \"format\": \"apa|mla|chicago|all\"}`\n3. Optionally pass `{\"doi\": \"10.1234/...\"}`"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "CrossRef API Lookup", "type": "main", "index": 0 }]
+      ]
+    },
+    "CrossRef API Lookup": {
+      "main": [
+        [{ "node": "Format Citations", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Citations": {
+      "main": [
+        [{ "node": "Save to Bibliography", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "name": "PDF Table Data Extractor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "extract-tables",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-pdf",
+      "name": "Webhook with PDF",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/image",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "language",
+              "value": "eng"
+            },
+            {
+              "name": "isTable",
+              "value": "true"
+            },
+            {
+              "name": "OCREngine",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ocr-tables",
+      "name": "HTTP OCR Table Detection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = item.json.ParsedResults?.[0]?.ParsedText || '';\n  const lines = text.split('\\n').filter(l => l.trim());\n  const tables = [];\n  let currentTable = [];\n  let prevWasTabular = false;\n  for (const line of lines) {\n    const cells = line.split(/\\t|\\s{2,}|\\|/).filter(c => c.trim());\n    const isTabular = cells.length >= 2;\n    if (isTabular) {\n      currentTable.push(cells.map(c => c.trim()));\n      prevWasTabular = true;\n    } else if (prevWasTabular && currentTable.length > 1) {\n      tables.push({\n        headers: currentTable[0],\n        rows: currentTable.slice(1),\n        rowCount: currentTable.length - 1\n      });\n      currentTable = [];\n      prevWasTabular = false;\n    } else {\n      currentTable = [];\n      prevWasTabular = false;\n    }\n  }\n  if (currentTable.length > 1) {\n    tables.push({\n      headers: currentTable[0],\n      rows: currentTable.slice(1),\n      rowCount: currentTable.length - 1\n    });\n  }\n  for (let i = 0; i < tables.length; i++) {\n    const t = tables[i];\n    for (const row of t.rows) {\n      const obj = { tableIndex: i + 1 };\n      t.headers.forEach((h, idx) => { obj[h] = row[idx] || ''; });\n      results.push({ json: obj });\n    }\n  }\n}\nif (results.length === 0) {\n  results.push({ json: { message: 'No tables detected in PDF' } });\n}\nreturn results;"
+      },
+      "id": "parse-tables",
+      "name": "Code Parse Tables",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-data",
+      "name": "Sheets Structured Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook with PDF').item.json.body.notifyEmail || 'data@company.com' }}",
+        "subject": "PDF Table Extraction Complete",
+        "message": "=Table data has been extracted from your PDF.\n\nRows extracted: {{ $('Code Parse Tables').all().length }}\n\nData has been saved to Google Sheets for review.",
+        "options": {}
+      },
+      "id": "gmail-report",
+      "name": "Gmail Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PDF Table Data Extractor\n\nUpload PDF → OCR with table detection → Code parses tabular data →\nStructured rows saved to Sheets → email report.\n\nUses OCR Engine 2 for better table detection.\nAutomatically identifies headers and data rows.\n\n**Setup:**\n1. Configure OCR API key (ocr.space with isTable=true)\n2. Set Google Sheets destination\n3. Set Gmail credentials\n4. POST { notifyEmail } + PDF binary"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook with PDF": {
+      "main": [
+        [{ "node": "HTTP OCR Table Detection", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP OCR Table Detection": {
+      "main": [
+        [{ "node": "Code Parse Tables", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Parse Tables": {
+      "main": [
+        [{ "node": "Sheets Structured Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Structured Data": {
+      "main": [
+        [{ "node": "Gmail Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

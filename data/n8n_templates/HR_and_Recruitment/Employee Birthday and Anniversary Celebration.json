@@ -1,0 +1,290 @@
+{
+  "name": "Employee Birthday and Anniversary Celebration",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "name": "Daily 8AM Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Employees"
+        },
+        "options": {}
+      },
+      "name": "Read Employee Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const employees = $input.all().map(i => i.json);\nconst today = new Date();\nconst todayStr = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;\n\nconst birthdays = [];\nconst anniversaries = [];\n\nemployees.forEach(emp => {\n  if (emp.birthday) {\n    const bday = emp.birthday.slice(5);\n    if (bday === todayStr) {\n      birthdays.push({ ...emp, celebrationType: 'birthday' });\n    }\n  }\n  if (emp.joinDate) {\n    const joinMD = emp.joinDate.slice(5);\n    const joinYear = parseInt(emp.joinDate.slice(0, 4));\n    const years = today.getFullYear() - joinYear;\n    if (joinMD === todayStr && years > 0) {\n      anniversaries.push({ ...emp, celebrationType: 'anniversary', yearsOfService: years });\n    }\n  }\n});\n\nconst results = [];\nbirthdays.forEach(b => results.push({ json: b }));\nanniversaries.forEach(a => results.push({ json: a }));\n\nif (results.length === 0) {\n  return [{ json: { noCelebrations: true } }];\n}\nreturn results;"
+      },
+      "name": "Check Birthdays and Anniversaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.noCelebrations}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Any Celebrations?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.celebrationType}}",
+              "value2": "birthday",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "name": "Birthday or Anniversary?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=🎂 Happy Birthday, {{$json.name}}!",
+        "emailType": "html",
+        "message": "=<div style='text-align:center; font-family:Arial,sans-serif;'><h1 style='color:#e74c3c;'>🎂 Happy Birthday! 🎉</h1><h2>Dear {{$json.name}},</h2><p style='font-size:18px;'>Wishing you a wonderful birthday filled with joy and happiness!</p><p style='font-size:16px;'>Your colleagues at {{$json.department}} and the entire company wish you all the best on your special day.</p><p style='font-size:14px; color:#666;'>Enjoy your day! 🎁🎈</p><p>With warm wishes,<br><strong>The Team</strong></p></div>",
+        "options": {}
+      },
+      "name": "Send Birthday Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 100],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=🎉 Happy {{$json.yearsOfService}}-Year Work Anniversary, {{$json.name}}!",
+        "emailType": "html",
+        "message": "=<div style='text-align:center; font-family:Arial,sans-serif;'><h1 style='color:#2ecc71;'>🎉 Happy Work Anniversary! 🏆</h1><h2>Congratulations, {{$json.name}}!</h2><p style='font-size:18px;'>Today marks your <strong>{{$json.yearsOfService}}-year anniversary</strong> with us!</p><p style='font-size:16px;'>Your dedication, hard work, and contributions to {{$json.department}} are truly valued.</p><p style='font-size:16px;'>Thank you for being an amazing part of our team! Here's to many more great years together. 🥂</p><p>With appreciation,<br><strong>The Team</strong></p></div>",
+        "options": {}
+      },
+      "name": "Send Anniversary Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 320],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-100XXXXXXXXXX",
+        "text": "=🎉 **Celebration Alert!**\n\n{{$json.celebrationType === 'birthday' ? '🎂 Happy Birthday to ' + $json.name + ' from ' + $json.department + '! 🎈' : '🏆 Congratulations to ' + $json.name + ' on ' + $json.yearsOfService + ' years with us! 🥂'}}\n\nLet's show some love! 💐",
+        "additionalFields": {}
+      },
+      "name": "Telegram Group Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1350, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Celebrations Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employeeName": "={{$json.name}}",
+            "department": "={{$json.department}}",
+            "celebrationType": "={{$json.celebrationType}}",
+            "yearsOfService": "={{$json.yearsOfService || 'N/A'}}",
+            "emailSent": "yes",
+            "telegramSent": "yes",
+            "date": "={{$now.toISO()}}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Track in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1570, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Employee Birthday and Anniversary Celebration\n\n**Trigger:** Daily at 8 AM\n**Process:**\n1. Read all employees from Sheets\n2. Check for today's birthdays (MM-DD match)\n3. Check for work anniversaries (MM-DD match + years > 0)\n4. If no celebrations today → stop\n5. Birthday → Send birthday email\n6. Anniversary → Send anniversary email (with years count)\n7. Post to Telegram group channel\n8. Log celebration to Sheets\n\n**Setup:**\n- 'Employees' sheet: name, email, department, birthday (YYYY-MM-DD), joinDate (YYYY-MM-DD)\n- 'Celebrations Log' sheet for tracking\n- Gmail + Telegram bot credentials\n- Update Telegram group chat ID",
+        "width": 440,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -60]
+    }
+  ],
+  "connections": {
+    "Daily 8AM Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Employee Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Employee Data": {
+      "main": [
+        [
+          {
+            "node": "Check Birthdays and Anniversaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Birthdays and Anniversaries": {
+      "main": [
+        [
+          {
+            "node": "Any Celebrations?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Celebrations?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Birthday or Anniversary?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Birthday or Anniversary?": {
+      "main": [
+        [
+          {
+            "node": "Send Birthday Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Anniversary Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Birthday Email": {
+      "main": [
+        [
+          {
+            "node": "Telegram Group Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Anniversary Email": {
+      "main": [
+        [
+          {
+            "node": "Telegram Group Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Group Notification": {
+      "main": [
+        [
+          {
+            "node": "Track in Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

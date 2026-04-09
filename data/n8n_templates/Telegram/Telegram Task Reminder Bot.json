@@ -1,0 +1,266 @@
+{
+  "name": "Telegram Task Reminder Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = item.json.message?.text || '';\n  const chatId = item.json.message?.chat?.id;\n  const userId = item.json.message?.from?.id;\n  const username = item.json.message?.from?.username || 'user';\n  \n  // Parse: /remind <text> at <HH:MM>\n  const match = text.match(/^\\/remind\\s+(.+?)\\s+at\\s+(\\d{1,2}:\\d{2})$/i);\n  if (match) {\n    const reminderText = match[1].trim();\n    const [hour, minute] = match[2].split(':').map(Number);\n    const now = new Date();\n    const remindAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute);\n    if (remindAt <= now) remindAt.setDate(remindAt.getDate() + 1);\n    results.push({\n      json: {\n        command: 'create',\n        reminderText,\n        remindAt: remindAt.toISOString(),\n        hour, minute,\n        chatId, userId, username,\n        status: 'pending',\n        createdAt: now.toISOString()\n      }\n    });\n  } else if (text.startsWith('/list')) {\n    results.push({ json: { command: 'list', chatId, userId, username } });\n  } else {\n    results.push({ json: { command: 'unknown', chatId } });\n  }\n}\nreturn results;"
+      },
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "outputKey": "create", "value": "create" },
+            { "outputKey": "list", "value": "list" },
+            { "outputKey": "unknown", "value": "unknown" }
+          ]
+        },
+        "dataType": "string",
+        "value1": "={{$json.command}}"
+      },
+      "name": "Route Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Reminders" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Save Reminder",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 150],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=⏰ Reminder set!\n📝 {{$json.reminderText}}\n🕐 Will remind at {{$json.hour}}:{{$json.minute}}",
+        "additionalFields": {}
+      },
+      "name": "Confirm Created",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 150],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Reminders" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get User Reminders",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst pending = items.filter(i => i.json.status === 'pending');\nlet text = '📋 <b>Your Pending Reminders:</b>\\n\\n';\nif (pending.length === 0) {\n  text += 'No pending reminders.';\n} else {\n  pending.forEach((item, idx) => {\n    text += `${idx + 1}. ${item.json.reminderText} - ⏰ ${item.json.remindAt}\\n`;\n  });\n}\nreturn [{ json: { text, chatId: pending[0]?.json.chatId || '' } }];"
+      },
+      "name": "Format List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send List",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "❓ Unknown command. Use:\n/remind <task> at <HH:MM>\n/list - show pending reminders",
+        "additionalFields": {}
+      },
+      "name": "Send Help",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 1 }
+          ]
+        }
+      },
+      "name": "Check Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Reminders" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Read All Reminders",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\nconst due = items.filter(i => {\n  if (i.json.status !== 'pending') return false;\n  const remindAt = new Date(i.json.remindAt);\n  return remindAt <= now;\n});\nif (due.length === 0) return [];\nreturn due.map(i => ({ json: { ...i.json, status: 'done' } }));"
+      },
+      "name": "Filter Due Reminders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 700]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=🔔 <b>REMINDER!</b>\n\n📝 {{$json.reminderText}}\n\nSet by @{{$json.username}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 700],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Task Reminder Bot\n\n**Commands:**\n- `/remind <task> at <HH:MM>` — create a reminder\n- `/list` — show pending reminders\n\n**Flows:**\n1. User command → parse → create/list/help\n2. Every minute → check due reminders → send alerts\n\n**Setup:**\n1. Set Telegram Bot API credentials\n2. Create Google Sheet: reminderText, remindAt, hour, minute, chatId, userId, username, status, createdAt",
+        "width": 450,
+        "height": 250
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 900]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [{ "node": "Route Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [{ "node": "Save Reminder", "type": "main", "index": 0 }],
+        [{ "node": "Get User Reminders", "type": "main", "index": 0 }],
+        [{ "node": "Send Help", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Reminder": {
+      "main": [
+        [{ "node": "Confirm Created", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get User Reminders": {
+      "main": [
+        [{ "node": "Format List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format List": {
+      "main": [
+        [{ "node": "Send List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Every Minute": {
+      "main": [
+        [{ "node": "Read All Reminders", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read All Reminders": {
+      "main": [
+        [{ "node": "Filter Due Reminders", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter Due Reminders": {
+      "main": [
+        [{ "node": "Send Reminder", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

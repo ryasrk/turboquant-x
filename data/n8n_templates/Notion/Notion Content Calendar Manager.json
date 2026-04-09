@@ -1,0 +1,163 @@
+{
+  "name": "Notion Content Calendar Manager",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Content Calendar Manager\nDaily check for content due today and send reminders via Telegram and email.\n\n**Setup:**\n1. Set Notion content database ID\n2. Configure Telegram bot token and chat ID\n3. Set author email property name to match your DB schema"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query Content DB",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Due Date|date",
+              "condition": "equals",
+              "returnType": "date",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Check If Due Today",
+      "type": "n8n-nodes-base.if",
+      "position": [680, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Format Reminders",
+      "type": "n8n-nodes-base.code",
+      "position": [900, 340],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst reminders = items.map(item => {\n  const props = item.json.properties || {};\n  const title = props['Name']?.title?.map(t => t.plain_text).join('') || 'Untitled';\n  const status = props['Status']?.select?.name || 'Unknown';\n  const author = props['Author']?.rich_text?.map(t => t.plain_text).join('') || '';\n  const authorEmail = props['Author Email']?.email || '';\n  const type = props['Content Type']?.select?.name || '';\n\n  return {\n    json: {\n      title,\n      status,\n      author,\n      authorEmail,\n      contentType: type,\n      dueDate: $now.format('yyyy-MM-dd')\n    }\n  };\n});\nreturn reminders;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Telegram Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1120, 340],
+      "parameters": {
+        "chatId": "",
+        "text": "=📅 *Content Due Today*\n\nTitle: {{ $json.title }}\nType: {{ $json.contentType }}\nAuthor: {{ $json.author }}\nStatus: {{ $json.status }}\n\nPlease ensure this content is published today!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Email Author",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1340, 340],
+      "parameters": {
+        "sendTo": "={{ $json.authorEmail }}",
+        "subject": "=Content Due Today: {{ $json.title }}",
+        "message": "=Hi {{ $json.author }},\n\nThis is a reminder that your content is due today:\n\nTitle: {{ $json.title }}\nType: {{ $json.contentType }}\nDue Date: {{ $json.dueDate }}\nCurrent Status: {{ $json.status }}\n\nPlease ensure it's published or updated today.\n\nThank you!",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [{ "node": "Notion Query Content DB", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query Content DB": {
+      "main": [
+        [{ "node": "Check If Due Today", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check If Due Today": {
+      "main": [
+        [{ "node": "Format Reminders", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Format Reminders": {
+      "main": [
+        [{ "node": "Telegram Reminder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Reminder": {
+      "main": [
+        [{ "node": "Email Author", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

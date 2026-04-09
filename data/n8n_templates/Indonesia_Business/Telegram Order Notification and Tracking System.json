@@ -1,0 +1,144 @@
+{
+  "name": "WhatsApp Order Notification and Tracking System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-webhook",
+        "options": {}
+      },
+      "name": "Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "order-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {"name": "order_id", "value": "={{ $json.body.order_id }}", "type": "string"},
+            {"name": "customer_name", "value": "={{ $json.body.customer_name }}", "type": "string"},
+            {"name": "customer_phone", "value": "={{ $json.body.phone }}", "type": "string"},
+            {"name": "items", "value": "={{ $json.body.items }}", "type": "string"},
+            {"name": "total", "value": "={{ $json.body.total }}", "type": "number"},
+            {"name": "status", "value": "={{ $json.body.status || 'new' }}", "type": "string"}
+          ]
+        }
+      },
+      "name": "Parse Order Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Orders"},
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [690, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {"conditions": {"conditions": [{"leftValue": "={{ $json.status }}", "rightValue": "new", "operator": {"type": "string", "operation": "equals"}}]}, "renameOutput": true, "outputKey": "New Order"},
+            {"conditions": {"conditions": [{"leftValue": "={{ $json.status }}", "rightValue": "processing", "operator": {"type": "string", "operation": "equals"}}]}, "renameOutput": true, "outputKey": "Processing"},
+            {"conditions": {"conditions": [{"leftValue": "={{ $json.status }}", "rightValue": "shipped", "operator": {"type": "string", "operation": "equals"}}]}, "renameOutput": true, "outputKey": "Shipped"},
+            {"conditions": {"conditions": [{"leftValue": "={{ $json.status }}", "rightValue": "delivered", "operator": {"type": "string", "operation": "equals"}}]}, "renameOutput": true, "outputKey": "Delivered"}
+          ]
+        }
+      },
+      "name": "Route by Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.customer_phone }}",
+        "text": "=Halo {{ $json.customer_name }} 👋\n\nTerima kasih atas pesanan Anda!\n\n🛒 *Order #{{ $json.order_id }}*\n📦 {{ $json.items }}\n💰 Total: Rp {{ $json.total.toLocaleString('id-ID') }}\n\nPesanan Anda sedang kami proses. Kami akan menginformasikan update selanjutnya.\n\nTerima kasih! 🙏"
+      },
+      "name": "WA - New Order",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1180, 140],
+      "credentials": {
+        "telegramApi": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.customer_phone }}",
+        "text": "=Halo {{ $json.customer_name }} 📦\n\n*Update Pesanan #{{ $json.order_id }}*\n\nPesanan Anda sedang *diproses* dan akan segera dikirim.\n\nTerima kasih sudah menunggu! 🙏"
+      },
+      "name": "WA - Processing",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1180, 300],
+      "credentials": {
+        "telegramApi": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.customer_phone }}",
+        "text": "=Halo {{ $json.customer_name }} 🚚\n\n*Pesanan #{{ $json.order_id }}* telah *dikirim*!\n\n📦 Estimasi tiba: 2-3 hari kerja\n🔍 Cek status: [link tracking]\n\nTerima kasih atas pesanan Anda! 🙏"
+      },
+      "name": "WA - Shipped",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1180, 460],
+      "credentials": {
+        "telegramApi": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.customer_phone }}",
+        "text": "=Halo {{ $json.customer_name }} ✅\n\n*Pesanan #{{ $json.order_id }}* telah *diterima*!\n\nSenang bisa melayani Anda. Jangan lupa berikan review ya ⭐\n\nTerima kasih! 🙏"
+      },
+      "name": "WA - Delivered",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1180, 620],
+      "credentials": {
+        "telegramApi": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## WhatsApp Order Notification System\n\n### Flow:\n1. **Webhook** — Receives order data from e-commerce/POS\n2. **Parse** — Extracts order details\n3. **Save** — Logs order to Google Sheets\n4. **Route** — Routes by order status (new/processing/shipped/delivered)\n5. **Notify** — Sends WhatsApp message in Bahasa Indonesia\n\n### Webhook JSON:\n```json\n{\"order_id\": \"ORD-001\", \"customer_name\": \"Budi\", \"phone\": \"+6281234567890\", \"items\": \"Kaos Polo x2\", \"total\": 250000, \"status\": \"new\"}\n```\n\n### Note:\nUses Telegram node as WhatsApp proxy. For native WhatsApp, use WhatsApp Business API node."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 60]
+    }
+  ],
+  "connections": {
+    "Order Webhook": {"main": [[{"node": "Parse Order Data", "type": "main", "index": 0}]]},
+    "Parse Order Data": {"main": [[{"node": "Save to Google Sheets", "type": "main", "index": 0}]]},
+    "Save to Google Sheets": {"main": [[{"node": "Route by Status", "type": "main", "index": 0}]]},
+    "Route by Status": {"main": [
+      [{"node": "Telegram - New Order", "type": "main", "index": 0}],
+      [{"node": "Telegram - Processing", "type": "main", "index": 0}],
+      [{"node": "Telegram - Shipped", "type": "main", "index": 0}],
+      [{"node": "Telegram - Delivered", "type": "main", "index": 0}]
+    ]}
+  }
+}

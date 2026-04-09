@@ -1,0 +1,100 @@
+{
+  "name": "AI Data Labeling Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "label-data",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Label each of the following data items. For each item, provide a label and a confidence score (0.0 to 1.0).\n\nLabel categories: {{ $json.body.labels ? $json.body.labels.join(', ') : 'positive, negative, neutral' }}\n\nData items:\n{{ JSON.stringify($json.body.items || $json.body.data || [], null, 2) }}\n\nReturn JSON array:\n[{\"index\": 0, \"text\": \"original text\", \"label\": \"...\", \"confidence\": 0.95, \"reasoning\": \"brief reason\"}]"
+            }
+          ]
+        },
+        "options": { "temperature": 0.1, "maxTokens": 3000 }
+      },
+      "name": "OpenAI Suggest Labels",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [470, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst content = items[0].json.message.content;\nconst confidenceThreshold = $('Webhook').item.json.body.confidenceThreshold || 0.8;\n\nlet labeled;\ntry {\n  const jsonMatch = content.match(/\\[.*\\]/s);\n  labeled = jsonMatch ? JSON.parse(jsonMatch[0]) : [];\n} catch (e) {\n  labeled = [];\n}\n\nconst highConfidence = labeled.filter(l => l.confidence >= confidenceThreshold);\nconst lowConfidence = labeled.filter(l => l.confidence < confidenceThreshold);\n\n// Label distribution\nconst distribution = {};\nfor (const item of labeled) {\n  distribution[item.label] = (distribution[item.label] || 0) + 1;\n}\n\nreturn [{\n  json: {\n    totalItems: labeled.length,\n    highConfidenceCount: highConfidence.length,\n    lowConfidenceCount: lowConfidence.length,\n    confidenceThreshold,\n    avgConfidence: labeled.length > 0 ? parseFloat((labeled.reduce((s, l) => s + l.confidence, 0) / labeled.length).toFixed(3)) : 0,\n    labelDistribution: distribution,\n    highConfidenceLabels: highConfidence,\n    lowConfidenceLabels: lowConfidence,\n    needsReview: lowConfidence.map(l => ({ index: l.index, text: l.text, suggestedLabel: l.label, confidence: l.confidence, reasoning: l.reasoning }))\n  }\n}];"
+      },
+      "name": "Review Low Confidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ new Date().toISOString() }}",
+            "total_items": "={{ $json.totalItems }}",
+            "auto_labeled": "={{ $json.highConfidenceCount }}",
+            "needs_review": "={{ $json.lowConfidenceCount }}",
+            "avg_confidence": "={{ $json.avgConfidence }}",
+            "distribution": "={{ JSON.stringify($json.labelDistribution) }}",
+            "high_confidence_data": "={{ JSON.stringify($json.highConfidenceLabels) }}",
+            "review_items": "={{ JSON.stringify($json.needsReview) }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Labeled Output",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Data Labeling Assistant\n\nReceives unlabeled data, uses OpenAI to suggest labels with confidence scores, separates high/low confidence predictions, and outputs labeled data to Sheets with items needing human review flagged.\n\n**Setup:**\n1. Add OpenAI and Google Sheets credentials\n2. POST: `{\"items\": [\"text1\", \"text2\"], \"labels\": [\"cat1\", \"cat2\"], \"confidenceThreshold\": 0.8}`\n3. Defaults: positive/negative/neutral labels, 0.8 threshold"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "OpenAI Suggest Labels", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Suggest Labels": {
+      "main": [
+        [{ "node": "Review Low Confidence", "type": "main", "index": 0 }]
+      ]
+    },
+    "Review Low Confidence": {
+      "main": [
+        [{ "node": "Write Labeled Output", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

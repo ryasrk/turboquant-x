@@ -1,0 +1,147 @@
+{
+  "name": "Document Translation Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "translate-document",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-doc",
+      "name": "Webhook Document",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/image",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "language",
+              "value": "={{ $json.body.sourceLanguage || 'eng' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "extract-text",
+      "name": "HTTP Extract Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://translation.googleapis.com/language/translate/v2",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ q: $json.ParsedResults?.[0]?.ParsedText || '', source: $('Webhook Document').item.json.body.sourceLanguage || 'en', target: $('Webhook Document').item.json.body.targetLanguage || 'es', format: 'text' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "translate-api",
+      "name": "HTTP Translate API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const translated = item.json.data?.translations?.[0]?.translatedText || item.json.translatedText || '';\n  const sourceText = $('HTTP Extract Text').item.json.ParsedResults?.[0]?.ParsedText || '';\n  const webhookData = $('Webhook Document').item.json.body || {};\n  const html = `<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>\n    body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }\n    h1 { color: #2c3e50; }\n    .original { background: #f8f9fa; padding: 20px; border-left: 4px solid #3498db; margin: 20px 0; }\n    .translated { background: #f0fff0; padding: 20px; border-left: 4px solid #27ae60; margin: 20px 0; }\n    .meta { color: #999; font-size: 12px; }\n  </style></head><body>\n    <h1>Translated Document</h1>\n    <p class=\"meta\">Source: ${webhookData.sourceLanguage || 'en'} → Target: ${webhookData.targetLanguage || 'es'} | Translated: ${new Date().toISOString()}</p>\n    <h2>Translation</h2><div class=\"translated\">${translated.replace(/\\n/g, '<br>')}</div>\n    <h2>Original Text</h2><div class=\"original\">${sourceText.substring(0, 3000).replace(/\\n/g, '<br>')}</div>\n  </body></html>`;\n  results.push({\n    json: {\n      html,\n      sourceLanguage: webhookData.sourceLanguage || 'en',\n      targetLanguage: webhookData.targetLanguage || 'es',\n      wordCount: translated.split(/\\s+/).length\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "reassemble",
+      "name": "Code Reassemble",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.html2pdf.app/v1/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ html: $json.html }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "generate-pdf",
+      "name": "HTTP Generate Translated PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Document Translation Pipeline\n\nUpload document → OCR extracts text → Translation API translates →\nCode reassembles into bilingual HTML → generates translated PDF.\n\n**Supported:** Google Translate, DeepL, or any translation API.\n\n**Setup:**\n1. Configure OCR API credentials\n2. Configure Translation API key\n3. Configure HTML-to-PDF API\n4. POST { sourceLanguage: 'en', targetLanguage: 'es' } + binary document"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Document": {
+      "main": [
+        [{ "node": "HTTP Extract Text", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Extract Text": {
+      "main": [
+        [{ "node": "HTTP Translate API", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Translate API": {
+      "main": [
+        [{ "node": "Code Reassemble", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Reassemble": {
+      "main": [
+        [{ "node": "HTTP Generate Translated PDF", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,158 @@
+{
+  "name": "AI Customer Email Classifier and Router",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "filters": { "readStatus": "unread" }
+      },
+      "name": "Gmail Trigger - Incoming Email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Classify the following customer email into exactly ONE category: billing, support, sales, or spam.\n\nAlso provide a brief reason for the classification and a priority level (high, medium, low).\n\nReturn ONLY valid JSON: {\"category\": \"...\", \"reason\": \"...\", \"priority\": \"...\"}\n\nEmail Subject: {{ $json.subject }}\nEmail Body: {{ $json.text }}\nFrom: {{ $json.from }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 200
+        }
+      },
+      "name": "OpenAI - Classify Email",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { category: 'support', reason: 'Could not parse', priority: 'medium' };\n}\nreturn [{\n  json: {\n    ...items[0].json,\n    category: parsed.category.toLowerCase(),\n    reason: parsed.reason,\n    priority: parsed.priority\n  }\n}];"
+      },
+      "name": "Code - Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "outputIndex": 0, "conditions": { "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "billing", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputIndex": 1, "conditions": { "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "support", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputIndex": 2, "conditions": { "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "sales", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputIndex": 3, "conditions": { "conditions": [{ "leftValue": "={{ $json.category }}", "rightValue": "spam", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        }
+      },
+      "name": "Switch - Route by Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "billing@example.com",
+        "subject": "=[{{ $json.priority }}] Billing Inquiry from {{ $json.from }}",
+        "message": "=<strong>Category:</strong> Billing<br><strong>Priority:</strong> {{ $json.priority }}<br><strong>Reason:</strong> {{ $json.reason }}<br><br><strong>Original Subject:</strong> {{ $json.subject }}<br><strong>Original Body:</strong><br>{{ $json.text }}",
+        "options": {}
+      },
+      "name": "Gmail - Forward to Billing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 100],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "support@example.com",
+        "subject": "=[{{ $json.priority }}] Support Request from {{ $json.from }}",
+        "message": "=<strong>Category:</strong> Support<br><strong>Priority:</strong> {{ $json.priority }}<br><strong>Reason:</strong> {{ $json.reason }}<br><br><strong>Original Subject:</strong> {{ $json.subject }}<br><strong>Original Body:</strong><br>{{ $json.text }}",
+        "options": {}
+      },
+      "name": "Gmail - Forward to Support",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "sales@example.com",
+        "subject": "=[{{ $json.priority }}] Sales Lead from {{ $json.from }}",
+        "message": "=<strong>Category:</strong> Sales<br><strong>Priority:</strong> {{ $json.priority }}<br><strong>Reason:</strong> {{ $json.reason }}<br><br><strong>Original Subject:</strong> {{ $json.subject }}<br><strong>Original Body:</strong><br>{{ $json.text }}",
+        "options": {}
+      },
+      "name": "Gmail - Forward to Sales",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 500],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 800,
+        "height": 200,
+        "content": "## AI Customer Email Classifier & Router\n\n**Setup:**\n1. Connect Gmail OAuth2 for trigger and sending\n2. Connect OpenAI API key\n3. Update team email addresses in each Gmail forward node (billing@, support@, sales@)\n4. Emails classified as 'spam' are dropped (no output)\n\nGPT-4o-mini classifies emails by category and priority, then routes them to the appropriate team inbox."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 600]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - Incoming Email": {
+      "main": [[{ "node": "OpenAI - Classify Email", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Classify Email": {
+      "main": [[{ "node": "Code - Parse Classification", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Classification": {
+      "main": [[{ "node": "Switch - Route by Category", "type": "main", "index": 0 }]]
+    },
+    "Switch - Route by Category": {
+      "main": [
+        [{ "node": "Gmail - Forward to Billing", "type": "main", "index": 0 }],
+        [{ "node": "Gmail - Forward to Support", "type": "main", "index": 0 }],
+        [{ "node": "Gmail - Forward to Sales", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

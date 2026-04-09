@@ -1,0 +1,211 @@
+{
+  "name": "Abandoned Cart Recovery Email Sequence",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cart-abandon",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "name": "Cart Abandonment Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "customerEmail", "value": "={{ $json.body.email }}" },
+            { "name": "customerName", "value": "={{ $json.body.name }}" },
+            { "name": "cartItems", "value": "={{ $json.body.items }}" },
+            { "name": "cartTotal", "value": "={{ $json.body.total }}" },
+            { "name": "cartUrl", "value": "={{ $json.body.cart_url }}" },
+            { "name": "abandonedAt", "value": "={{ $now.toISO() }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract Cart Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "hours"
+      },
+      "name": "Wait 1 Hour",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customerEmail }}",
+        "subject": "You left something behind! Complete your order",
+        "emailType": "html",
+        "message": "<h2>Hi {{ $json.customerName }},</h2><p>We noticed you left items in your cart worth <strong>${{ $json.cartTotal }}</strong>.</p><p>Your items are still waiting for you!</p><p><a href=\"{{ $json.cartUrl }}\" style=\"background:#4CAF50;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;\">Complete Your Order</a></p><p>Need help? Reply to this email and we'll assist you.</p>",
+        "options": {
+          "senderName": "Your Store"
+        }
+      },
+      "name": "Send 1h Reminder Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 24,
+        "unit": "hours"
+      },
+      "name": "Wait 24 Hours",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customerEmail }}",
+        "subject": "Still thinking about it? Here's 10% off!",
+        "emailType": "html",
+        "message": "<h2>Hi {{ $json.customerName }},</h2><p>We'd hate for you to miss out! Your cart worth <strong>${{ $json.cartTotal }}</strong> is still saved.</p><p>Use code <strong>COMEBACK10</strong> for 10% off your order!</p><p><a href=\"{{ $json.cartUrl }}\" style=\"background:#FF5722;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;\">Claim Your Discount</a></p>",
+        "options": {
+          "senderName": "Your Store"
+        }
+      },
+      "name": "Send 24h Discount Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 72,
+        "unit": "hours"
+      },
+      "name": "Wait 72 Hours",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1570, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customerEmail }}",
+        "subject": "Last chance! Your cart expires soon",
+        "emailType": "html",
+        "message": "<h2>Final Reminder, {{ $json.customerName }}</h2><p>Your cart worth <strong>${{ $json.cartTotal }}</strong> will expire soon.</p><p>This is your last chance to use code <strong>LASTCHANCE15</strong> for 15% off!</p><p><a href=\"{{ $json.cartUrl }}\" style=\"background:#F44336;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;\">Complete Order Now</a></p><p>After today, your cart items may no longer be available.</p>",
+        "options": {
+          "senderName": "Your Store"
+        }
+      },
+      "name": "Send 72h Final Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1790, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Recovery Tracking" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Email": "={{ $json.customerEmail }}",
+            "Name": "={{ $json.customerName }}",
+            "Cart Total": "={{ $json.cartTotal }}",
+            "Abandoned At": "={{ $json.abandonedAt }}",
+            "Emails Sent": "3",
+            "Status": "All emails sent"
+          }
+        },
+        "options": {}
+      },
+      "name": "Track Recovery in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2010, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Abandoned Cart Recovery Email Sequence\n\n**How to use:**\n1. Configure the Webhook URL in your e-commerce platform to fire on cart abandonment\n2. Set up Gmail OAuth2 credentials\n3. Connect your Google Sheets for tracking\n4. Customize email templates with your branding\n5. Adjust wait times (1h, 24h, 72h) as needed\n\n**Webhook payload expected:**\n```json\n{\n  \"email\": \"customer@example.com\",\n  \"name\": \"John Doe\",\n  \"items\": \"Product A, Product B\",\n  \"total\": \"59.99\",\n  \"cart_url\": \"https://store.com/cart/abc123\"\n}\n```\n\n**Discount codes:** Update COMEBACK10 and LASTCHANCE15 with your actual coupon codes.",
+        "width": 400,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -120]
+    }
+  ],
+  "connections": {
+    "Cart Abandonment Webhook": {
+      "main": [
+        [{ "node": "Extract Cart Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Cart Data": {
+      "main": [
+        [{ "node": "Wait 1 Hour", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 1 Hour": {
+      "main": [
+        [{ "node": "Send 1h Reminder Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send 1h Reminder Email": {
+      "main": [
+        [{ "node": "Wait 24 Hours", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 24 Hours": {
+      "main": [
+        [{ "node": "Send 24h Discount Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send 24h Discount Email": {
+      "main": [
+        [{ "node": "Wait 72 Hours", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 72 Hours": {
+      "main": [
+        [{ "node": "Send 72h Final Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send 72h Final Email": {
+      "main": [
+        [{ "node": "Track Recovery in Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

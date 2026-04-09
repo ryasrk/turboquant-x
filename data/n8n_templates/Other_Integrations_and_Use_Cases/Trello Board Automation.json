@@ -1,0 +1,123 @@
+{
+  "name": "Trello Board Automation",
+  "nodes": [
+    {
+      "name": "Webhook Card Move",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "trello-card-move",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Detect Column Change",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const action = payload.action || {};\n  const data = action.data || {};\n  const card = data.card || {};\n  const listAfter = data.listAfter || {};\n  const listBefore = data.listBefore || {};\n  const member = action.memberCreator || {};\n  \n  const isBlocked = (listAfter.name || '').toLowerCase().includes('blocked') ||\n                    (listAfter.name || '').toLowerCase().includes('stuck');\n  \n  return {\n    json: {\n      cardId: card.id || '',\n      cardName: card.name || '',\n      fromColumn: listBefore.name || '',\n      toColumn: listAfter.name || '',\n      boardName: data.board?.name || '',\n      movedBy: member.fullName || member.username || '',\n      actionType: action.type || '',\n      isBlocked: isBlocked,\n      cardUrl: card.shortUrl || `https://trello.com/c/${card.shortLink || ''}`,\n      timestamp: action.date || new Date().toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Slack Card Notification",
+      "type": "n8n-nodes-base.slack",
+      "position": [710, 200],
+      "parameters": {
+        "channel": "",
+        "text": "=📋 *Trello Card Moved*\n\nCard: {{ $json.cardName }}\nFrom: {{ $json.fromColumn }} → To: {{ $json.toColumn }}\nBoard: {{ $json.boardName }}\nBy: {{ $json.movedBy }}\nLink: {{ $json.cardUrl }}",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sheets Timeline Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 400],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Check If Blocked",
+      "type": "n8n-nodes-base.if",
+      "position": [940, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isBlocked }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Gmail Blocked Alert",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1170, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=⚠️ Blocked Card: {{ $json.cardName }}",
+        "message": "=A Trello card has been moved to a blocked/stuck column.\n\nCard: {{ $json.cardName }}\nBoard: {{ $json.boardName }}\nColumn: {{ $json.toColumn }}\nMoved By: {{ $json.movedBy }}\nLink: {{ $json.cardUrl }}\n\nPlease investigate and unblock this task.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Trello Board Automation\nReceives Trello card move webhooks, notifies Slack, logs timeline to Sheets, and emails alerts when cards are blocked.\n\n**Setup:**\n1. Configure Trello webhook for 'updateCard' actions\n2. Set Slack channel for card movement notifications\n3. Connect Google Sheets for timeline tracking\n4. Configure Gmail for blocked card alerts"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Card Move": {
+      "main": [[{ "node": "Detect Column Change", "type": "main", "index": 0 }]]
+    },
+    "Detect Column Change": {
+      "main": [
+        [
+          { "node": "Slack Card Notification", "type": "main", "index": 0 },
+          { "node": "Sheets Timeline Log", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Sheets Timeline Log": {
+      "main": [[{ "node": "Check If Blocked", "type": "main", "index": 0 }]]
+    },
+    "Check If Blocked": {
+      "main": [
+        [{ "node": "Gmail Blocked Alert", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

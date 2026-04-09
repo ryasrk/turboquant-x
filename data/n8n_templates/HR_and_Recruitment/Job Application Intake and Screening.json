@@ -1,0 +1,174 @@
+{
+  "name": "Job Application Intake and Screening",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "job-application-intake",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "name": "Webhook - New Application",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body || $input.first().json;\nconst applicant = {\n  name: body.name || '',\n  email: body.email || '',\n  phone: body.phone || '',\n  position: body.position || '',\n  resumeText: body.resume_text || '',\n  appliedAt: new Date().toISOString()\n};\nreturn [{ json: applicant }];"
+      },
+      "name": "Parse Resume Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an HR screening assistant. Analyze this resume text for the position of {{$json.position}}.\n\nResume:\n{{$json.resumeText}}\n\nReturn a JSON with:\n- relevance_score (0-100)\n- key_skills (array of matched skills)\n- experience_years (number)\n- recommendation (shortlist/review/reject)\n- summary (one paragraph)"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "name": "OpenAI - Screen Resume",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const input = $input.first().json;\nconst screening = JSON.parse(input.message?.content || '{}');\nconst applicant = $('Parse Resume Data').first().json;\nreturn [{\n  json: {\n    ...applicant,\n    relevanceScore: screening.relevance_score || 0,\n    keySkills: (screening.key_skills || []).join(', '),\n    experienceYears: screening.experience_years || 0,\n    recommendation: screening.recommendation || 'review',\n    screeningSummary: screening.summary || '',\n    screenedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Score Candidate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Applications"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1130, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=Application Received - {{$json.position}}",
+        "emailType": "text",
+        "message": "=Dear {{$json.name}},\n\nThank you for applying for the {{$json.position}} position. We have received your application and it is currently under review.\n\nOur recruitment team will get back to you within 5-7 business days.\n\nBest regards,\nHR Team",
+        "options": {}
+      },
+      "name": "Auto-Reply Acknowledgment",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1130, 420],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Job Application Intake and Screening\n\n**Trigger:** Webhook receives new job application\n**Process:**\n1. Parse incoming resume/application data\n2. OpenAI screens resume against job requirements\n3. Score and categorize candidate\n4. Save results to Google Sheets\n5. Send auto-reply acknowledgment to applicant\n\n**Setup:**\n- Configure OpenAI API credentials\n- Create Google Sheet with columns: name, email, phone, position, relevanceScore, keySkills, experienceYears, recommendation, screeningSummary, appliedAt, screenedAt\n- Configure Gmail credentials for auto-reply",
+        "width": 400,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -60]
+    }
+  ],
+  "connections": {
+    "Webhook - New Application": {
+      "main": [
+        [
+          {
+            "node": "Parse Resume Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Resume Data": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - Screen Resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Screen Resume": {
+      "main": [
+        [
+          {
+            "node": "Score Candidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Candidate": {
+      "main": [
+        [
+          {
+            "node": "Save to Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Auto-Reply Acknowledgment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

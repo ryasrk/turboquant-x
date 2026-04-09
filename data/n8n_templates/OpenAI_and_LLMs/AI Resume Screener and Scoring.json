@@ -1,0 +1,163 @@
+{
+  "name": "AI Resume Screener and Scoring",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "screen-resume",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Resume Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an expert HR recruiter AI. Score the following resume against the job requirements.\n\nJob Requirements:\n{{ $json.body.job_requirements || 'General software engineering position' }}\n\nProvide scores from 0-100 for each category and an overall score.\nReturn ONLY valid JSON:\n{\n  \"candidate_name\": \"extracted name\",\n  \"overall_score\": 85,\n  \"skills_score\": 80,\n  \"experience_score\": 90,\n  \"education_score\": 85,\n  \"skills_match\": [\"matched skill 1\", \"matched skill 2\"],\n  \"skills_missing\": [\"missing skill 1\"],\n  \"years_experience\": 5,\n  \"strengths\": [\"strength 1\", \"strength 2\"],\n  \"concerns\": [\"concern 1\"],\n  \"recommendation\": \"Strongly Recommend / Recommend / Consider / Pass\"\n}\n\nResume:\n{{ $json.body.resume_text }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1500
+        }
+      },
+      "name": "OpenAI - Score Resume",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { candidate_name: 'Unknown', overall_score: 0, skills_score: 0, experience_score: 0, education_score: 0, recommendation: 'Error parsing' };\n}\nreturn [{\n  json: {\n    candidateName: parsed.candidate_name || 'Unknown',\n    overallScore: parsed.overall_score || 0,\n    skillsScore: parsed.skills_score || 0,\n    experienceScore: parsed.experience_score || 0,\n    educationScore: parsed.education_score || 0,\n    skillsMatch: Array.isArray(parsed.skills_match) ? parsed.skills_match.join(', ') : '',\n    skillsMissing: Array.isArray(parsed.skills_missing) ? parsed.skills_missing.join(', ') : '',\n    yearsExperience: parsed.years_experience || 0,\n    strengths: Array.isArray(parsed.strengths) ? parsed.strengths.join(', ') : '',\n    concerns: Array.isArray(parsed.concerns) ? parsed.concerns.join(', ') : '',\n    recommendation: parsed.recommendation || 'N/A',\n    date: new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "name": "Code - Parse Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Candidate": "={{ $json.candidateName }}",
+            "Overall Score": "={{ $json.overallScore }}",
+            "Skills Score": "={{ $json.skillsScore }}",
+            "Experience Score": "={{ $json.experienceScore }}",
+            "Education Score": "={{ $json.educationScore }}",
+            "Recommendation": "={{ $json.recommendation }}",
+            "Strengths": "={{ $json.strengths }}",
+            "Concerns": "={{ $json.concerns }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Candidate", "type": "string", "display": true },
+            { "id": "Overall Score", "type": "string", "display": true },
+            { "id": "Skills Score", "type": "string", "display": true },
+            { "id": "Experience Score", "type": "string", "display": true },
+            { "id": "Education Score", "type": "string", "display": true },
+            { "id": "Recommendation", "type": "string", "display": true },
+            { "id": "Strengths", "type": "string", "display": true },
+            { "id": "Concerns", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Ranking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.overallScore }}",
+              "value2": 80,
+              "operation": "largerEqual"
+            }
+          ]
+        }
+      },
+      "name": "IF - Score Above 80",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "hr@example.com",
+        "subject": "=🌟 High-Score Candidate: {{ $json.candidateName }} (Score: {{ $json.overallScore }})",
+        "message": "=<h2>High-Potential Candidate Alert</h2>\n<p><strong>Candidate:</strong> {{ $json.candidateName }}</p>\n<p><strong>Overall Score:</strong> {{ $json.overallScore }}/100</p>\n<p><strong>Skills:</strong> {{ $json.skillsScore }} | <strong>Experience:</strong> {{ $json.experienceScore }} | <strong>Education:</strong> {{ $json.educationScore }}</p>\n<p><strong>Recommendation:</strong> {{ $json.recommendation }}</p>\n<p><strong>Strengths:</strong> {{ $json.strengths }}</p>\n<p><strong>Concerns:</strong> {{ $json.concerns }}</p>\n<p><strong>Matched Skills:</strong> {{ $json.skillsMatch }}</p>\n<p><strong>Missing Skills:</strong> {{ $json.skillsMissing }}</p>",
+        "options": {}
+      },
+      "name": "Gmail - Notify HR",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1500, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 800,
+        "height": 200,
+        "content": "## AI Resume Screener & Scoring\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set spreadsheet ID in Google Sheets node\n3. POST to webhook: `{\"resume_text\": \"full resume text...\", \"job_requirements\": \"required skills and experience...\"}`\n\nScores resumes on skills/experience/education (0-100), logs to Sheets, and notifies HR if overall score ≥ 80."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Resume Input": {
+      "main": [[{ "node": "OpenAI - Score Resume", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Score Resume": {
+      "main": [[{ "node": "Code - Parse Scores", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Scores": {
+      "main": [[{ "node": "Google Sheets - Ranking", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Ranking": {
+      "main": [[{ "node": "IF - Score Above 80", "type": "main", "index": 0 }]]
+    },
+    "IF - Score Above 80": {
+      "main": [
+        [{ "node": "Gmail - Notify HR", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

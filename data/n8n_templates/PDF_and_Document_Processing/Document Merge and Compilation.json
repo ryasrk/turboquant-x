@@ -1,0 +1,130 @@
+{
+  "name": "Document Merge and Compilation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "merge-documents",
+        "options": {}
+      },
+      "id": "webhook-input",
+      "name": "Webhook with Doc IDs",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.documentUrls[$itemIndex] || $json.body.fetchUrl }}",
+        "method": "GET",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "fetch-docs",
+      "name": "HTTP Fetch Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet mergedContent = '';\nconst toc = [];\nfor (let i = 0; i < items.length; i++) {\n  const content = items[i].json.data || items[i].json.body || '';\n  const title = items[i].json.title || `Document ${i + 1}`;\n  toc.push(`${i + 1}. ${title}`);\n  mergedContent += `<h2>${title}</h2>\\n${content}\\n<hr/>\\n`;\n}\nconst finalHtml = `<html><body><h1>Merged Document</h1><h3>Table of Contents</h3><ul>${toc.map(t => `<li>${t}</li>`).join('')}</ul><hr/>${mergedContent}</body></html>`;\nreturn [{ json: { mergedHtml: finalHtml, documentCount: items.length, tableOfContents: toc } }];"
+      },
+      "id": "merge-content",
+      "name": "Code Merge Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.pdfgeneratorapi.com/v3/documents/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ html: $json.mergedHtml, output: 'pdf' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-pdf",
+      "name": "HTTP Generate PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook with Doc IDs').item.json.body.recipientEmail || 'team@company.com' }}",
+        "subject": "=Merged Document Ready ({{ $('Code Merge Content').item.json.documentCount }} docs)",
+        "message": "=Your merged document is ready.\n\nDocuments merged: {{ $('Code Merge Content').item.json.documentCount }}\n\nTable of Contents:\n{{ $('Code Merge Content').item.json.tableOfContents.join('\\n') }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{}]
+          }
+        }
+      },
+      "id": "gmail-send",
+      "name": "Gmail with Attachment",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Document Merge and Compilation\n\nReceives document IDs/URLs via webhook, fetches each document,\nmerges content into a single HTML with table of contents,\nconverts to PDF, and emails with attachment.\n\n**Setup:**\n1. Configure HTTP auth for document source API\n2. Configure PDF generation API credentials\n3. Set Gmail credentials\n4. POST { documentUrls: [...], recipientEmail: '...' } to webhook"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook with Doc IDs": {
+      "main": [
+        [{ "node": "HTTP Fetch Documents", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Fetch Documents": {
+      "main": [
+        [{ "node": "Code Merge Content", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Merge Content": {
+      "main": [
+        [{ "node": "HTTP Generate PDF", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Generate PDF": {
+      "main": [
+        [{ "node": "Gmail with Attachment", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

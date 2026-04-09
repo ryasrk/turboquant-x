@@ -1,0 +1,121 @@
+{
+  "name": "GitHub Issue Labeler and Assigner",
+  "nodes": [
+    {
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "github-issue",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Analyze Keywords",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const issue = payload.issue || {};\n  const title = (issue.title || '').toLowerCase();\n  const body = (issue.body || '').toLowerCase();\n  const combined = title + ' ' + body;\n  const repo = payload.repository || {};\n  \n  const labelRules = [\n    { keywords: ['bug', 'error', 'crash', 'broken', 'fix', 'issue'], label: 'bug' },\n    { keywords: ['feature', 'request', 'enhancement', 'add', 'new'], label: 'enhancement' },\n    { keywords: ['docs', 'documentation', 'readme', 'typo', 'spelling'], label: 'documentation' },\n    { keywords: ['performance', 'slow', 'optimize', 'speed', 'memory'], label: 'performance' },\n    { keywords: ['security', 'vulnerability', 'cve', 'auth'], label: 'security' },\n    { keywords: ['test', 'testing', 'coverage', 'ci', 'pipeline'], label: 'testing' },\n    { keywords: ['ui', 'ux', 'design', 'css', 'layout', 'style'], label: 'ui/ux' }\n  ];\n  \n  const assignRules = [\n    { keywords: ['frontend', 'react', 'css', 'ui', 'ux'], assignee: 'frontend-dev' },\n    { keywords: ['backend', 'api', 'database', 'server'], assignee: 'backend-dev' },\n    { keywords: ['devops', 'ci', 'deploy', 'docker', 'infra'], assignee: 'devops-engineer' },\n    { keywords: ['security', 'auth', 'vulnerability'], assignee: 'security-lead' }\n  ];\n  \n  const labels = labelRules\n    .filter(rule => rule.keywords.some(kw => combined.includes(kw)))\n    .map(rule => rule.label);\n  if (labels.length === 0) labels.push('triage');\n  \n  const assignee = assignRules.find(rule => rule.keywords.some(kw => combined.includes(kw)));\n  \n  return {\n    json: {\n      issueNumber: issue.number || 0,\n      issueTitle: issue.title || '',\n      repoOwner: repo.owner?.login || '',\n      repoName: repo.name || '',\n      repoFullName: repo.full_name || '',\n      labels: labels,\n      assignee: assignee?.assignee || '',\n      action: payload.action || '',\n      issueUrl: issue.html_url || '',\n      author: issue.user?.login || ''\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Add Labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [710, 200],
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.repoFullName }}/issues/{{ $json.issueNumber }}/labels",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ labels: $json.labels }) }}",
+        "options": {
+          "response": {
+            "response": { "responseFormat": "json" }
+          }
+        }
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Assign User",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [710, 400],
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.repoFullName }}/issues/{{ $json.issueNumber }}/assignees",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ assignees: [$json.assignee] }) }}",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sheets Tracking",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "values": [
+              { "column": "issueNumber", "value": "={{ $json.issueNumber }}" },
+              { "column": "title", "value": "={{ $json.issueTitle }}" },
+              { "column": "labels", "value": "={{ $json.labels.join(', ') }}" },
+              { "column": "assignee", "value": "={{ $json.assignee }}" },
+              { "column": "author", "value": "={{ $json.author }}" },
+              { "column": "url", "value": "={{ $json.issueUrl }}" },
+              { "column": "processedAt", "value": "={{ $now.toISO() }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## GitHub Issue Labeler and Assigner\nReceives GitHub issue webhooks, analyzes title/body keywords, auto-adds labels, assigns team members, and logs to Sheets.\n\n**Setup:**\n1. Configure GitHub webhook for 'issues' events\n2. Set GitHub token in HTTP Header Auth (Authorization: Bearer YOUR_TOKEN)\n3. Customize keyword-to-label rules in the Code node\n4. Customize keyword-to-assignee rules for your team\n5. Connect Google Sheets for issue tracking"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [[{ "node": "Analyze Keywords", "type": "main", "index": 0 }]]
+    },
+    "Analyze Keywords": {
+      "main": [
+        [
+          { "node": "Add Labels", "type": "main", "index": 0 },
+          { "node": "Assign User", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Add Labels": {
+      "main": [[{ "node": "Sheets Tracking", "type": "main", "index": 0 }]]
+    }
+  }
+}

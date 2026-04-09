@@ -1,0 +1,163 @@
+{
+  "name": "Slack Team Availability Checker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whos-available",
+        "options": {}
+      },
+      "name": "Availability Slash Command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://slack.com/api/users.list",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.slackApi.accessToken }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Get Users List",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst members = (items[0].json.members || []).filter(m => !m.is_bot && !m.deleted && m.id !== 'USLACKBOT');\n\n// We'll simulate presence check — in production, use users.getPresence for each\nconst results = members.map(m => ({\n  userId: m.id,\n  name: m.real_name || m.name || 'Unknown',\n  statusText: (m.profile || {}).status_text || '',\n  statusEmoji: (m.profile || {}).status_emoji || '',\n  title: (m.profile || {}).title || '',\n  tz: m.tz || 'UTC'\n}));\n\nreturn results.map(r => ({json: r}));"
+      },
+      "name": "Parse Users",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://slack.com/api/users.getPresence?user={{ $json.userId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.slackApi.accessToken }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Check Presence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst matrix = {\n  active: [],\n  away: [],\n  dnd: [],\n  offline: []\n};\n\nfor (const item of items) {\n  const data = item.json;\n  const presence = data.presence || 'away';\n  const name = data.name || 'Unknown';\n  const status = data.statusText ? ` (${data.statusEmoji} ${data.statusText})` : '';\n\n  if (presence === 'active') {\n    matrix.active.push(`<@${data.userId}>${status}`);\n  } else {\n    matrix.away.push(`<@${data.userId}>${status}`);\n  }\n}\n\nlet reply = `:busts_in_silhouette: *Team Availability*\\n\\n`;\nreply += `:green_circle: *Available (${matrix.active.length}):*\\n`;\nreply += matrix.active.length > 0 ? matrix.active.join('\\n') : '_No one currently active_';\nreply += `\\n\\n:red_circle: *Away (${matrix.away.length}):*\\n`;\nreply += matrix.away.length > 0 ? matrix.away.join('\\n') : '_Everyone is available!_';\nreply += `\\n\\n_Checked at ${new Date().toLocaleTimeString()}_`;\n\nreturn [{json: {reply, activeCount: matrix.active.length, awayCount: matrix.away.length}}];"
+      },
+      "name": "Compile Availability",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $('Availability Slash Command').item.json.body.channel_id || $('Availability Slash Command').item.json.channel_id }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.reply }}",
+        "otherOptions": {}
+      },
+      "name": "Reply Availability",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1360, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Team Availability Checker\n\nInstant team availability matrix.\n\n**Usage:** `/whosavailable`\n\n**Flow:**\n1. Slash command triggers webhook\n2. Fetch all workspace users\n3. Parse into active members\n4. Check presence status for each user\n5. Compile availability matrix\n6. Reply with formatted status\n\n**Shows:**\n- Green circle = Active\n- Red circle = Away\n- Custom status text if set",
+        "width": 340,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Availability Slash Command": {
+      "main": [
+        [
+          {
+            "node": "Get Users List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Users List": {
+      "main": [
+        [
+          {
+            "node": "Parse Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Users": {
+      "main": [
+        [
+          {
+            "node": "Check Presence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Presence": {
+      "main": [
+        [
+          {
+            "node": "Compile Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Availability": {
+      "main": [
+        [
+          {
+            "node": "Reply Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

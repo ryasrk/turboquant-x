@@ -1,0 +1,109 @@
+{
+  "name": "Sheets Budget vs Actual Tracker",
+  "nodes": [
+    {
+      "name": "Monthly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "months", "monthsInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Budget Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 200],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Budget" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Actual Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 420],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Actual" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Variance Analysis",
+      "type": "n8n-nodes-base.code",
+      "position": [780, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst budgetItems = items.filter(i => i.json._source === 'budget');\nconst actualItems = items.filter(i => i.json._source === 'actual');\n\nconst budget = {};\nfor (const b of budgetItems) {\n  budget[b.json.category] = Number(b.json.amount) || 0;\n}\n\nconst actual = {};\nfor (const a of actualItems) {\n  actual[a.json.category] = Number(a.json.amount) || 0;\n}\n\nconst categories = [...new Set([...Object.keys(budget), ...Object.keys(actual)])];\nconst report = categories.map(cat => {\n  const budgeted = budget[cat] || 0;\n  const spent = actual[cat] || 0;\n  const variance = budgeted - spent;\n  const variancePct = budgeted > 0 ? Math.round((variance / budgeted) * 10000) / 100 : 0;\n  return {\n    category: cat,\n    budgeted,\n    actual: spent,\n    variance,\n    variancePercent: variancePct,\n    status: variance >= 0 ? 'Under Budget' : 'Over Budget'\n  };\n});\n\nconst totalBudget = Object.values(budget).reduce((s, v) => s + v, 0);\nconst totalActual = Object.values(actual).reduce((s, v) => s + v, 0);\n\nreturn [{ json: { report, totalBudget, totalActual, totalVariance: totalBudget - totalActual, month: new Date().toISOString().slice(0, 7) } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Report Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1020, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "VarianceReport" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1240, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Budget vs Actual Report - {{ $json.month }}",
+        "message": "=Monthly Budget Variance Report\n\nMonth: {{ $json.month }}\nTotal Budget: {{ $json.totalBudget }}\nTotal Actual: {{ $json.totalActual }}\nTotal Variance: {{ $json.totalVariance }}\n\nFull report written to VarianceReport sheet.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 80],
+      "parameters": {
+        "width": 1140,
+        "height": 100,
+        "content": "### Sheets Budget vs Actual Tracker\nMonthly workflow that reads budget and actual spending sheets, performs variance analysis per category, writes a report, and emails the summary."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Monthly Schedule": {
+      "main": [[
+        { "node": "Read Budget Sheet", "type": "main", "index": 0 },
+        { "node": "Read Actual Sheet", "type": "main", "index": 0 }
+      ]]
+    },
+    "Read Budget Sheet": { "main": [[{ "node": "Variance Analysis", "type": "main", "index": 0 }]] },
+    "Read Actual Sheet": { "main": [[{ "node": "Variance Analysis", "type": "main", "index": 0 }]] },
+    "Variance Analysis": { "main": [[{ "node": "Write Report Sheet", "type": "main", "index": 0 }]] },
+    "Write Report Sheet": { "main": [[{ "node": "Email Report", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "name": "Mailchimp Audience Manager",
+  "nodes": [
+    {
+      "name": "Webhook New Subscriber",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "mailchimp-subscriber",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Add to Mailchimp",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "=https://YOUR_DC.api.mailchimp.com/3.0/lists/YOUR_LIST_ID/members",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"email_address\": \"{{ $json.body?.email || $json.email }}\",\n  \"status\": \"subscribed\",\n  \"merge_fields\": {\n    \"FNAME\": \"{{ $json.body?.firstName || $json.firstName || '' }}\",\n    \"LNAME\": \"{{ $json.body?.lastName || $json.lastName || '' }}\"\n  }\n}",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sheets Subscriber Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 200],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "values": [
+              { "column": "email", "value": "={{ $json.email_address || $json.body?.email || $json.email }}" },
+              { "column": "firstName", "value": "={{ $json.merge_fields?.FNAME || $json.body?.firstName || '' }}" },
+              { "column": "lastName", "value": "={{ $json.merge_fields?.LNAME || $json.body?.lastName || '' }}" },
+              { "column": "status", "value": "subscribed" },
+              { "column": "addedAt", "value": "={{ $now.toISO() }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Welcome",
+      "type": "n8n-nodes-base.gmail",
+      "position": [710, 400],
+      "parameters": {
+        "sendTo": "={{ $json.email_address || $json.body?.email || $json.email }}",
+        "subject": "Welcome aboard! 🎉",
+        "message": "=Hi {{ $json.merge_fields?.FNAME || $json.body?.firstName || 'there' }},\n\nWelcome to our community! We're thrilled to have you.\n\nYou'll receive our latest updates, tips, and exclusive content directly in your inbox.\n\nStay tuned!",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "position": [940, 300],
+      "parameters": {
+        "channel": "",
+        "text": "=📬 New subscriber added to Mailchimp!\n\nEmail: {{ $json.email_address || $json.body?.email || $json.email }}\nName: {{ $json.merge_fields?.FNAME || '' }} {{ $json.merge_fields?.LNAME || '' }}",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Mailchimp Audience Manager\nReceives new subscriber data, adds to Mailchimp list, logs to Sheets, sends welcome email, and notifies Slack.\n\n**Setup:**\n1. Replace YOUR_DC and YOUR_LIST_ID in the Mailchimp API URL\n2. Set HTTP Basic Auth (any_username:API_KEY)\n3. Connect Google Sheets for subscriber tracking\n4. Configure Gmail for welcome emails\n5. Set Slack channel for notifications"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook New Subscriber": {
+      "main": [[{ "node": "Add to Mailchimp", "type": "main", "index": 0 }]]
+    },
+    "Add to Mailchimp": {
+      "main": [
+        [
+          { "node": "Sheets Subscriber Log", "type": "main", "index": 0 },
+          { "node": "Gmail Welcome", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Gmail Welcome": {
+      "main": [[{ "node": "Slack Notification", "type": "main", "index": 0 }]]
+    }
+  }
+}

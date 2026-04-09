@@ -1,0 +1,256 @@
+{
+  "name": "Discord Moderation Alert and Log System",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "messageCreate",
+        "options": {}
+      },
+      "name": "Discord Message Trigger",
+      "type": "n8n-nodes-base.discordTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "discordBotApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const message = $input.first().json;\nconst content = message.content.toLowerCase();\n\n// Banned words list\nconst bannedWords = ['spam', 'scam', 'hack', 'cheat', 'exploit', 'phishing'];\nconst hasBannedWord = bannedWords.some(word => content.includes(word));\n\n// Spam patterns\nconst hasExcessiveCaps = (message.content.match(/[A-Z]/g) || []).length > message.content.length * 0.7 && message.content.length > 10;\nconst hasExcessiveEmoji = (content.match(/[\\u{1F600}-\\u{1F64F}\\u{1F300}-\\u{1F5FF}\\u{1F680}-\\u{1F6FF}]/gu) || []).length > 10;\nconst hasRepeatedChars = /(.)(\\1{5,})/.test(content);\nconst hasExcessiveMentions = (content.match(/<@/g) || []).length > 5;\nconst hasExcessiveLinks = (content.match(/https?:\\/\\//g) || []).length > 3;\n\nconst isViolation = hasBannedWord || hasExcessiveCaps || hasExcessiveEmoji || hasRepeatedChars || hasExcessiveMentions || hasExcessiveLinks;\n\nconst reasons = [];\nif (hasBannedWord) reasons.push('Banned word detected');\nif (hasExcessiveCaps) reasons.push('Excessive caps');\nif (hasExcessiveEmoji) reasons.push('Emoji spam');\nif (hasRepeatedChars) reasons.push('Character spam');\nif (hasExcessiveMentions) reasons.push('Mention spam');\nif (hasExcessiveLinks) reasons.push('Link spam');\n\nconst severity = reasons.length >= 3 ? 'HIGH' : reasons.length >= 2 ? 'MEDIUM' : 'LOW';\n\nreturn [{\n  json: {\n    ...message,\n    is_violation: isViolation,\n    violation_reasons: reasons,\n    severity: severity,\n    checked_at: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Check for Violations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_violation }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Is Violation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "https://discord.com/api/v10/channels/{{ $json.channel_id }}/messages/{{ $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Auto-Delete Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1000, 150]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Moderation_Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.checked_at }}",
+            "user_id": "={{ $json.author.id }}",
+            "username": "={{ $json.author.username }}",
+            "channel_id": "={{ $json.channel_id }}",
+            "message_content": "={{ $json.content }}",
+            "violation_reasons": "={{ $json.violation_reasons.join(', ') }}",
+            "severity": "={{ $json.severity }}",
+            "action_taken": "auto_deleted"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Log Violation to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1000, 350],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.severity }}",
+              "operation": "equal",
+              "value2": "HIGH"
+            }
+          ]
+        }
+      },
+      "name": "High Severity?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 250]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/users/{{ $env.MOD_USER_ID }}/channels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipient_id: $env.MOD_USER_ID }) }}",
+        "options": {}
+      },
+      "name": "Create Mod DM Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1500, 150]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ $json.id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: '🚨 HIGH SEVERITY VIOLATION\\n\\nUser: ' + $('Check for Violations').item.json.author.username + ' (' + $('Check for Violations').item.json.author.id + ')\\nChannel: <#' + $('Check for Violations').item.json.channel_id + '>\\nReasons: ' + $('Check for Violations').item.json.violation_reasons.join(', ') + '\\n\\nMessage content (deleted):\\n> ' + $('Check for Violations').item.json.content.substring(0, 500), embeds: [{ title: 'Action Required', description: 'Consider warning or banning this user.', color: 15158332 }] }) }}",
+        "options": {}
+      },
+      "name": "Escalate to Mod DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1750, 150]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/{{ $env.MOD_LOG_CHANNEL_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot {{ $env.DISCORD_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ embeds: [{ title: '⚠️ Moderation Action', fields: [{ name: 'User', value: $json.author.username, inline: true }, { name: 'Severity', value: $json.severity, inline: true }, { name: 'Reasons', value: $json.violation_reasons.join(', ') }, { name: 'Original Message', value: $json.content.substring(0, 200) + '...' }], color: $json.severity === 'HIGH' ? 15158332 : 16776960, timestamp: new Date().toISOString() }] }) }}",
+        "options": {}
+      },
+      "name": "Post to Mod Log Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1250, 450]
+    },
+    {
+      "parameters": {
+        "content": "## Discord Moderation Alert and Log System\n\nAutomatic moderation with violation detection, auto-delete, and escalation.\n\n**Detection Rules:**\n- Banned words: spam, scam, hack, cheat, exploit, phishing\n- Excessive CAPS (>70% of message)\n- Emoji spam (>10 emoji)\n- Character spam (6+ repeated chars)\n- Mention spam (>5 mentions)\n- Link spam (>3 links)\n\n**Severity Levels:**\n- LOW: 1 rule triggered\n- MEDIUM: 2 rules triggered\n- HIGH: 3+ rules → escalate to mod via DM\n\n**Setup:**\n1. Discord bot with MESSAGE_CONTENT intent\n2. Env vars: DISCORD_BOT_TOKEN, MOD_USER_ID, MOD_LOG_CHANNEL_ID\n3. Bot needs: Manage Messages, Send Messages, Read Message History",
+        "width": 460,
+        "height": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Discord Message Trigger": {
+      "main": [
+        [{ "node": "Check for Violations", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check for Violations": {
+      "main": [
+        [{ "node": "Is Violation?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Violation?": {
+      "main": [
+        [
+          { "node": "Auto-Delete Message", "type": "main", "index": 0 },
+          { "node": "Log Violation to Sheets", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Auto-Delete Message": {
+      "main": [
+        [{ "node": "High Severity?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Violation to Sheets": {
+      "main": [
+        [{ "node": "Post to Mod Log Channel", "type": "main", "index": 0 }]
+      ]
+    },
+    "High Severity?": {
+      "main": [
+        [{ "node": "Create Mod DM Channel", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Create Mod DM Channel": {
+      "main": [
+        [{ "node": "Escalate to Mod DM", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

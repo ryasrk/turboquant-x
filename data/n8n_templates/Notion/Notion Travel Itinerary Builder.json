@@ -1,0 +1,142 @@
+{
+  "name": "Notion Travel Itinerary Builder",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Travel Itinerary Builder\nCreate trip pages from flight/hotel data, add activities, generate shareable link, and email itinerary.\n\n**Setup:**\n1. Configure webhook to receive booking data\n2. Set Notion trips database ID\n3. Set email for itinerary distribution"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook Booking Data",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "travel-booking",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Build Itinerary",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const data = item.json.body || item.json;\n  const destination = data.destination || 'Unknown';\n  const tripName = data.tripName || `Trip to ${destination}`;\n  const startDate = data.startDate || data.departureDate || '';\n  const endDate = data.endDate || data.returnDate || '';\n\n  // Flights\n  const flights = data.flights || [];\n  const flightDetails = flights.map(f =>\n    `✈️ ${f.airline || ''} ${f.flightNumber || ''}: ${f.from || ''} → ${f.to || ''} | ${f.date || ''} ${f.time || ''}`\n  ).join('\\n');\n\n  // Hotels\n  const hotels = data.hotels || [];\n  const hotelDetails = hotels.map(h =>\n    `🏨 ${h.name || ''} | Check-in: ${h.checkIn || ''} | Check-out: ${h.checkOut || ''} | Conf: ${h.confirmation || ''}`\n  ).join('\\n');\n\n  // Activities\n  const activities = data.activities || [];\n  const activityDetails = activities.map(a =>\n    `📍 ${a.name || ''} — ${a.date || ''} ${a.time || ''} | ${a.notes || ''}`\n  ).join('\\n');\n\n  const budget = data.budget || 'Not set';\n  const travelers = data.travelers || [];\n\n  return {\n    json: {\n      tripName,\n      destination,\n      startDate,\n      endDate,\n      flightDetails: flightDetails || 'No flights added',\n      hotelDetails: hotelDetails || 'No hotels added',\n      activityDetails: activityDetails || 'No activities planned',\n      budget,\n      travelers: Array.isArray(travelers) ? travelers.join(', ') : String(travelers),\n      travelerEmails: data.travelerEmails || []\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Trip Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [680, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.tripName }}"
+            },
+            {
+              "name": "Destination",
+              "type": "rich_text",
+              "richText": "={{ $json.destination }}"
+            },
+            {
+              "name": "Start Date",
+              "type": "date",
+              "date": "={{ $json.startDate }}"
+            },
+            {
+              "name": "End Date",
+              "type": "date",
+              "date": "={{ $json.endDate }}"
+            },
+            {
+              "name": "Travelers",
+              "type": "rich_text",
+              "richText": "={{ $json.travelers }}"
+            },
+            {
+              "name": "Budget",
+              "type": "rich_text",
+              "richText": "={{ $json.budget }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "Planned"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=## ✈️ Flights\n{{ $json.flightDetails }}\n\n## 🏨 Accommodation\n{{ $json.hotelDetails }}\n\n## 📍 Activities & Itinerary\n{{ $json.activityDetails }}\n\n## 💰 Budget\n{{ $json.budget }}\n\n## 📝 Packing List\n- [ ] Passport\n- [ ] Tickets\n- [ ] Chargers\n- [ ] Medications\n- [ ] \n\n## 📋 Notes\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Email Itinerary",
+      "type": "n8n-nodes-base.gmail",
+      "position": [900, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=🗺 Travel Itinerary: {{ $('Build Itinerary').item.json.tripName }}",
+        "message": "=Your travel itinerary has been created in Notion!\n\n{{ $('Build Itinerary').item.json.tripName }}\nDestination: {{ $('Build Itinerary').item.json.destination }}\nDates: {{ $('Build Itinerary').item.json.startDate }} → {{ $('Build Itinerary').item.json.endDate }}\nTravelers: {{ $('Build Itinerary').item.json.travelers }}\n\n--- FLIGHTS ---\n{{ $('Build Itinerary').item.json.flightDetails }}\n\n--- ACCOMMODATION ---\n{{ $('Build Itinerary').item.json.hotelDetails }}\n\n--- ACTIVITIES ---\n{{ $('Build Itinerary').item.json.activityDetails }}\n\nFull itinerary available in Notion. Have a great trip!",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Webhook Booking Data": {
+      "main": [
+        [{ "node": "Build Itinerary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Itinerary": {
+      "main": [
+        [{ "node": "Notion Create Trip Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Trip Page": {
+      "main": [
+        [{ "node": "Email Itinerary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

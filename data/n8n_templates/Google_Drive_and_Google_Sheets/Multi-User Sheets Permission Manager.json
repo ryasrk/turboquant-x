@@ -1,0 +1,146 @@
+{
+  "name": "Multi-User Sheets Permission Manager",
+  "nodes": [
+    {
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [300, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "permission-manager",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "typeVersion": 2,
+      "webhookId": "perm-manager"
+    },
+    {
+      "name": "Parse Request",
+      "type": "n8n-nodes-base.code",
+      "position": [520, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst body = items[0].json.body || items[0].json;\n\nconst action = (body.action || '').toLowerCase();\nconst email = body.email || '';\nconst fileId = body.fileId || body.sheetId || '';\nconst role = body.role || 'reader';\n\nif (!action || !email || !fileId) {\n  return [{ json: { error: true, message: 'Missing required fields: action, email, fileId' } }];\n}\n\nreturn [{ json: { action, email, fileId, role, requestedAt: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "If Add Permission",
+      "type": "n8n-nodes-base.if",
+      "position": [740, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "add",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Add Permission",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [980, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.fileId }}/permissions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'user', role: $json.role, emailAddress: $json.email }) }}",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Remove Permission",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [980, 420],
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.fileId }}/permissions/{{ $json.permissionId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Write Access Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1220, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "AccessLog" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "={{ $json.action }}",
+            "email": "={{ $json.email }}",
+            "fileId": "={{ $json.fileId }}",
+            "role": "={{ $json.role }}",
+            "timestamp": "={{ new Date().toISOString() }}",
+            "status": "completed"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1440, 300],
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "=Permission {{ $json.action === 'add' ? 'Granted' : 'Revoked' }} for Sheet",
+        "message": "=Your access has been {{ $json.action === 'add' ? 'granted' : 'revoked' }}.\n\nAction: {{ $json.action }}\nRole: {{ $json.role }}\nFile: {{ $json.fileId }}\nTimestamp: {{ new Date().toISOString() }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 80],
+      "parameters": {
+        "width": 1340,
+        "height": 100,
+        "content": "### Multi-User Sheets Permission Manager\nWebhook-triggered workflow to add/remove Google Drive file permissions. Logs all access changes to a Sheet and sends email confirmations."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Parse Request", "type": "main", "index": 0 }]] },
+    "Parse Request": { "main": [[{ "node": "If Add Permission", "type": "main", "index": 0 }]] },
+    "If Add Permission": {
+      "main": [
+        [{ "node": "Add Permission", "type": "main", "index": 0 }],
+        [{ "node": "Remove Permission", "type": "main", "index": 0 }]
+      ]
+    },
+    "Add Permission": { "main": [[{ "node": "Write Access Log", "type": "main", "index": 0 }]] },
+    "Remove Permission": { "main": [[{ "node": "Write Access Log", "type": "main", "index": 0 }]] },
+    "Write Access Log": { "main": [[{ "node": "Email Confirmation", "type": "main", "index": 0 }]] }
+  }
+}

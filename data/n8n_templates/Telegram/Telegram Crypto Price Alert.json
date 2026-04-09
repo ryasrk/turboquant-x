@@ -1,0 +1,132 @@
+{
+  "name": "Telegram Crypto Price Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 15 }
+          ]
+        }
+      },
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Fetch Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0].json;\nconst thresholds = {\n  bitcoin: { low: 50000, high: 100000 },\n  ethereum: { low: 2000, high: 5000 },\n  solana: { low: 50, high: 200 }\n};\nconst results = [];\nfor (const [coin, prices] of Object.entries(data)) {\n  const price = prices.usd;\n  const change24h = prices.usd_24h_change || 0;\n  const threshold = thresholds[coin] || { low: 0, high: Infinity };\n  const crossedLow = price <= threshold.low;\n  const crossedHigh = price >= threshold.high;\n  const shouldAlert = crossedLow || crossedHigh || Math.abs(change24h) > 10;\n  results.push({\n    json: {\n      coin,\n      price,\n      change24h: change24h.toFixed(2),\n      crossedLow,\n      crossedHigh,\n      shouldAlert,\n      alertReason: crossedLow ? 'Below support' : crossedHigh ? 'Above resistance' : Math.abs(change24h) > 10 ? 'Large 24h move' : 'Normal',\n      timestamp: new Date().toISOString(),\n      date: new Date().toISOString().split('T')[0]\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse & Check Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.shouldAlert}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Should Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 <b>Crypto Alert: {{$json.coin}}</b>\n\n💰 Price: ${{$json.price}}\n📈 24h Change: {{$json.change24h}}%\n⚠️ Reason: {{$json.alertReason}}\n🕐 {{$json.timestamp}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "PriceHistory" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Price History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Crypto Price Alert\n\nEvery 15 min → CoinGecko API → check price thresholds → alert if crossed → log history.\n\n**Setup:**\n1. Edit thresholds in Parse & Check Thresholds code node\n2. Add more coins to the CoinGecko API URL\n3. Set Telegram chat ID in Send Alert node\n4. Create Google Sheet: coin, price, change24h, shouldAlert, alertReason, timestamp, date",
+        "width": 420,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [{ "node": "Fetch Prices", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Prices": {
+      "main": [
+        [{ "node": "Parse & Check Thresholds", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & Check Thresholds": {
+      "main": [
+        [{ "node": "Should Alert?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Should Alert?": {
+      "main": [
+        [{ "node": "Send Alert", "type": "main", "index": 0 }],
+        [{ "node": "Log Price History", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [{ "node": "Log Price History", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

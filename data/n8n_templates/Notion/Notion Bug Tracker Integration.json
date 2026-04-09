@@ -1,0 +1,146 @@
+{
+  "name": "Notion Bug Tracker Integration",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Bug Tracker Integration\nGitHub issues automatically create bug entries in Notion and notify Slack #bugs channel.\n\n**Setup:**\n1. Configure GitHub webhook for issues events\n2. Set Notion bugs database ID\n3. Set Slack #bugs channel"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "github-issue",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Parse Issue Data",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const issue = payload.issue || payload;\n  const action = payload.action || 'opened';\n\n  // Map GitHub labels to priority\n  const labels = (issue.labels || []).map(l => l.name || l);\n  let priority = 'Medium';\n  if (labels.some(l => l.toLowerCase().includes('critical') || l.toLowerCase().includes('p0'))) priority = 'Critical';\n  else if (labels.some(l => l.toLowerCase().includes('high') || l.toLowerCase().includes('p1'))) priority = 'High';\n  else if (labels.some(l => l.toLowerCase().includes('low') || l.toLowerCase().includes('p3'))) priority = 'Low';\n\n  return {\n    json: {\n      action,\n      title: issue.title || 'Untitled Issue',\n      body: (issue.body || '').substring(0, 2000),\n      issueNumber: issue.number || 0,\n      url: issue.html_url || '',\n      author: issue.user?.login || 'unknown',\n      labels: labels.join(', '),\n      priority,\n      repo: payload.repository?.full_name || '',\n      createdAt: issue.created_at || new Date().toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Bug",
+      "type": "n8n-nodes-base.notion",
+      "position": [680, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "=[#{{ $json.issueNumber }}] {{ $json.title }}"
+            },
+            {
+              "name": "Priority",
+              "type": "select",
+              "select": "={{ $json.priority }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "Open"
+            },
+            {
+              "name": "GitHub URL",
+              "type": "url",
+              "url": "={{ $json.url }}"
+            },
+            {
+              "name": "Repository",
+              "type": "rich_text",
+              "richText": "={{ $json.repo }}"
+            },
+            {
+              "name": "Reporter",
+              "type": "rich_text",
+              "richText": "={{ $json.author }}"
+            },
+            {
+              "name": "Labels",
+              "type": "rich_text",
+              "richText": "={{ $json.labels }}"
+            },
+            {
+              "name": "Date Reported",
+              "type": "date",
+              "date": "={{ $json.createdAt }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "={{ $json.body }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Slack Bugs Notification",
+      "type": "n8n-nodes-base.slack",
+      "position": [900, 400],
+      "parameters": {
+        "channel": "#bugs",
+        "text": "=🐛 *New Bug Report*\n\n*[#{{ $('Parse Issue Data').item.json.issueNumber }}] {{ $('Parse Issue Data').item.json.title }}*\nPriority: {{ $('Parse Issue Data').item.json.priority }}\nReporter: {{ $('Parse Issue Data').item.json.author }}\nRepo: {{ $('Parse Issue Data').item.json.repo }}\n\n<{{ $('Parse Issue Data').item.json.url }}|View on GitHub>",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [
+        [{ "node": "Parse Issue Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Issue Data": {
+      "main": [
+        [{ "node": "Notion Create Bug", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Bug": {
+      "main": [
+        [{ "node": "Slack Bugs Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

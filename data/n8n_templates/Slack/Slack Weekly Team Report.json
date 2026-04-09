@@ -1,0 +1,154 @@
+{
+  "name": "Slack Weekly Team Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 16 * * 5"
+            }
+          ]
+        }
+      },
+      "name": "Friday 4PM Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Weekly Metrics",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "name": "Read Metrics Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(i => i.json);\n\nlet totalTasks = 0;\nlet completedTasks = 0;\nlet blockers = [];\nlet highlights = [];\n\nfor (const row of rows) {\n  totalTasks += parseInt(row.tasks_total || 0);\n  completedTasks += parseInt(row.tasks_completed || 0);\n  if (row.blocker) blockers.push(`- ${row.team_member}: ${row.blocker}`);\n  if (row.highlight) highlights.push(`- ${row.team_member}: ${row.highlight}`);\n}\n\nconst completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;\nconst weekOf = new Date().toISOString().split('T')[0];\n\nlet report = `:bar_chart: *Weekly Team Report — ${weekOf}*\\n\\n`;\nreport += `*Completion Rate:* ${completionRate}% (${completedTasks}/${totalTasks} tasks)\\n\\n`;\n\nif (highlights.length > 0) {\n  report += `:star: *Highlights:*\\n${highlights.join('\\n')}\\n\\n`;\n}\n\nif (blockers.length > 0) {\n  report += `:no_entry_sign: *Blockers:*\\n${blockers.join('\\n')}\\n\\n`;\n}\n\nreport += `_Report generated automatically at ${new Date().toLocaleTimeString()}_`;\n\nreturn [{json: {report, weekOf, completionRate, totalTasks, completedTasks, blockerCount: blockers.length}}];"
+      },
+      "name": "Format Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#team-updates",
+          "mode": "name"
+        },
+        "text": "={{ $json.report }}",
+        "otherOptions": {}
+      },
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "team-leads@company.com",
+        "subject": "=Weekly Team Report - {{ $json.weekOf }}",
+        "message": "={{ $json.report.replace(/:[a-z_]+:/g, '').replace(/\\*/g, '') }}",
+        "options": {}
+      },
+      "name": "Email Backup",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1140, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Weekly Team Report\n\nAutomated Friday team report generation.\n\n**Flow:**\n1. Trigger Friday at 4PM\n2. Read metrics from Google Sheets\n3. Format rich Slack message with stats\n4. Post to #team-updates\n5. Email backup to team leads\n\n**Sheet columns expected:**\nteam_member, tasks_total, tasks_completed, blocker, highlight",
+        "width": 340,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Friday 4PM Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Metrics Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Metrics Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Report": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Slack": {
+      "main": [
+        [
+          {
+            "node": "Email Backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

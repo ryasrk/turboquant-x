@@ -1,0 +1,279 @@
+{
+  "name": "Automated Server Scaling Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 5 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "command": "CPU=$(top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d. -f1)\nMEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')\nMEM_USED=$(free -m | awk '/^Mem:/{print $3}')\nMEM_PCT=$((MEM_USED * 100 / MEM_TOTAL))\nDISK_PCT=$(df -h / | awk 'NR==2{print $5}' | tr -d '%')\nLOAD=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $1}' | xargs)\nUPTIME=$(uptime -p)\nHOSTNAME=$(hostname)\n\necho \"{\\\"hostname\\\": \\\"$HOSTNAME\\\", \\\"cpu_pct\\\": $CPU, \\\"mem_total_mb\\\": $MEM_TOTAL, \\\"mem_used_mb\\\": $MEM_USED, \\\"mem_pct\\\": $MEM_PCT, \\\"disk_pct\\\": $DISK_PCT, \\\"load_avg\\\": \\\"$LOAD\\\", \\\"uptime\\\": \\\"$UPTIME\\\"}\""
+      },
+      "name": "SSH Check Server Resources",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [480, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json.stdout;\nconst metrics = JSON.parse(output.trim());\nconst timestamp = new Date().toISOString();\n\nlet alertLevel = 'NORMAL';\nlet alerts = [];\n\nif (metrics.cpu_pct >= 95 || metrics.mem_pct >= 95 || metrics.disk_pct >= 95) {\n  alertLevel = 'CRITICAL';\n}\nif (metrics.cpu_pct >= 80) alerts.push(`CPU: ${metrics.cpu_pct}%`);\nif (metrics.mem_pct >= 80) alerts.push(`Memory: ${metrics.mem_pct}%`);\nif (metrics.disk_pct >= 80) alerts.push(`Disk: ${metrics.disk_pct}%`);\n\nif (alerts.length > 0 && alertLevel !== 'CRITICAL') {\n  alertLevel = 'WARNING';\n}\n\nreturn [{\n  json: {\n    ...metrics,\n    alertLevel,\n    alerts: alerts.join(', ') || 'All normal',\n    needsWarning: alertLevel === 'WARNING',\n    needsCritical: alertLevel === 'CRITICAL',\n    timestamp\n  }\n}];"
+      },
+      "name": "Evaluate Resource Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-critical",
+              "leftValue": "={{ $json.needsCritical }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Is Critical (>95%)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [920, 180]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-warning",
+              "leftValue": "={{ $json.needsWarning }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Is Warning (>80%)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [920, 420]
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=🔴 CRITICAL: Server {{ $json.hostname }} Resources Exhausted",
+        "emailType": "text",
+        "message": "=CRITICAL SERVER ALERT\n\nHostname: {{ $json.hostname }}\nCPU: {{ $json.cpu_pct }}%\nMemory: {{ $json.mem_pct }}% ({{ $json.mem_used_mb }}MB / {{ $json.mem_total_mb }}MB)\nDisk: {{ $json.disk_pct }}%\nLoad Average: {{ $json.load_avg }}\nUptime: {{ $json.uptime }}\n\nAlerts: {{ $json.alerts }}\n\nIMMEDIATE ACTION REQUIRED - Server resources are critically low.\nConsider scaling up or investigating resource-heavy processes."
+      },
+      "name": "Critical Email Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1180, 80],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🔴 *CRITICAL: Server Resources Exhausted*\n\nHostname: `{{ $json.hostname }}`\nCPU: {{ $json.cpu_pct }}%\nMemory: {{ $json.mem_pct }}% ({{ $json.mem_used_mb }}MB / {{ $json.mem_total_mb }}MB)\nDisk: {{ $json.disk_pct }}%\nLoad: {{ $json.load_avg }}\n\n⚠️ Alerts: {{ $json.alerts }}\n\n🚨 IMMEDIATE ACTION REQUIRED!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Critical Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1180, 240],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "⚠️ *Server Resource Warning*\n\nHostname: `{{ $json.hostname }}`\nCPU: {{ $json.cpu_pct }}%\nMemory: {{ $json.mem_pct }}%\nDisk: {{ $json.disk_pct }}%\nLoad: {{ $json.load_avg }}\n\nAlerts: {{ $json.alerts }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Warning Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1180, 420],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "ServerMonitoring"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "hostname": "={{ $json.hostname }}",
+            "cpu_pct": "={{ $json.cpu_pct }}",
+            "mem_pct": "={{ $json.mem_pct }}",
+            "mem_used_mb": "={{ $json.mem_used_mb }}",
+            "disk_pct": "={{ $json.disk_pct }}",
+            "load_avg": "={{ $json.load_avg }}",
+            "alert_level": "={{ $json.alertLevel }}",
+            "alerts": "={{ $json.alerts }}"
+          }
+        }
+      },
+      "name": "Google Sheets Monitoring Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1180, 580],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Server Scaling Alert\n\n**Schedule:** Every 5 minutes\n**Function:** SSHs into server, checks CPU, memory, and disk usage.\n\n**Alert Thresholds:**\n- ⚠️ WARNING: Any metric >80%\n- 🔴 CRITICAL: Any metric >95%\n\n**Notifications:**\n- >80%: Telegram warning\n- >95%: Telegram + Email critical alert\n\n**Logging:** All metrics logged to Google Sheets.\n\n### Setup\n1. Configure SSH credentials\n2. Configure Telegram Bot credentials and chat ID\n3. Configure SMTP email credentials\n4. Set Google Sheets document ID",
+        "width": 420,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -80]
+    }
+  ],
+  "connections": {
+    "Schedule Every 5 Min": {
+      "main": [
+        [
+          {
+            "node": "SSH Check Server Resources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH Check Server Resources": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Resource Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Resource Thresholds": {
+      "main": [
+        [
+          {
+            "node": "Is Critical (>95%)?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Warning (>80%)?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets Monitoring Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Critical (>95%)?": {
+      "main": [
+        [
+          {
+            "node": "Critical Email Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Critical Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Is Warning (>80%)?": {
+      "main": [
+        [
+          {
+            "node": "Warning Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

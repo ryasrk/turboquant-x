@@ -1,0 +1,150 @@
+{
+  "name": "PDF Text Search and Extract",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pdf-search",
+        "options": {}
+      },
+      "id": "webhook-search",
+      "name": "Webhook Search Terms",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "sheets-inventory",
+      "name": "Read Sheets PDF Inventory",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.pdfUrl }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.pdfUrl }}"
+            },
+            {
+              "name": "language",
+              "value": "eng"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "extract-text",
+      "name": "HTTP Extract Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst searchTerms = $('Webhook Search Terms').item.json.body.searchTerms || [];\nconst results = [];\nfor (const item of items) {\n  const text = item.json.ParsedResults?.[0]?.ParsedText || item.json.data || '';\n  const pdfName = item.json.pdfName || 'Unknown';\n  for (const term of searchTerms) {\n    const regex = new RegExp(`(.{0,50}${term.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}.{0,50})`, 'gi');\n    const matches = text.match(regex) || [];\n    if (matches.length > 0) {\n      results.push({\n        json: {\n          pdfName,\n          searchTerm: term,\n          matchCount: matches.length,\n          contexts: matches.slice(0, 5),\n          foundAt: new Date().toISOString()\n        }\n      });\n    }\n  }\n}\nif (results.length === 0) {\n  results.push({ json: { message: 'No matches found', searchTerms } });\n}\nreturn results;"
+      },
+      "id": "search-matches",
+      "name": "Code Search Matches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-results",
+      "name": "Sheets Results",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1120, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PDF Text Search and Extract\n\nReceive search terms via webhook → read PDF inventory from Sheets →\nExtract text from each PDF via OCR → search for matches with context →\nResults saved to Sheets.\n\n**Setup:**\n1. Create PDF inventory sheet (columns: pdfName, pdfUrl)\n2. Configure OCR API credentials\n3. Set results Google Sheet\n4. POST { searchTerms: ['term1', 'term2'] } to webhook"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Search Terms": {
+      "main": [
+        [{ "node": "Read Sheets PDF Inventory", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sheets PDF Inventory": {
+      "main": [
+        [{ "node": "HTTP Extract Text", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Extract Text": {
+      "main": [
+        [{ "node": "Code Search Matches", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Search Matches": {
+      "main": [
+        [{ "node": "Sheets Results", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

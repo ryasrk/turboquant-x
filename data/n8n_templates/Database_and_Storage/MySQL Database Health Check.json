@@ -1,0 +1,246 @@
+{
+  "name": "MySQL Database Health Check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 1 AS connection_ok, VERSION() AS mysql_version, @@uptime AS uptime_seconds;",
+        "options": {}
+      },
+      "name": "Check Connection",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "mySql": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT query_time, lock_time, rows_sent, rows_examined, sql_text\nFROM mysql.slow_log\nWHERE start_time >= NOW() - INTERVAL 1 HOUR\nORDER BY query_time DESC\nLIMIT 20;",
+        "options": {}
+      },
+      "name": "Slow Query Log",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [680, 200],
+      "credentials": {
+        "mySql": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  table_schema AS db_name,\n  table_name,\n  ROUND(data_length / 1024 / 1024, 2) AS data_mb,\n  ROUND(index_length / 1024 / 1024, 2) AS index_mb,\n  table_rows\nFROM information_schema.tables\nWHERE table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')\nORDER BY data_length DESC\nLIMIT 20;",
+        "options": {}
+      },
+      "name": "Table Sizes",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [680, 400],
+      "credentials": {
+        "mySql": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  t.TABLE_SCHEMA,\n  t.TABLE_NAME,\n  s.INDEX_NAME,\n  s.SEQ_IN_INDEX,\n  s.COLUMN_NAME,\n  s.CARDINALITY\nFROM information_schema.STATISTICS s\nJOIN information_schema.TABLES t\n  ON s.TABLE_SCHEMA = t.TABLE_SCHEMA AND s.TABLE_NAME = t.TABLE_NAME\nWHERE t.TABLE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')\n  AND s.CARDINALITY < 10\nORDER BY s.CARDINALITY ASC\nLIMIT 20;",
+        "options": {}
+      },
+      "name": "Index Usage Check",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [680, 600],
+      "credentials": {
+        "mySql": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const connection = $('Check Connection').first().json;\nconst slowQueries = $('Slow Query Log').all();\nconst tableSizes = $('Table Sizes').all();\nconst indexIssues = $('Index Usage Check').all();\n\nconst issues = [];\n\nif (slowQueries.length > 5) {\n  issues.push(`⚠️ ${slowQueries.length} slow queries in last hour`);\n}\n\nconst largeTables = tableSizes.filter(t => t.json.data_mb > 1000);\nif (largeTables.length > 0) {\n  issues.push(`⚠️ ${largeTables.length} tables exceed 1GB`);\n}\n\nif (indexIssues.length > 5) {\n  issues.push(`⚠️ ${indexIssues.length} low-cardinality indexes detected`);\n}\n\nreturn [{\n  json: {\n    status: issues.length > 0 ? 'WARNING' : 'HEALTHY',\n    mysql_version: connection.mysql_version,\n    uptime_hours: Math.round(connection.uptime_seconds / 3600),\n    slow_query_count: slowQueries.length,\n    large_tables: largeTables.length,\n    index_issues: indexIssues.length,\n    issues: issues,\n    has_issues: issues.length > 0,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Analyze Health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "health-check",
+              "leftValue": "={{ $json.has_issues }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has Issues?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 400]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_CHAT_ID",
+        "text": "=🔴 *MySQL Health Alert*\n\nStatus: {{ $json.status }}\nVersion: {{ $json.mysql_version }}\nUptime: {{ $json.uptime_hours }}h\nSlow Queries: {{ $json.slow_query_count }}\nLarge Tables: {{ $json.large_tables }}\nIndex Issues: {{ $json.index_issues }}\n\n{{ $json.issues.join('\\n') }}\n\nTimestamp: {{ $json.timestamp }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1360, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## MySQL Database Health Check\n\n**Schedule:** Every hour\n\n**Checks:**\n1. Connection & version info\n2. Slow query log (last hour)\n3. Table sizes (flag >1GB)\n4. Index usage & cardinality\n\n**Alerts via Telegram when:**\n- More than 5 slow queries/hour\n- Tables exceed 1GB\n- Low-cardinality indexes detected\n\n**Setup:**\n- Configure MySQL credentials\n- Set Telegram bot token & chat ID\n- Adjust thresholds as needed",
+        "height": 340,
+        "width": 360
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -80]
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Check Connection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Connection": {
+      "main": [
+        [
+          {
+            "node": "Slow Query Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Table Sizes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Index Usage Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slow Query Log": {
+      "main": [
+        [
+          {
+            "node": "Analyze Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Table Sizes": {
+      "main": [
+        [
+          {
+            "node": "Analyze Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Index Usage Check": {
+      "main": [
+        [
+          {
+            "node": "Analyze Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Health": {
+      "main": [
+        [
+          {
+            "node": "Has Issues?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Issues?": {
+      "main": [
+        [
+          {
+            "node": "Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

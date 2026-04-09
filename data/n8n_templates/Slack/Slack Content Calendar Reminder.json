@@ -1,0 +1,236 @@
+{
+  "name": "Slack Content Calendar Reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "name": "Daily 8AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Content Calendar",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "name": "Read Content Calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\nconst dueToday = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const dueDate = row.due_date || row.dueDate || '';\n  const status = (row.status || '').toLowerCase();\n\n  // Check if due today and not already published\n  if (dueDate === today && status !== 'published' && status !== 'done') {\n    dueToday.push({\n      title: row.title || 'Untitled',\n      author: row.author || row.authorSlackId || '',\n      authorSlackId: row.author_slack_id || row.authorSlackId || '',\n      platform: row.platform || 'Blog',\n      contentType: row.content_type || row.contentType || 'Article',\n      status: row.status || 'Draft',\n      dueDate,\n      notes: row.notes || '',\n      rowNumber: row.row_number || ''\n    });\n  }\n}\n\nif (dueToday.length === 0) {\n  return [{json: {hasDue: false, message: 'No content due today'}}];\n}\n\nreturn dueToday.map(item => ({json: {...item, hasDue: true}}));"
+      },
+      "name": "Filter Due Today",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.hasDue }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If Content Due",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $json.authorSlackId }}",
+          "mode": "id"
+        },
+        "text": ":bell: *Content Reminder!*\n\nYou have content due today:\n\n:page_facing_up: *Title:* {{ $json.title }}\n:desktop_computer: *Platform:* {{ $json.platform }}\n:pencil2: *Type:* {{ $json.contentType }}\n:traffic_light: *Status:* {{ $json.status }}\n{{ $json.notes ? '\\n:memo: *Notes:* ' + $json.notes : '' }}\n\nPlease update the content calendar when published!",
+        "otherOptions": {}
+      },
+      "name": "DM Author",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 240],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#content",
+          "mode": "name"
+        },
+        "text": ":calendar: *Content due today:*\n\n:page_facing_up: *{{ $json.title }}* ({{ $json.platform }})\n:bust_in_silhouette: Author: <@{{ $json.authorSlackId }}>\n:traffic_light: Status: {{ $json.status }}",
+        "otherOptions": {}
+      },
+      "name": "Post to Content Channel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 420],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Content Calendar",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "reminder_sent": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "name": "Update Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1360, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Content Calendar Reminder\n\nDaily content publishing reminders from a shared calendar.\n\n**Flow:**\n1. Daily 8AM trigger (weekdays)\n2. Read content calendar from Sheets\n3. Filter items due today that aren't published\n4. DM each author with their due content\n5. Post summary to #content channel\n6. Update reminder_sent timestamp in Sheets\n\n**Sheet columns:**\ntitle, author_slack_id, platform, content_type, status, due_date, notes",
+        "width": 340,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Daily 8AM Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Content Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Content Calendar": {
+      "main": [
+        [
+          {
+            "node": "Filter Due Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Due Today": {
+      "main": [
+        [
+          {
+            "node": "If Content Due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Content Due": {
+      "main": [
+        [
+          {
+            "node": "DM Author",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post to Content Channel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "DM Author": {
+      "main": [
+        [
+          {
+            "node": "Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

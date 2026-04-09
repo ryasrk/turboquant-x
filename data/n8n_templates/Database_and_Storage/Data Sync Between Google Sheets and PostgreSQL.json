@@ -1,0 +1,222 @@
+{
+  "name": "Data Sync Between Google Sheets and PostgreSQL",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Master Data"
+        },
+        "options": {}
+      },
+      "name": "Read Sheets Changes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [480, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, email, status, updated_at FROM sync_records ORDER BY updated_at DESC;",
+        "options": {}
+      },
+      "name": "Read DB Records",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [480, 500],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const sheetsData = $('Read Sheets Changes').all().map(i => i.json);\nconst dbData = $('Read DB Records').all().map(i => i.json);\n\n// Build lookup maps by ID\nconst sheetsMap = {};\nsheetsData.forEach(row => { sheetsMap[row.id] = row; });\nconst dbMap = {};\ndbData.forEach(row => { dbMap[row.id] = row; });\n\nconst toUpsertInDB = [];\nconst toUpdateInSheets = [];\nconst conflicts = [];\n\n// Sheets → DB: find new or updated in Sheets\nfor (const [id, sheetRow] of Object.entries(sheetsMap)) {\n  const dbRow = dbMap[id];\n  if (!dbRow) {\n    toUpsertInDB.push({ ...sheetRow, source: 'sheets_new' });\n  } else if (sheetRow.updated_at > dbRow.updated_at) {\n    toUpsertInDB.push({ ...sheetRow, source: 'sheets_updated' });\n  } else if (dbRow.updated_at > sheetRow.updated_at) {\n    toUpdateInSheets.push({ ...dbRow, source: 'db_updated' });\n  } else if (sheetRow.name !== dbRow.name || sheetRow.email !== dbRow.email) {\n    conflicts.push({\n      id: id,\n      sheets_data: sheetRow,\n      db_data: dbRow,\n      reason: 'Both modified with same timestamp'\n    });\n  }\n}\n\n// DB → Sheets: find records only in DB\nfor (const [id, dbRow] of Object.entries(dbMap)) {\n  if (!sheetsMap[id]) {\n    toUpdateInSheets.push({ ...dbRow, source: 'db_only' });\n  }\n}\n\nreturn [{\n  json: {\n    upsert_to_db: toUpsertInDB,\n    update_in_sheets: toUpdateInSheets,\n    conflicts: conflicts,\n    db_upsert_count: toUpsertInDB.length,\n    sheets_update_count: toUpdateInSheets.length,\n    conflict_count: conflicts.length,\n    sync_timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Diff and Resolve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.upsert_to_db.map(r => `INSERT INTO sync_records (id, name, email, status, updated_at) VALUES ('${r.id}', '${r.name}', '${r.email}', '${r.status}', NOW()) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email, status = EXCLUDED.status, updated_at = NOW()`).join(';\\n') }};",
+        "options": {}
+      },
+      "name": "Upsert to PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1000, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Master Data"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "name": "Sync Back to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1000, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Conflict Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Log Conflicts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1000, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Data Sync Between Google Sheets and PostgreSQL\n\n**Schedule:** Every 30 minutes\n\n**Flow:**\n1. Read current Sheets data and DB records in parallel\n2. Diff: compare by ID and updated_at timestamp\n3. Sheets → DB: upsert new/updated rows\n4. DB → Sheets: sync back DB-only changes\n5. Log conflicts to separate sheet\n\n**Conflict Resolution:**\n- Last-write-wins based on updated_at\n- Same timestamp + different data → logged as conflict\n- DB-only records synced to Sheets\n\n**Setup:**\n- Google Sheets: columns id, name, email, status, updated_at\n- PostgreSQL: sync_records table with same schema\n- Create 'Conflict Log' sheet for audit trail",
+        "height": 380,
+        "width": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -40]
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Read Sheets Changes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read DB Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sheets Changes": {
+      "main": [
+        [
+          {
+            "node": "Diff and Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read DB Records": {
+      "main": [
+        [
+          {
+            "node": "Diff and Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diff and Resolve": {
+      "main": [
+        [
+          {
+            "node": "Upsert to PostgreSQL",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sync Back to Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Conflicts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

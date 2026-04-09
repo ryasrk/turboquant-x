@@ -1,0 +1,156 @@
+{
+  "name": "Shopify Order to Google Sheets and Shipping Label",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "shopify-order",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "name": "Shopify Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "orderId", "value": "={{ $json.body.id }}" },
+            { "name": "orderNumber", "value": "={{ $json.body.order_number }}" },
+            { "name": "customerName", "value": "={{ $json.body.customer.first_name }} {{ $json.body.customer.last_name }}" },
+            { "name": "customerEmail", "value": "={{ $json.body.customer.email }}" },
+            { "name": "shippingAddress", "value": "={{ $json.body.shipping_address.address1 }}" },
+            { "name": "shippingCity", "value": "={{ $json.body.shipping_address.city }}" },
+            { "name": "shippingState", "value": "={{ $json.body.shipping_address.province }}" },
+            { "name": "shippingZip", "value": "={{ $json.body.shipping_address.zip }}" },
+            { "name": "shippingCountry", "value": "={{ $json.body.shipping_address.country }}" },
+            { "name": "totalPrice", "value": "={{ $json.body.total_price }}" },
+            { "name": "currency", "value": "={{ $json.body.currency }}" },
+            { "name": "orderDate", "value": "={{ $now.toISO() }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract Order Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const order = $input.first().json;\nconst items = JSON.parse(order.body?.line_items || '[]');\nconst itemSummary = items.map(i => `${i.title} x${i.quantity}`).join(', ');\nconst totalWeight = items.reduce((sum, i) => sum + (i.grams || 0) * i.quantity, 0);\n\nreturn [{\n  json: {\n    ...order,\n    itemSummary: itemSummary || 'See order details',\n    itemCount: items.length || 0,\n    totalWeightGrams: totalWeight\n  }\n}];"
+      },
+      "name": "Extract Line Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Orders" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Order ID": "={{ $json.orderId }}",
+            "Order Number": "={{ $json.orderNumber }}",
+            "Date": "={{ $json.orderDate }}",
+            "Customer": "={{ $json.customerName }}",
+            "Email": "={{ $json.customerEmail }}",
+            "Items": "={{ $json.itemSummary }}",
+            "Item Count": "={{ $json.itemCount }}",
+            "Total": "={{ $json.totalPrice }} {{ $json.currency }}",
+            "Address": "={{ $json.shippingAddress }}",
+            "City": "={{ $json.shippingCity }}",
+            "State": "={{ $json.shippingState }}",
+            "Zip": "={{ $json.shippingZip }}",
+            "Country": "={{ $json.shippingCountry }}",
+            "Status": "Processing"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save Order to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const order = $input.first().json;\nconst label = {\n  shipFrom: {\n    name: 'Your Store Name',\n    address: '123 Warehouse St',\n    city: 'Your City',\n    state: 'YS',\n    zip: '12345',\n    country: 'US'\n  },\n  shipTo: {\n    name: order.customerName,\n    address: order.shippingAddress,\n    city: order.shippingCity,\n    state: order.shippingState,\n    zip: order.shippingZip,\n    country: order.shippingCountry\n  },\n  package: {\n    weightGrams: order.totalWeightGrams || 500,\n    orderNumber: order.orderNumber,\n    itemCount: order.itemCount\n  },\n  generatedAt: new Date().toISOString()\n};\n\nreturn [{ json: { ...order, shippingLabel: label } }];"
+      },
+      "name": "Generate Shipping Label Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customerEmail }}",
+        "subject": "Order #{{ $json.orderNumber }} Confirmed! 🎉",
+        "emailType": "html",
+        "message": "<h2>Thank you for your order, {{ $json.customerName }}!</h2><p>Your order <strong>#{{ $json.orderNumber }}</strong> has been received and is being processed.</p><h3>Order Summary</h3><p><strong>Items:</strong> {{ $json.itemSummary }}</p><p><strong>Total:</strong> {{ $json.totalPrice }} {{ $json.currency }}</p><h3>Shipping To</h3><p>{{ $json.shippingAddress }}<br>{{ $json.shippingCity }}, {{ $json.shippingState }} {{ $json.shippingZip }}<br>{{ $json.shippingCountry }}</p><p>We'll send you a tracking number once your order ships.</p><p>Thank you for shopping with us!</p>",
+        "options": {
+          "senderName": "Your Store"
+        }
+      },
+      "name": "Send Order Confirmation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Shopify Order to Google Sheets and Shipping Label\n\n**How to use:**\n1. In Shopify Admin → Settings → Notifications → Webhooks → Create webhook for 'Order creation'\n2. Point the webhook URL to this workflow's Webhook node URL\n3. Set up Google Sheets OAuth2 credentials\n4. Set up Gmail OAuth2 credentials\n5. Update the 'Generate Shipping Label Data' node with your warehouse address\n\n**Shopify webhook payload:** Automatically includes customer, items, shipping address, and totals.\n\n**Google Sheets columns:** Order ID, Order Number, Date, Customer, Email, Items, Item Count, Total, Address, City, State, Zip, Country, Status\n\n**Customization:**\n- Update shipping label generation for your carrier API\n- Add a carrier API node (EasyPost, ShipStation) after label data generation\n- Modify email template with your branding",
+        "width": 420,
+        "height": 360
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -100]
+    }
+  ],
+  "connections": {
+    "Shopify Order Webhook": {
+      "main": [
+        [{ "node": "Extract Order Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Order Data": {
+      "main": [
+        [{ "node": "Extract Line Items", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Line Items": {
+      "main": [
+        [{ "node": "Save Order to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Order to Sheets": {
+      "main": [
+        [{ "node": "Generate Shipping Label Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Shipping Label Data": {
+      "main": [
+        [{ "node": "Send Order Confirmation Email", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

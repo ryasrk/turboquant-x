@@ -1,0 +1,274 @@
+{
+  "name": "Training and Certification Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtDayOfMonth": 1,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "name": "Monthly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Certifications"
+        },
+        "options": {}
+      },
+      "name": "Read Certifications",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const certs = $input.all().map(i => i.json);\nconst now = new Date();\nconst results = [];\n\ncerts.forEach(cert => {\n  const expiryDate = new Date(cert.expiryDate);\n  const daysUntilExpiry = Math.floor((expiryDate - now) / (1000 * 60 * 60 * 24));\n  \n  if (daysUntilExpiry <= 60 && daysUntilExpiry > 0) {\n    results.push({\n      ...cert,\n      daysUntilExpiry,\n      urgency: daysUntilExpiry <= 30 ? 'urgent' : 'warning',\n      alertType: daysUntilExpiry <= 30 ? '30-day' : '60-day'\n    });\n  } else if (daysUntilExpiry <= 0) {\n    results.push({\n      ...cert,\n      daysUntilExpiry,\n      urgency: 'expired',\n      alertType: 'expired'\n    });\n  }\n});\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "name": "Check Expiry Dates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.urgency}}",
+              "value2": "urgent",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "name": "Is Urgent (30 days)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=URGENT: {{$json.certificationName}} Expires in {{$json.daysUntilExpiry}} Days",
+        "emailType": "text",
+        "message": "=Dear {{$json.employeeName}},\n\nURGENT: Your {{$json.certificationName}} certification will expire in {{$json.daysUntilExpiry}} days ({{$json.expiryDate}}).\n\nPlease take immediate action to renew your certification. Failure to renew may affect your eligibility for certain projects and roles.\n\nRenewal steps:\n1. Visit the certification provider's website\n2. Complete any required continuing education\n3. Submit renewal application\n4. Upload the new certificate to HR\n\nIf you need support or funding for renewal, please contact your manager.\n\nBest regards,\nHR Training Team",
+        "options": {}
+      },
+      "name": "Send Urgent Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1130, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=Reminder: {{$json.certificationName}} Expires in {{$json.daysUntilExpiry}} Days",
+        "emailType": "text",
+        "message": "=Dear {{$json.employeeName}},\n\nThis is a friendly reminder that your {{$json.certificationName}} certification will expire in {{$json.daysUntilExpiry}} days ({{$json.expiryDate}}).\n\nPlease plan for renewal in advance to avoid any gaps in your certification status.\n\nIf you need assistance with the renewal process, please reach out to the HR Training team.\n\nBest regards,\nHR Training Team",
+        "options": {}
+      },
+      "name": "Send 60-Day Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1130, 420],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Training Completions"
+        },
+        "options": {}
+      },
+      "name": "Read Completed Trainings",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 560],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const trainings = $input.all().map(i => i.json);\nconst thisMonth = new Date().toISOString().slice(0, 7);\nconst completedThisMonth = trainings.filter(t => t.completedDate && t.completedDate.startsWith(thisMonth));\nconst totalCompleted = trainings.filter(t => t.status === 'completed').length;\nconst inProgress = trainings.filter(t => t.status === 'in_progress').length;\n\nreturn [{ json: {\n  completedThisMonth: completedThisMonth.length,\n  totalCompleted,\n  inProgress,\n  month: thisMonth,\n  details: completedThisMonth.map(t => `${t.employeeName}: ${t.trainingName}`).join(', ')\n}}];"
+      },
+      "name": "Generate Training Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [690, 560]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Monthly Reports"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "month": "={{$json.month}}",
+            "completedThisMonth": "={{$json.completedThisMonth}}",
+            "totalCompleted": "={{$json.totalCompleted}}",
+            "inProgress": "={{$json.inProgress}}",
+            "details": "={{$json.details}}",
+            "generatedAt": "={{$now.toISO()}}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save Monthly Report",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [910, 560],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Training and Certification Tracker\n\n**Trigger:** Monthly on the 1st at 9 AM\n**Process:**\n1. Read all certifications from sheet\n2. Check expiry dates:\n   - ≤30 days: URGENT reminder\n   - 31-60 days: Warning reminder\n   - Expired: Alert\n3. Read completed trainings\n4. Generate monthly report with stats\n5. Save report to Sheets\n\n**Setup:**\n- 'Certifications' sheet: employeeName, email, certificationName, expiryDate\n- 'Training Completions' sheet: employeeName, trainingName, completedDate, status\n- 'Monthly Reports' sheet for tracking\n- Gmail credentials",
+        "width": 420,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -60]
+    }
+  ],
+  "connections": {
+    "Monthly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Certifications",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Completed Trainings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Certifications": {
+      "main": [
+        [
+          {
+            "node": "Check Expiry Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Expiry Dates": {
+      "main": [
+        [
+          {
+            "node": "Is Urgent (30 days)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Urgent (30 days)?": {
+      "main": [
+        [
+          {
+            "node": "Send Urgent Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send 60-Day Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Completed Trainings": {
+      "main": [
+        [
+          {
+            "node": "Generate Training Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Training Report": {
+      "main": [
+        [
+          {
+            "node": "Save Monthly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "name": "Slack New Employee Announcer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-hire",
+        "options": {}
+      },
+      "name": "New Hire Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst hire = items[0].json;\n\nconst name = hire.name || 'New Team Member';\nconst role = hire.role || 'Team Member';\nconst team = hire.team || 'Engineering';\nconst startDate = hire.startDate || new Date().toISOString().split('T')[0];\nconst buddyId = hire.buddyId || '';\nconst funFact = hire.funFact || '';\nconst email = hire.email || '';\n\nconst welcomeMsg = `:tada: *Welcome to the team, ${name}!* :tada:\\n\\n` +\n  `:briefcase: *Role:* ${role}\\n` +\n  `:busts_in_silhouette: *Team:* ${team}\\n` +\n  `:calendar: *Start Date:* ${startDate}\\n` +\n  (funFact ? `\\n:star2: *Fun Fact:* ${funFact}\\n` : '') +\n  `\\nPlease give ${name} a warm welcome! :wave:`;\n\nreturn [{json: {name, role, team, startDate, buddyId, email, welcomeMsg}}];"
+      },
+      "name": "Prepare Welcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#general",
+          "mode": "name"
+        },
+        "text": "={{ $json.welcomeMsg }}",
+        "otherOptions": {}
+      },
+      "name": "Welcome in General",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $json.buddyId }}",
+          "mode": "id"
+        },
+        "text": ":wave: Hi! You've been assigned as the buddy for *{{ $json.name }}* ({{ $json.role }}).\n\nThey start on {{ $json.startDate }}. Please reach out to welcome them and help them get set up!\n\n*Buddy responsibilities:*\n- Schedule a welcome coffee chat\n- Help with tool access and setup\n- Be available for questions in the first two weeks\n- Introduce them to the team",
+        "otherOptions": {}
+      },
+      "name": "DM Buddy",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Onboarding Checklist",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "employee_name": "={{ $json.name }}",
+            "role": "={{ $json.role }}",
+            "team": "={{ $json.team }}",
+            "start_date": "={{ $json.startDate }}",
+            "buddy_assigned": true,
+            "welcome_posted": true,
+            "setup_complete": false,
+            "first_week_checkin": false,
+            "email": "={{ $json.email }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Onboarding Checklist",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1140, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack New Employee Announcer\n\nAutomate new hire onboarding announcements.\n\n**Flow:**\n1. HR triggers webhook with new hire data\n2. Prepare personalized welcome message\n3. Post welcome in #general\n4. DM assigned buddy with responsibilities\n5. Create onboarding checklist in Sheets\n\n**Webhook payload:**\n```json\n{\n  \"name\": \"Jane Smith\",\n  \"role\": \"Senior Engineer\",\n  \"team\": \"Platform\",\n  \"startDate\": \"2024-04-01\",\n  \"buddyId\": \"U12345\",\n  \"funFact\": \"Climbed Mt. Rainier\",\n  \"email\": \"jane@company.com\"\n}\n```",
+        "width": 340,
+        "height": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 220]
+    }
+  ],
+  "connections": {
+    "New Hire Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Welcome": {
+      "main": [
+        [
+          {
+            "node": "Welcome in General",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Welcome in General": {
+      "main": [
+        [
+          {
+            "node": "DM Buddy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DM Buddy": {
+      "main": [
+        [
+          {
+            "node": "Onboarding Checklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

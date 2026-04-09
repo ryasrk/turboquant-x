@@ -1,0 +1,137 @@
+{
+  "name": "Hashtag Performance Tracker",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 8}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Search Hashtags",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets/search/recent",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "query", "value": "#yourbrand OR #yourcampaign"},
+            {"name": "tweet.fields", "value": "public_metrics,created_at"},
+            {"name": "max_results", "value": "100"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Aggregate Metrics",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst tweets = items[0].json.data || [];\nconst hashtagStats = {};\n\nfor (const tweet of tweets) {\n  const tags = tweet.text.match(/#\\w+/g) || [];\n  for (const tag of tags) {\n    const lower = tag.toLowerCase();\n    if (!hashtagStats[lower]) {\n      hashtagStats[lower] = {hashtag: lower, tweet_count: 0, total_likes: 0, total_retweets: 0, total_impressions: 0};\n    }\n    hashtagStats[lower].tweet_count++;\n    hashtagStats[lower].total_likes += tweet.public_metrics?.like_count || 0;\n    hashtagStats[lower].total_retweets += tweet.public_metrics?.retweet_count || 0;\n    hashtagStats[lower].total_impressions += tweet.public_metrics?.impression_count || 0;\n  }\n}\n\nreturn Object.values(hashtagStats).map(s => ({\n  json: {...s, date: new Date().toISOString().split('T')[0], engagement_rate: s.tweet_count > 0 ? ((s.total_likes + s.total_retweets) / s.tweet_count).toFixed(2) : '0'}\n}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [850, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Hashtag Analytics",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Check If Sunday",
+      "type": "n8n-nodes-base.if",
+      "position": [1050, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ new Date().getDay() }}",
+              "value2": "0",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Send Weekly Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1250, 250],
+      "parameters": {
+        "sendTo": "marketing@example.com",
+        "subject": "Weekly Hashtag Performance Report",
+        "message": "Hashtag performance summary for the week:\n\nTop hashtags and their engagement rates are attached in the Google Sheet.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Hashtag Performance Tracker\nRuns daily. Searches Twitter for branded/campaign hashtags, aggregates metrics (likes, retweets, impressions), stores in Google Sheets, and sends a weekly email report on Sundays."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[{"node": "Search Hashtags", "type": "main", "index": 0}]]
+    },
+    "Search Hashtags": {
+      "main": [[{"node": "Aggregate Metrics", "type": "main", "index": 0}]]
+    },
+    "Aggregate Metrics": {
+      "main": [[{"node": "Save to Sheets", "type": "main", "index": 0}]]
+    },
+    "Save to Sheets": {
+      "main": [[{"node": "Check If Sunday", "type": "main", "index": 0}]]
+    },
+    "Check If Sunday": {
+      "main": [
+        [{"node": "Send Weekly Report", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  }
+}

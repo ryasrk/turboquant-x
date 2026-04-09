@@ -1,0 +1,241 @@
+{
+  "name": "Slack Channel Archiver",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 1 * *"
+            }
+          ]
+        }
+      },
+      "name": "Monthly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://slack.com/api/conversations.list",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "types",
+              "value": "public_channel"
+            },
+            {
+              "name": "exclude_archived",
+              "value": "true"
+            },
+            {
+              "name": "limit",
+              "value": "200"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.slackApi.accessToken }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "List All Channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst channels = items[0].json.channels || [];\nconst now = Date.now() / 1000;\nconst ninetyDays = 90 * 24 * 60 * 60;\n\nconst protectedChannels = ['general', 'random', 'announcements', 'incidents'];\n\nconst staleChannels = channels.filter(ch => {\n  if (protectedChannels.includes(ch.name)) return false;\n  const lastActivity = ch.updated || ch.created || 0;\n  return (now - lastActivity) > ninetyDays;\n});\n\nreturn staleChannels.map(ch => ({\n  json: {\n    channelId: ch.id,\n    channelName: ch.name,\n    memberCount: ch.num_members || 0,\n    lastActivity: new Date((ch.updated || ch.created) * 1000).toISOString(),\n    daysSinceActivity: Math.round((now - (ch.updated || ch.created)) / (24 * 60 * 60)),\n    archivedAt: new Date().toISOString()\n  }\n}));"
+      },
+      "name": "Find Inactive Channels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.daysSinceActivity }}",
+              "rightValue": 90,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If Inactive 90 Days",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "resource": "channel",
+        "operation": "archive",
+        "channelId": "={{ $json.channelId }}"
+      },
+      "name": "Archive Channel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 240],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Archived Channels",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1360, 240],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#admin-log",
+          "mode": "name"
+        },
+        "text": ":file_cabinet: *Channel Archived:* #{{ $json.channelName }}\n*Members:* {{ $json.memberCount }} | *Inactive:* {{ $json.daysSinceActivity }} days",
+        "otherOptions": {}
+      },
+      "name": "Notify Admin",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1580, 240],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Channel Archiver\n\nMonthly cleanup of inactive Slack channels.\n\n**Flow:**\n1. Monthly trigger (1st of month)\n2. List all public channels via API\n3. Filter channels inactive 90+ days\n4. Skip protected channels (general, random, etc.)\n5. Archive inactive channels\n6. Log to Google Sheets\n7. Post notification to #admin-log\n\n**Protected channels:** general, random, announcements, incidents",
+        "width": 340,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Monthly Schedule": {
+      "main": [
+        [
+          {
+            "node": "List All Channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List All Channels": {
+      "main": [
+        [
+          {
+            "node": "Find Inactive Channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Inactive Channels": {
+      "main": [
+        [
+          {
+            "node": "If Inactive 90 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Inactive 90 Days": {
+      "main": [
+        [
+          {
+            "node": "Archive Channel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Archive Channel": {
+      "main": [
+        [
+          {
+            "node": "Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

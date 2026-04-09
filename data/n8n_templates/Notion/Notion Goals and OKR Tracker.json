@@ -1,0 +1,146 @@
+{
+  "name": "Notion Goals and OKR Tracker",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Goals and OKR Tracker\nWeekly OKR progress calculation, status updates, and Slack notification.\n\n**Setup:**\n1. Set Notion OKR database ID\n2. Adjust weekly schedule\n3. Set Slack channel for OKR updates"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query OKRs",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Status|select",
+              "condition": "is_not",
+              "returnType": "string",
+              "value": "Completed"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Calculate Progress",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst okrs = items.map(item => {\n  const props = item.json.properties || {};\n  const objective = props['Name']?.title?.map(t => t.plain_text).join('') || 'Untitled';\n  const keyResult = props['Key Result']?.rich_text?.map(t => t.plain_text).join('') || '';\n  const target = props['Target']?.number || 100;\n  const current = props['Current']?.number || 0;\n  const owner = props['Owner']?.rich_text?.map(t => t.plain_text).join('') || 'Unassigned';\n  const status = props['Status']?.select?.name || 'In Progress';\n  const quarter = props['Quarter']?.select?.name || 'Current';\n\n  const progress = target > 0 ? Math.round((current / target) * 100) : 0;\n  let health = '🟢';\n  if (progress < 30) health = '🔴';\n  else if (progress < 60) health = '🟡';\n\n  return {\n    pageId: item.json.id,\n    objective,\n    keyResult,\n    target,\n    current,\n    progress,\n    health,\n    owner,\n    status,\n    quarter\n  };\n});\n\nconst avgProgress = okrs.length > 0\n  ? Math.round(okrs.reduce((sum, o) => sum + o.progress, 0) / okrs.length)\n  : 0;\n\nconst onTrack = okrs.filter(o => o.progress >= 60).length;\nconst atRisk = okrs.filter(o => o.progress >= 30 && o.progress < 60).length;\nconst offTrack = okrs.filter(o => o.progress < 30).length;\n\nconst details = okrs.map(o =>\n  `${o.health} *${o.objective}*\\n   KR: ${o.keyResult}\\n   Progress: ${o.current}/${o.target} (${o.progress}%) | Owner: ${o.owner}`\n).join('\\n\\n');\n\nreturn [{\n  json: {\n    avgProgress,\n    totalOKRs: okrs.length,\n    onTrack,\n    atRisk,\n    offTrack,\n    details,\n    okrs,\n    week: $now.format('yyyy-WW')\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Update Status",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 400],
+      "parameters": {
+        "resource": "page",
+        "operation": "create",
+        "parentPageId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "title": "=OKR Weekly Update — {{ $json.week }}",
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=## OKR Weekly Summary\n\nAverage Progress: {{ $json.avgProgress }}%\nTotal OKRs: {{ $json.totalOKRs }}\n🟢 On Track: {{ $json.onTrack }} | 🟡 At Risk: {{ $json.atRisk }} | 🔴 Off Track: {{ $json.offTrack }}\n\n## Details\n{{ $json.details }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Slack Weekly OKR Update",
+      "type": "n8n-nodes-base.slack",
+      "position": [1120, 400],
+      "parameters": {
+        "channel": "#okr-updates",
+        "text": "=📈 *Weekly OKR Update — {{ $('Calculate Progress').item.json.week }}*\n\n*Overall Progress: {{ $('Calculate Progress').item.json.avgProgress }}%*\n\n🟢 On Track: {{ $('Calculate Progress').item.json.onTrack }}\n🟡 At Risk: {{ $('Calculate Progress').item.json.atRisk }}\n🔴 Off Track: {{ $('Calculate Progress').item.json.offTrack }}\n\n{{ $('Calculate Progress').item.json.details }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [{ "node": "Notion Query OKRs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query OKRs": {
+      "main": [
+        [{ "node": "Calculate Progress", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Progress": {
+      "main": [
+        [{ "node": "Notion Update Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Update Status": {
+      "main": [
+        [{ "node": "Slack Weekly OKR Update", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

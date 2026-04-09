@@ -1,0 +1,102 @@
+{
+  "name": "Monday.com Board to Sheets Export",
+  "nodes": [
+    {
+      "name": "Schedule Weekly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Fetch Monday Board",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "https://api.monday.com/v2",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "{\"query\": \"{ boards(ids: [YOUR_BOARD_ID]) { name items_page(limit: 100) { items { id name column_values { id title text } group { title } created_at updated_at } } } }\"}",
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Transform Board Data",
+      "type": "n8n-nodes-base.code",
+      "position": [710, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst boards = items[0]?.json?.data?.boards || [];\nconst board = boards[0] || {};\nconst boardItems = board.items_page?.items || [];\nconst boardName = board.name || 'Unknown Board';\n\nreturn boardItems.map(bItem => {\n  const columns = {};\n  (bItem.column_values || []).forEach(col => {\n    columns[col.title || col.id] = col.text || '';\n  });\n  return {\n    json: {\n      boardName: boardName,\n      itemId: bItem.id || '',\n      itemName: bItem.name || '',\n      group: bItem.group?.title || '',\n      createdAt: bItem.created_at || '',\n      updatedAt: bItem.updated_at || '',\n      exportDate: new Date().toISOString(),\n      ...columns\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Export",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1170, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Weekly Monday.com Export - {{ $now.toISODate() }}",
+        "message": "=Weekly Monday.com board export is complete.\n\nBoard: {{ $json.boardName }}\nItems exported: {{ $input.all().length }}\nExport Date: {{ $now.toISO() }}\n\nData has been synced to Google Sheets.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Monday.com Board to Sheets Export\nWeekly scheduled export of Monday.com board data to Google Sheets with email report.\n\n**Setup:**\n1. Replace YOUR_BOARD_ID in the HTTP Request body\n2. Set Monday.com API token in HTTP Header Auth (Authorization: YOUR_TOKEN)\n3. Connect Google Sheets and Gmail\n4. Adjust schedule as needed (default: weekly)"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Weekly": {
+      "main": [[{ "node": "Fetch Monday Board", "type": "main", "index": 0 }]]
+    },
+    "Fetch Monday Board": {
+      "main": [[{ "node": "Transform Board Data", "type": "main", "index": 0 }]]
+    },
+    "Transform Board Data": {
+      "main": [[{ "node": "Sheets Export", "type": "main", "index": 0 }]]
+    },
+    "Sheets Export": {
+      "main": [[{ "node": "Email Report", "type": "main", "index": 0 }]]
+    }
+  }
+}

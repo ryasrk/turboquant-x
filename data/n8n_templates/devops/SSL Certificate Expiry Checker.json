@@ -1,0 +1,260 @@
+{
+  "name": "SSL Certificate Expiry Checker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "domains",
+              "value": "example.com,api.example.com,app.example.com,admin.example.com"
+            }
+          ]
+        }
+      },
+      "name": "Set Domain List",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const domains = $input.first().json.domains.split(',').map(d => d.trim());\nreturn domains.map(domain => ({ json: { domain } }));"
+      },
+      "name": "Split Domains",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://ssl-checker.io/api/v1/check/{{ $json.domain }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "Check SSL Certificate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [920, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst now = new Date();\nconst expiry = new Date(item.result?.valid_till || item.valid_till || now);\nconst daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));\nconst domain = item.domain || item.host || 'unknown';\n\nlet alertLevel = 'OK';\nif (daysUntilExpiry <= 7) alertLevel = 'CRITICAL';\nelse if (daysUntilExpiry <= 14) alertLevel = 'WARNING';\nelse if (daysUntilExpiry <= 30) alertLevel = 'NOTICE';\n\nreturn [{\n  json: {\n    domain,\n    expiryDate: expiry.toISOString().split('T')[0],\n    daysUntilExpiry,\n    alertLevel,\n    issuer: item.result?.issuer || item.issuer || 'N/A',\n    timestamp: now.toISOString()\n  }\n}];"
+      },
+      "name": "Calculate Days Until Expiry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-expiring",
+              "leftValue": "={{ $json.daysUntilExpiry }}",
+              "rightValue": 30,
+              "operator": {
+                "type": "number",
+                "operation": "smallerEqual"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Expiring Soon?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🔐 *SSL Certificate Expiry Alert*\n\nDomain: `{{ $json.domain }}`\nExpiry Date: {{ $json.expiryDate }}\nDays Remaining: {{ $json.daysUntilExpiry }}\nAlert Level: {{ $json.alertLevel }}\nIssuer: {{ $json.issuer }}\n\n{{ $json.alertLevel === 'CRITICAL' ? '🔴 RENEW IMMEDIATELY!' : $json.alertLevel === 'WARNING' ? '🟡 Renew soon!' : '🟠 Plan renewal.' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Expiry Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1580, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=SSL Certificate Expiry {{ $json.alertLevel }}: {{ $json.domain }}",
+        "emailType": "text",
+        "message": "=SSL Certificate for {{ $json.domain }} expires on {{ $json.expiryDate }} ({{ $json.daysUntilExpiry }} days remaining).\n\nAlert Level: {{ $json.alertLevel }}\nIssuer: {{ $json.issuer }}\n\nPlease renew the certificate before it expires."
+      },
+      "name": "Email Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1580, 360],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "SSLTracking"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "domain": "={{ $json.domain }}",
+            "expiry_date": "={{ $json.expiryDate }}",
+            "days_remaining": "={{ $json.daysUntilExpiry }}",
+            "alert_level": "={{ $json.alertLevel }}",
+            "issuer": "={{ $json.issuer }}"
+          }
+        }
+      },
+      "name": "Google Sheets SSL Tracking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1580, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## SSL Certificate Expiry Checker\n\n**Schedule:** Daily at 8:00 AM\n**Function:** Checks SSL certificate expiry for list of domains.\n\n**Alert Levels:**\n- 🟠 NOTICE: ≤30 days\n- 🟡 WARNING: ≤14 days\n- 🔴 CRITICAL: ≤7 days\n\n**Notifications:** Telegram + Email for expiring certs.\n**Tracking:** All results logged to Google Sheets.\n\n### Setup\n1. Update domain list in 'Set Domain List'\n2. Configure Telegram and SMTP credentials\n3. Set Google Sheets document ID",
+        "width": 400,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -80]
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [
+          {
+            "node": "Set Domain List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Domain List": {
+      "main": [
+        [
+          {
+            "node": "Split Domains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Domains": {
+      "main": [
+        [
+          {
+            "node": "Check SSL Certificate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check SSL Certificate": {
+      "main": [
+        [
+          {
+            "node": "Calculate Days Until Expiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Days Until Expiry": {
+      "main": [
+        [
+          {
+            "node": "Expiring Soon?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expiring Soon?": {
+      "main": [
+        [
+          {
+            "node": "Telegram Expiry Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets SSL Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

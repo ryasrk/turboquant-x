@@ -1,0 +1,212 @@
+{
+  "name": "Slack Standup Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "name": "Daily 9AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#standup",
+          "mode": "name"
+        },
+        "text": ":sunrise: *Daily Standup Time!*\n\nPlease reply in a thread with:\n1. :white_check_mark: What did you accomplish yesterday?\n2. :dart: What are you working on today?\n3. :no_entry_sign: Any blockers?",
+        "otherOptions": {}
+      },
+      "name": "Post Standup Prompt",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [480, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 11 * * 1-5"
+            }
+          ]
+        }
+      },
+      "name": "Collect at 11AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 520]
+    },
+    {
+      "parameters": {
+        "resource": "channel",
+        "operation": "history",
+        "channelId": {
+          "__rl": true,
+          "value": "#standup",
+          "mode": "name"
+        },
+        "limit": 50,
+        "filters": {}
+      },
+      "name": "Fetch Standup Replies",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [480, 520],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst responses = items.map(item => {\n  const msg = item.json;\n  return {\n    user: msg.user || 'Unknown',\n    text: msg.text || '',\n    timestamp: msg.ts || ''\n  };\n});\n\nlet summary = ':clipboard: *Standup Summary*\\n\\n';\nfor (const r of responses) {\n  if (r.text && r.text.length > 5) {\n    summary += `*<@${r.user}>*:\\n${r.text}\\n\\n`;\n  }\n}\n\nconst blockers = responses.filter(r => \n  r.text.toLowerCase().includes('blocker') || r.text.toLowerCase().includes('blocked')\n);\n\nif (blockers.length > 0) {\n  summary += ':rotating_light: *Blockers Identified:*\\n';\n  blockers.forEach(b => {\n    summary += `- <@${b.user}>: ${b.text}\\n`;\n  });\n}\n\nreturn [{json: {summary, responseCount: responses.length, hasBlockers: blockers.length > 0, date: new Date().toISOString().split('T')[0]}}];"
+      },
+      "name": "Compile Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 520]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#standup",
+          "mode": "name"
+        },
+        "text": "={{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "name": "Post Summary",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 520],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Standups",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1140, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Standup Bot\n\nAutomated daily standup collection and summarization.\n\n**Flow:**\n1. Post standup prompt at 9AM weekdays\n2. Collect replies at 11AM\n3. Compile summary with blocker detection\n4. Post summary back to channel\n5. Archive to Google Sheets\n\n**Setup:**\n- Create #standup channel\n- Configure Slack credentials\n- Set Google Sheets document ID",
+        "width": 340,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "Daily 9AM Trigger": {
+      "main": [
+        [
+          {
+            "node": "Post Standup Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect at 11AM": {
+      "main": [
+        [
+          {
+            "node": "Fetch Standup Replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Standup Replies": {
+      "main": [
+        [
+          {
+            "node": "Compile Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Summary": {
+      "main": [
+        [
+          {
+            "node": "Post Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Summary": {
+      "main": [
+        [
+          {
+            "node": "Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

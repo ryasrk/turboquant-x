@@ -1,0 +1,316 @@
+{
+  "name": "WhatsApp Appointment Booking System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-booking",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Booking Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body;\nconst message = body.message.toLowerCase();\n\n// Parse time preference from message\nconst timePatterns = [\n  /(?:jam|at|pukul)\\s*(\\d{1,2})[:.](\\d{2})/i,\n  /(?:jam|at|pukul)\\s*(\\d{1,2})\\s*(pagi|siang|sore|malam|am|pm)/i,\n  /(\\d{1,2})[:.](\\d{2})\\s*(pagi|siang|sore|malam|am|pm)?/i\n];\n\nlet requestedHour = null;\nlet requestedMinute = 0;\n\nfor (const pattern of timePatterns) {\n  const match = message.match(pattern);\n  if (match) {\n    requestedHour = parseInt(match[1]);\n    requestedMinute = match[2] ? parseInt(match[2]) : 0;\n    break;\n  }\n}\n\n// Parse date preference\nconst today = new Date();\nlet requestedDate = new Date(today);\n\nif (message.includes('besok') || message.includes('tomorrow')) {\n  requestedDate.setDate(requestedDate.getDate() + 1);\n} else if (message.includes('lusa')) {\n  requestedDate.setDate(requestedDate.getDate() + 2);\n}\n\nreturn [{\n  json: {\n    customer_phone: body.from,\n    customer_name: body.profile_name || 'Customer',\n    raw_message: body.message,\n    requested_date: requestedDate.toISOString().split('T')[0],\n    requested_hour: requestedHour,\n    requested_minute: requestedMinute,\n    parsed_ok: requestedHour !== null\n  }\n}];"
+      },
+      "name": "Parse Time Preference",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.parsed_ok }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Time Parsed OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "calendarId": "primary",
+        "timeMin": "={{ $json.requested_date }}T{{ String($json.requested_hour).padStart(2, '0') }}:00:00+07:00",
+        "timeMax": "={{ $json.requested_date }}T{{ String($json.requested_hour + 1).padStart(2, '0') }}:00:00+07:00",
+        "options": {}
+      },
+      "name": "Check Google Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 3,
+      "position": [1000, 200],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.length || 0 }}",
+              "operation": "equal",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Slot Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "calendarId": "primary",
+        "start": "={{ $('Parse Time Preference').item.json.requested_date }}T{{ String($('Parse Time Preference').item.json.requested_hour).padStart(2, '0') }}:{{ String($('Parse Time Preference').item.json.requested_minute).padStart(2, '0') }}:00+07:00",
+        "end": "={{ $('Parse Time Preference').item.json.requested_date }}T{{ String($('Parse Time Preference').item.json.requested_hour + 1).padStart(2, '0') }}:{{ String($('Parse Time Preference').item.json.requested_minute).padStart(2, '0') }}:00+07:00",
+        "additionalFields": {
+          "summary": "Appointment - {{ $('Parse Time Preference').item.json.customer_name }}",
+          "description": "Customer: {{ $('Parse Time Preference').item.json.customer_name }}\nPhone: {{ $('Parse Time Preference').item.json.customer_phone }}\nBooked via WhatsApp"
+        }
+      },
+      "name": "Book Calendar Slot",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 3,
+      "position": [1500, 100],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $('Parse Time Preference').item.json.customer_phone }}"
+            },
+            {
+              "name": "text",
+              "value": "✅ Booking Berhasil!\n\n📅 Tanggal: {{ $('Parse Time Preference').item.json.requested_date }}\n🕐 Jam: {{ String($('Parse Time Preference').item.json.requested_hour).padStart(2, '0') }}:{{ String($('Parse Time Preference').item.json.requested_minute).padStart(2, '0') }}\n\nKami akan mengirim pengingat 1 jam sebelum jadwal Anda.\n\nUntuk membatalkan, ketik 'BATAL'."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Confirm Booking via WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1750, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $('Parse Time Preference').item.json.customer_phone }}"
+            },
+            {
+              "name": "text",
+              "value": "⚠️ Maaf, slot jam {{ String($('Parse Time Preference').item.json.requested_hour).padStart(2, '0') }}:{{ String($('Parse Time Preference').item.json.requested_minute).padStart(2, '0') }} pada {{ $('Parse Time Preference').item.json.requested_date }} sudah terisi.\n\nSilakan pilih waktu lain atau ketik 'JADWAL' untuk melihat slot yang tersedia."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Notify Slot Unavailable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1500, 350]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.customer_phone }}"
+            },
+            {
+              "name": "text",
+              "value": "🤔 Maaf, kami tidak bisa memahami waktu yang Anda minta.\n\nSilakan kirim ulang dengan format:\n📌 'Booking besok jam 10:00'\n📌 'Jadwal lusa pukul 14:30'\n\nAtau ketik 'JADWAL' untuk melihat slot tersedia."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Request Clarification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "hours"
+      },
+      "name": "Wait 1 Hour Before",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1950, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.whatsapp.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $('Parse Time Preference').item.json.customer_phone }}"
+            },
+            {
+              "name": "text",
+              "value": "⏰ Pengingat: Appointment Anda dalam 1 jam lagi!\n\n📅 {{ $('Parse Time Preference').item.json.requested_date }}\n🕐 {{ String($('Parse Time Preference').item.json.requested_hour).padStart(2, '0') }}:{{ String($('Parse Time Preference').item.json.requested_minute).padStart(2, '0') }}\n\nSampai jumpa! 👋"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Send Reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2150, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok' }) }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 400]
+    },
+    {
+      "parameters": {
+        "content": "## WhatsApp Appointment Booking System\n\nFull booking flow via WhatsApp with Google Calendar integration.\n\n**Flow:**\n1. Customer sends time preference via WhatsApp\n2. Parse date/time from natural language (ID/EN)\n3. Check Google Calendar for availability\n4. If available → book slot → confirm via WhatsApp\n5. If unavailable → notify customer\n6. Send reminder 1 hour before appointment\n\n**Supported formats:**\n- 'Booking besok jam 10:00'\n- 'Jadwal lusa pukul 14:30'\n- 'Book at 3pm tomorrow'",
+        "width": 420,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Booking Request Webhook": {
+      "main": [
+        [{ "node": "Parse Time Preference", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Time Preference": {
+      "main": [
+        [{ "node": "Time Parsed OK?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Time Parsed OK?": {
+      "main": [
+        [{ "node": "Check Google Calendar", "type": "main", "index": 0 }],
+        [{ "node": "Request Clarification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Google Calendar": {
+      "main": [
+        [{ "node": "Slot Available?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Slot Available?": {
+      "main": [
+        [{ "node": "Book Calendar Slot", "type": "main", "index": 0 }],
+        [{ "node": "Notify Slot Unavailable", "type": "main", "index": 0 }]
+      ]
+    },
+    "Book Calendar Slot": {
+      "main": [
+        [{ "node": "Confirm Booking via WhatsApp", "type": "main", "index": 0 }]
+      ]
+    },
+    "Confirm Booking via WhatsApp": {
+      "main": [
+        [{ "node": "Wait 1 Hour Before", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 1 Hour Before": {
+      "main": [
+        [{ "node": "Send Reminder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Slot Unavailable": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Request Clarification": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

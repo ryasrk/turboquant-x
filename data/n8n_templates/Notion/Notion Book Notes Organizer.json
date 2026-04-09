@@ -1,0 +1,142 @@
+{
+  "name": "Notion Book Notes Organizer",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Book Notes Organizer\nReceive book highlights/notes, create organized Notion pages with metadata, organize by genre.\n\n**Setup:**\n1. Configure webhook for highlights input\n2. Set Notion books database ID\n3. Set email for summary notifications"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook Highlights",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "book-notes",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Format Book Data",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const data = item.json.body || item.json;\n  const title = data.title || 'Untitled Book';\n  const author = data.author || 'Unknown Author';\n  const genre = data.genre || 'Uncategorized';\n  const highlights = data.highlights || [];\n  const notes = data.notes || '';\n  const rating = data.rating || 0;\n  const isbn = data.isbn || '';\n  const pages = data.pages || 0;\n  const dateFinished = data.dateFinished || new Date().toISOString();\n\n  const highlightsList = Array.isArray(highlights)\n    ? highlights.map((h, i) => `${i + 1}. \"${typeof h === 'string' ? h : h.text || h}\"${h.page ? ` (p.${h.page})` : ''}`).join('\\n')\n    : String(highlights);\n\n  return {\n    json: {\n      title,\n      author,\n      genre,\n      highlightsList,\n      highlightCount: Array.isArray(highlights) ? highlights.length : 0,\n      notes,\n      rating,\n      isbn,\n      pages,\n      dateFinished\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Book Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [680, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.title }}"
+            },
+            {
+              "name": "Author",
+              "type": "rich_text",
+              "richText": "={{ $json.author }}"
+            },
+            {
+              "name": "Genre",
+              "type": "select",
+              "select": "={{ $json.genre }}"
+            },
+            {
+              "name": "Rating",
+              "type": "number",
+              "number": "={{ $json.rating }}"
+            },
+            {
+              "name": "Pages",
+              "type": "number",
+              "number": "={{ $json.pages }}"
+            },
+            {
+              "name": "Highlights",
+              "type": "number",
+              "number": "={{ $json.highlightCount }}"
+            },
+            {
+              "name": "Date Finished",
+              "type": "date",
+              "date": "={{ $json.dateFinished }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=## Book Info\nAuthor: {{ $json.author }}\nGenre: {{ $json.genre }}\nPages: {{ $json.pages }}\nRating: {{ '⭐'.repeat($json.rating) }}\n\n## Highlights ({{ $json.highlightCount }})\n{{ $json.highlightsList }}\n\n## Personal Notes\n{{ $json.notes }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Email Summary",
+      "type": "n8n-nodes-base.gmail",
+      "position": [900, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=📚 Book Notes Saved: {{ $('Format Book Data').item.json.title }}",
+        "message": "=Book notes have been saved to Notion.\n\nTitle: {{ $('Format Book Data').item.json.title }}\nAuthor: {{ $('Format Book Data').item.json.author }}\nGenre: {{ $('Format Book Data').item.json.genre }}\nRating: {{ $('Format Book Data').item.json.rating }}/5\nHighlights: {{ $('Format Book Data').item.json.highlightCount }}\n\nCheck your Notion books database for the full entry.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Webhook Highlights": {
+      "main": [
+        [{ "node": "Format Book Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Book Data": {
+      "main": [
+        [{ "node": "Notion Create Book Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Book Page": {
+      "main": [
+        [{ "node": "Email Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

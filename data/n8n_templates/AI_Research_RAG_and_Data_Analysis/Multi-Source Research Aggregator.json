@@ -1,0 +1,179 @@
+{
+  "name": "Multi-Source Research Aggregator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "research-aggregate",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://newsapi.org/v2/everything?q={{ encodeURIComponent($json.body.topic) }}&pageSize=10&sortBy=relevancy",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        },
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Api-Key", "value": "" }
+          ]
+        }
+      },
+      "name": "Fetch News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 180]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.semanticscholar.org/graph/v1/paper/search?query={{ encodeURIComponent($json.body.topic) }}&limit=10&fields=title,abstract,year,citationCount,authors",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Fetch Academic Papers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 330]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.reddit.com/search.json?q={{ encodeURIComponent($json.body.topic) }}&sort=relevance&limit=10",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Fetch Social Discussions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst newsData = $('Fetch News').first().json;\nconst academicData = $('Fetch Academic Papers').first().json;\nconst socialData = $('Fetch Social Discussions').first().json;\n\nconst news = (newsData.articles || []).map(a => ({\n  source: 'news',\n  title: a.title,\n  description: a.description || '',\n  url: a.url,\n  date: a.publishedAt\n}));\n\nconst academic = (academicData.data || []).map(p => ({\n  source: 'academic',\n  title: p.title,\n  description: p.abstract || '',\n  authors: (p.authors || []).map(a => a.name).join(', '),\n  citations: p.citationCount || 0,\n  year: p.year\n}));\n\nconst social = ((socialData.data || {}).children || []).map(p => ({\n  source: 'social',\n  title: p.data ? p.data.title : '',\n  description: p.data ? (p.data.selftext || '').substring(0, 500) : '',\n  score: p.data ? p.data.score : 0,\n  comments: p.data ? p.data.num_comments : 0,\n  subreddit: p.data ? p.data.subreddit : ''\n}));\n\nreturn [{\n  json: {\n    topic: $('Webhook').item.json.body.topic,\n    news: { count: news.length, items: news },\n    academic: { count: academic.length, items: academic },\n    social: { count: social.length, items: social },\n    totalSources: news.length + academic.length + social.length\n  }\n}];"
+      },
+      "name": "Merge Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 330]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Synthesize this multi-source research on \"{{ $json.topic }}\" into a comprehensive briefing:\n\nNews Sources ({{ $json.news.count }}):\n{{ JSON.stringify($json.news.items.slice(0, 5), null, 2) }}\n\nAcademic Sources ({{ $json.academic.count }}):\n{{ JSON.stringify($json.academic.items.slice(0, 5), null, 2) }}\n\nSocial Discussion ({{ $json.social.count }}):\n{{ JSON.stringify($json.social.items.slice(0, 5), null, 2) }}\n\nProvide:\n1. **Executive Summary** — what the overall landscape looks like\n2. **News Perspective** — current events and trends\n3. **Academic Perspective** — research findings\n4. **Public Sentiment** — social discussion themes\n5. **Key Insights** — cross-source patterns\n6. **Gaps** — what's missing from available sources"
+            }
+          ]
+        },
+        "options": { "temperature": 0.3, "maxTokens": 2500 }
+      },
+      "name": "OpenAI Synthesize",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [910, 330],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "topic": "={{ $('Merge Sources').item.json.topic }}",
+            "news_count": "={{ $('Merge Sources').item.json.news.count }}",
+            "academic_count": "={{ $('Merge Sources').item.json.academic.count }}",
+            "social_count": "={{ $('Merge Sources').item.json.social.count }}",
+            "synthesis": "={{ $json.message.content }}",
+            "date": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1130, 230],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').item.json.body.email || '' }}",
+        "subject": "=Research Briefing: {{ $('Merge Sources').item.json.topic }}",
+        "message": "={{ $json.message.content }}",
+        "options": {}
+      },
+      "name": "Email Briefing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1130, 430],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Multi-Source Research Aggregator\n\nFetches data in parallel from news, academic, and social sources, merges results, and uses OpenAI to synthesize a comprehensive research briefing.\n\n**Setup:**\n1. Add NewsAPI key (header in Fetch News node)\n2. Configure OpenAI, Google Sheets, Gmail credentials\n3. POST: `{\"topic\": \"artificial intelligence\", \"email\": \"user@example.com\"}`\n4. Semantic Scholar and Reddit APIs are free"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Fetch News", "type": "main", "index": 0 },
+          { "node": "Fetch Academic Papers", "type": "main", "index": 0 },
+          { "node": "Fetch Social Discussions", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch News": {
+      "main": [
+        [{ "node": "Merge Sources", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Academic Papers": {
+      "main": [
+        [{ "node": "Merge Sources", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Social Discussions": {
+      "main": [
+        [{ "node": "Merge Sources", "type": "main", "index": 0 }]
+      ]
+    },
+    "Merge Sources": {
+      "main": [
+        [{ "node": "OpenAI Synthesize", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Synthesize": {
+      "main": [
+        [
+          { "node": "Save to Sheets", "type": "main", "index": 0 },
+          { "node": "Email Briefing", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

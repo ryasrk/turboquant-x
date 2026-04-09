@@ -1,0 +1,201 @@
+{
+  "name": "Slack Code Deploy Notifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-deploy",
+        "options": {}
+      },
+      "name": "GitHub Deploy Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst payload = items[0].json;\n\nconst action = payload.action || 'created';\nconst deploy = payload.deployment || {};\nconst repo = (payload.repository || {}).full_name || 'unknown/repo';\nconst env = deploy.environment || 'production';\nconst sha = (deploy.sha || '').slice(0, 7);\nconst creator = (deploy.creator || {}).login || 'unknown';\nconst description = deploy.description || '';\n\nconst status = payload.deployment_status || {};\nconst state = status.state || action;\nconst isFailure = ['failure', 'error'].includes(state);\nconst isSuccess = state === 'success';\n\n// Get commits if available\nconst commits = (payload.commits || []).slice(0, 10);\nlet commitList = '';\nif (commits.length > 0) {\n  commitList = commits.map(c => `• \\`${(c.id || '').slice(0, 7)}\\` ${c.message || ''} — ${(c.author || {}).name || ''}`).join('\\n');\n}\n\nreturn [{json: {\n  repo,\n  env,\n  sha,\n  creator,\n  description,\n  state,\n  isFailure,\n  isSuccess,\n  commitList,\n  commitCount: commits.length,\n  timestamp: new Date().toISOString()\n}}];"
+      },
+      "name": "Parse Deploy Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#deploys",
+          "mode": "name"
+        },
+        "text": "={{ $json.isSuccess ? ':white_check_mark:' : $json.isFailure ? ':x:' : ':rocket:' }} *Deploy {{ $json.state }}* — `{{ $json.repo }}`\n\n*Environment:* {{ $json.env }}\n*SHA:* `{{ $json.sha }}`\n*By:* {{ $json.creator }}\n*Description:* {{ $json.description }}\n\n{{ $json.commitList ? '*Commits:*\\n' + $json.commitList : '' }}",
+        "otherOptions": {}
+      },
+      "name": "Post to Deploys",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.isFailure }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If Failure",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#incidents",
+          "mode": "name"
+        },
+        "text": ":rotating_light: *DEPLOY FAILURE*\n\n*Repo:* `{{ $json.repo }}`\n*Environment:* {{ $json.env }}\n*SHA:* `{{ $json.sha }}`\n*By:* {{ $json.creator }}\n\n@channel — Deploy to {{ $json.env }} has failed. Please investigate immediately.",
+        "otherOptions": {}
+      },
+      "name": "Alert Incidents",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 240],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Deploy Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Deploy Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1140, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Code Deploy Notifier\n\nTrack deployments via GitHub webhooks.\n\n**Flow:**\n1. GitHub sends deploy event webhook\n2. Parse deployment data and commits\n3. Post to #deploys with commit list\n4. If failure → alert #incidents\n5. Log all deploys to Google Sheets\n\n**GitHub webhook events:**\n- deployment\n- deployment_status",
+        "width": 340,
+        "height": 260
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "GitHub Deploy Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Deploy Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Deploy Event": {
+      "main": [
+        [
+          {
+            "node": "Post to Deploys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Deploys": {
+      "main": [
+        [
+          {
+            "node": "If Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Failure": {
+      "main": [
+        [
+          {
+            "node": "Alert Incidents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets Deploy Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Incidents": {
+      "main": [
+        [
+          {
+            "node": "Sheets Deploy Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

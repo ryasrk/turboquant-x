@@ -1,0 +1,181 @@
+{
+  "name": "Bulk PDF Rename and Organize",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "weekly-schedule",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {
+          "filter": "mimeType='application/pdf'"
+        }
+      },
+      "id": "drive-list",
+      "name": "Drive List PDFs",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [460, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/image",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.webViewLink || $json.webContentLink }}"
+            },
+            {
+              "name": "language",
+              "value": "eng"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "extract-info",
+      "name": "HTTP Extract Title/Date",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = item.json.ParsedResults?.[0]?.ParsedText || '';\n  const driveItem = $('Drive List PDFs').item.json;\n  const titleMatch = text.match(/^(.{5,60})$/m);\n  const dateMatch = text.match(/(\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{2,4})/);\n  const title = (titleMatch?.[1] || 'Untitled').trim().replace(/[^a-zA-Z0-9\\s-]/g, '').substring(0, 50);\n  const date = dateMatch?.[1]?.replace(/\\//g, '-') || new Date().toISOString().split('T')[0];\n  const newName = `${date}_${title.replace(/\\s+/g, '_')}`;\n  results.push({\n    json: {\n      fileId: driveItem.id,\n      originalName: driveItem.name,\n      newName,\n      extractedTitle: title,\n      extractedDate: date,\n      processedAt: new Date().toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "generate-name",
+      "name": "Code Generate New Name",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.fileId }}"
+        },
+        "options": {
+          "name": "={{ $json.newName }}.pdf"
+        }
+      },
+      "id": "drive-rename",
+      "name": "Drive Rename",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1120, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-index",
+      "name": "Sheets Index",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1340, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Bulk PDF Rename and Organize\n\nWeekly schedule → lists PDFs in Drive folder →\nOCR extracts title/date from each → Code generates standardized name →\nDrive renames files → Sheets maintains index.\n\n**Naming Convention:** YYYY-MM-DD_Extracted_Title.pdf\n\n**Setup:**\n1. Set Google Drive source folder\n2. Configure OCR API credentials\n3. Set Google Sheets index document\n4. Adjust cron schedule if needed"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [{ "node": "Drive List PDFs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive List PDFs": {
+      "main": [
+        [{ "node": "HTTP Extract Title/Date", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Extract Title/Date": {
+      "main": [
+        [{ "node": "Code Generate New Name", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Generate New Name": {
+      "main": [
+        [{ "node": "Drive Rename", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Rename": {
+      "main": [
+        [{ "node": "Sheets Index", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

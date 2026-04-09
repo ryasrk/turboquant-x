@@ -1,0 +1,149 @@
+{
+  "name": "Telegram Website Downtime Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 5 }
+          ]
+        }
+      },
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sites = [\n  { name: 'Main Website', url: 'https://example.com' },\n  { name: 'API Server', url: 'https://api.example.com/health' },\n  { name: 'Dashboard', url: 'https://dashboard.example.com' }\n];\nreturn sites.map(s => ({ json: s }));"
+      },
+      "name": "Site List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "method": "GET",
+        "options": {
+          "timeout": 10000,
+          "redirect": { "redirect": { "followRedirects": true } }
+        }
+      },
+      "name": "Ping Site",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const statusCode = item.json.statusCode || item.json.$response?.statusCode || 0;\n  const isDown = statusCode < 200 || statusCode >= 400;\n  const responseTime = item.json.$response?.responseTime || 0;\n  results.push({\n    json: {\n      name: item.json.name || 'Unknown',\n      url: item.json.url || '',\n      statusCode,\n      isDown,\n      responseTime,\n      status: isDown ? 'DOWN' : 'UP',\n      timestamp: new Date().toISOString(),\n      date: new Date().toISOString().split('T')[0]\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Check Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.isDown}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Is Down?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 <b>SITE DOWN ALERT!</b>\n\n🌐 {{$json.name}}\n🔗 {{$json.url}}\n❌ Status: {{$json.statusCode}}\n⏱ Response: {{$json.responseTime}}ms\n🕐 Time: {{$json.timestamp}}\n\n⚠️ Immediate attention required!",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "UptimeLog" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Uptime",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Website Downtime Alert\n\nEvery 5 min → ping sites → if down → Telegram alert → log uptime to Sheets.\n\n**Setup:**\n1. Edit Site List code node with your URLs\n2. Set Telegram Bot API credentials\n3. Set chat ID for alert destination\n4. Create Google Sheet: name, url, statusCode, isDown, responseTime, status, timestamp, date",
+        "width": 420,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [{ "node": "Site List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Site List": {
+      "main": [
+        [{ "node": "Ping Site", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ping Site": {
+      "main": [
+        [{ "node": "Check Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [{ "node": "Is Down?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Down?": {
+      "main": [
+        [{ "node": "Send Alert", "type": "main", "index": 0 }],
+        [{ "node": "Log Uptime", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [{ "node": "Log Uptime", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,192 @@
+{
+  "name": "Telegram Multi-Language Translator Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = (item.json.message?.text || '').trim();\n  const chatId = item.json.message?.chat?.id;\n  const username = item.json.message?.from?.username || 'user';\n  \n  // Parse: /translate <lang> <text>\n  const match = text.match(/^\\/translate\\s+(\\w{2})\\s+(.+)$/is);\n  \n  if (match) {\n    const langMap = {\n      en: 'English', id: 'Indonesian', ja: 'Japanese', ko: 'Korean',\n      zh: 'Chinese', es: 'Spanish', fr: 'French', de: 'German',\n      ar: 'Arabic', hi: 'Hindi', pt: 'Portuguese', ru: 'Russian',\n      th: 'Thai', vi: 'Vietnamese', ms: 'Malay', tl: 'Filipino'\n    };\n    const targetLang = match[1].toLowerCase();\n    results.push({\n      json: {\n        command: 'translate',\n        targetLang,\n        targetLangName: langMap[targetLang] || targetLang.toUpperCase(),\n        sourceText: match[2].trim(),\n        chatId, username,\n        timestamp: new Date().toISOString()\n      }\n    });\n  } else if (text === '/languages') {\n    results.push({ json: { command: 'languages', chatId } });\n  } else {\n    results.push({ json: { command: 'help', chatId } });\n  }\n}\nreturn results;"
+      },
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "outputKey": "translate", "value": "translate" },
+            { "outputKey": "languages", "value": "languages" },
+            { "outputKey": "help", "value": "help" }
+          ]
+        },
+        "dataType": "string",
+        "value1": "={{$json.command}}"
+      },
+      "name": "Route Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.mymemory.translated.net/get",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{$json.sourceText}}" },
+            { "name": "langpair", "value": "=auto|{{$json.targetLang}}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Translate API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 150]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0].json;\nconst translated = data.responseData?.translatedText || 'Translation failed';\nconst detectedLang = data.responseData?.detectedLanguage || 'auto';\nconst match = data.responseData?.match || 0;\n\nreturn [{\n  json: {\n    translatedText: translated,\n    detectedLang,\n    confidence: (match * 100).toFixed(0),\n    sourceText: data.sourceText || '',\n    targetLang: data.targetLang || '',\n    targetLangName: data.targetLangName || ''\n  }\n}];"
+      },
+      "name": "Parse Translation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 150]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Command'].json.chatId}}",
+        "text": "=🌐 <b>Translation</b>\n\n📝 Original: {{$node['Parse Command'].json.sourceText}}\n🔄 {{$json.targetLangName}}: <b>{{$json.translatedText}}</b>\n\n🎯 Confidence: {{$json.confidence}}%",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Translation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 150],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Translations" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Translation",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1750, 150],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "🌐 <b>Supported Languages:</b>\n\n🇺🇸 en - English\n🇮🇩 id - Indonesian\n🇯🇵 ja - Japanese\n🇰🇷 ko - Korean\n🇨🇳 zh - Chinese\n🇪🇸 es - Spanish\n🇫🇷 fr - French\n🇩🇪 de - German\n🇸🇦 ar - Arabic\n🇮🇳 hi - Hindi\n🇧🇷 pt - Portuguese\n🇷🇺 ru - Russian\n🇹🇭 th - Thai\n🇻🇳 vi - Vietnamese\n🇲🇾 ms - Malay\n🇵🇭 tl - Filipino",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Languages",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "🌐 <b>Translator Bot</b>\n\n/translate <lang> <text>\nExample: /translate en Selamat pagi\n\n/languages - show supported languages",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Help",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 450],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Multi-Language Translator Bot\n\n/translate <lang> <text> → MyMemory API → reply with translation → log to Sheets.\n\n**Setup:**\n1. Set Telegram Bot credentials\n2. MyMemory API is free (1000 words/day), no key needed\n3. For higher limits, add email param to API URL\n4. Create Google Sheet 'Translations': sourceText, translatedText, targetLang, username, timestamp",
+        "width": 440,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 600]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [{ "node": "Route Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [{ "node": "Translate API", "type": "main", "index": 0 }],
+        [{ "node": "Send Languages", "type": "main", "index": 0 }],
+        [{ "node": "Send Help", "type": "main", "index": 0 }]
+      ]
+    },
+    "Translate API": {
+      "main": [
+        [{ "node": "Parse Translation", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Translation": {
+      "main": [
+        [{ "node": "Send Translation", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Translation": {
+      "main": [
+        [{ "node": "Log Translation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

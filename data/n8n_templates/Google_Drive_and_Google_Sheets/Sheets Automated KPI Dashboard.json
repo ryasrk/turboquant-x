@@ -1,0 +1,145 @@
+{
+  "name": "Sheets Automated KPI Dashboard",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 340],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "days", "daysInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Sales Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 180],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Sales" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Marketing Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 360],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Marketing" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Read Support Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [540, 540],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Support" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Calculate KPIs",
+      "type": "n8n-nodes-base.code",
+      "position": [780, 360],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items.map(i => i.json);\n\n// Sales KPIs\nconst salesData = data.filter(d => d._source === 'sales' || d.department === 'sales');\nconst totalRevenue = salesData.reduce((sum, d) => sum + (Number(d.revenue) || Number(d.amount) || 0), 0);\nconst totalDeals = salesData.length;\nconst avgDealSize = totalDeals > 0 ? Math.round(totalRevenue / totalDeals * 100) / 100 : 0;\nconst closedWon = salesData.filter(d => (d.status || '').toLowerCase() === 'won').length;\nconst winRate = totalDeals > 0 ? Math.round((closedWon / totalDeals) * 10000) / 100 : 0;\n\n// Marketing KPIs\nconst marketingData = data.filter(d => d._source === 'marketing' || d.department === 'marketing');\nconst totalLeads = marketingData.reduce((sum, d) => sum + (Number(d.leads) || 1), 0);\nconst totalSpend = marketingData.reduce((sum, d) => sum + (Number(d.spend) || Number(d.cost) || 0), 0);\nconst costPerLead = totalLeads > 0 ? Math.round(totalSpend / totalLeads * 100) / 100 : 0;\n\n// Support KPIs\nconst supportData = data.filter(d => d._source === 'support' || d.department === 'support');\nconst totalTickets = supportData.length;\nconst resolvedTickets = supportData.filter(d => (d.status || '').toLowerCase() === 'resolved').length;\nconst resolutionRate = totalTickets > 0 ? Math.round((resolvedTickets / totalTickets) * 10000) / 100 : 0;\nconst avgResponseTime = supportData.reduce((sum, d) => sum + (Number(d.responseTimeHours) || 0), 0) / (totalTickets || 1);\n\nconst kpis = {\n  date: new Date().toISOString().split('T')[0],\n  sales_totalRevenue: totalRevenue,\n  sales_totalDeals: totalDeals,\n  sales_avgDealSize: avgDealSize,\n  sales_winRate: winRate,\n  marketing_totalLeads: totalLeads,\n  marketing_totalSpend: totalSpend,\n  marketing_costPerLead: costPerLead,\n  support_totalTickets: totalTickets,\n  support_resolutionRate: resolutionRate,\n  support_avgResponseTimeHours: Math.round(avgResponseTime * 100) / 100\n};\n\nreturn [{ json: kpis }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Dashboard Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1020, 360],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "KPI_Dashboard" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1260, 260],
+      "parameters": {
+        "chatId": "",
+        "text": "=📊 Daily KPI Dashboard - {{ $json.date }}\n\n💰 Sales:\n• Revenue: ${{ $json.sales_totalRevenue }}\n• Deals: {{ $json.sales_totalDeals }}\n• Win Rate: {{ $json.sales_winRate }}%\n\n📈 Marketing:\n• Leads: {{ $json.marketing_totalLeads }}\n• Cost/Lead: ${{ $json.marketing_costPerLead }}\n\n🎧 Support:\n• Tickets: {{ $json.support_totalTickets }}\n• Resolution Rate: {{ $json.support_resolutionRate }}%",
+        "additionalFields": {}
+      },
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Summary",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1260, 480],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Daily KPI Report - {{ $json.date }}",
+        "message": "=Daily KPI Dashboard\n\nDate: {{ $json.date }}\n\nSALES:\n- Total Revenue: ${{ $json.sales_totalRevenue }}\n- Total Deals: {{ $json.sales_totalDeals }}\n- Avg Deal Size: ${{ $json.sales_avgDealSize }}\n- Win Rate: {{ $json.sales_winRate }}%\n\nMARKETING:\n- Total Leads: {{ $json.marketing_totalLeads }}\n- Total Spend: ${{ $json.marketing_totalSpend }}\n- Cost Per Lead: ${{ $json.marketing_costPerLead }}\n\nSUPPORT:\n- Total Tickets: {{ $json.support_totalTickets }}\n- Resolution Rate: {{ $json.support_resolutionRate }}%\n- Avg Response Time: {{ $json.support_avgResponseTimeHours }}h\n\nFull report in KPI_Dashboard sheet.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 60],
+      "parameters": {
+        "width": 1150,
+        "height": 100,
+        "content": "### Sheets Automated KPI Dashboard\nDaily workflow that reads sales, marketing, and support data from Google Sheets, calculates KPIs (revenue, win rate, cost per lead, resolution rate), writes to a dashboard sheet, and sends summaries via Telegram and Gmail."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[
+        { "node": "Read Sales Sheet", "type": "main", "index": 0 },
+        { "node": "Read Marketing Sheet", "type": "main", "index": 0 },
+        { "node": "Read Support Sheet", "type": "main", "index": 0 }
+      ]]
+    },
+    "Read Sales Sheet": { "main": [[{ "node": "Calculate KPIs", "type": "main", "index": 0 }]] },
+    "Read Marketing Sheet": { "main": [[{ "node": "Calculate KPIs", "type": "main", "index": 0 }]] },
+    "Read Support Sheet": { "main": [[{ "node": "Calculate KPIs", "type": "main", "index": 0 }]] },
+    "Calculate KPIs": { "main": [[{ "node": "Write Dashboard Sheet", "type": "main", "index": 0 }]] },
+    "Write Dashboard Sheet": {
+      "main": [[
+        { "node": "Telegram Summary", "type": "main", "index": 0 },
+        { "node": "Gmail Summary", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "name": "AI Social Media Comment Moderator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "moderate-comment",
+        "options": {}
+      },
+      "name": "Webhook - New Comment",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Classify this social media comment into exactly ONE category:\n- positive (genuine positive feedback)\n- negative (legitimate complaint or criticism)\n- spam (promotional, irrelevant links)\n- offensive (hate speech, harassment, threats)\n\nAlso provide:\n- suggested_action: \"auto_reply\" (positive), \"flag_review\" (negative), \"delete\" (spam/offensive), \"escalate\" (threats)\n- auto_reply_text: If positive, generate a friendly thank-you reply. Otherwise empty string.\n- confidence: 0.0 to 1.0\n\nReturn JSON: {\"category\": \"...\", \"suggested_action\": \"...\", \"auto_reply_text\": \"...\", \"confidence\": 0.95, \"reason\": \"...\"}\n\nComment Author: {{ $json.body.author }}\nComment: {{ $json.body.comment }}\nPost Context: {{ $json.body.post_context || 'N/A' }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 300
+        }
+      },
+      "name": "OpenAI - Classify Comment",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { category: 'negative', suggested_action: 'flag_review', auto_reply_text: '', confidence: 0, reason: 'Parse error' };\n}\nreturn [{\n  json: {\n    author: items[0].json.body?.author || 'Unknown',\n    comment: items[0].json.body?.comment || '',\n    commentId: items[0].json.body?.comment_id || '',\n    category: parsed.category,\n    suggestedAction: parsed.suggested_action,\n    autoReplyText: parsed.auto_reply_text || '',\n    confidence: parsed.confidence || 0,\n    reason: parsed.reason || '',\n    date: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Code - Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "outputIndex": 0, "conditions": { "conditions": [{ "leftValue": "={{ $json.suggestedAction }}", "rightValue": "auto_reply", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputIndex": 1, "conditions": { "conditions": [{ "leftValue": "={{ $json.suggestedAction }}", "rightValue": "flag_review", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputIndex": 2, "conditions": { "conditions": [{ "leftValue": "={{ $json.suggestedAction }}", "rightValue": "delete", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputIndex": 3, "conditions": { "conditions": [{ "leftValue": "={{ $json.suggestedAction }}", "rightValue": "escalate", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        }
+      },
+      "name": "Switch - Action Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n// In a real scenario, this would call the social media API to post the reply\nconst item = items[0].json;\nreturn [{\n  json: {\n    ...item,\n    actionTaken: 'auto_replied',\n    replyPosted: item.autoReplyText\n  }\n}];"
+      },
+      "name": "Code - Auto Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn [{\n  json: {\n    ...items[0].json,\n    actionTaken: 'flagged_for_review'\n  }\n}];"
+      },
+      "name": "Code - Flag for Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n// In production, call social media API to delete/hide the comment\nreturn [{\n  json: {\n    ...items[0].json,\n    actionTaken: 'deleted'\n  }\n}];"
+      },
+      "name": "Code - Delete Comment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 500]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "name": "Merge - All Actions",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Timestamp": "={{ $json.date }}",
+            "Author": "={{ $json.author }}",
+            "Comment": "={{ $json.comment }}",
+            "Category": "={{ $json.category }}",
+            "Action Taken": "={{ $json.actionTaken }}",
+            "Confidence": "={{ $json.confidence }}",
+            "Reason": "={{ $json.reason }}"
+          },
+          "schema": [
+            { "id": "Timestamp", "type": "string", "display": true },
+            { "id": "Author", "type": "string", "display": true },
+            { "id": "Comment", "type": "string", "display": true },
+            { "id": "Category", "type": "string", "display": true },
+            { "id": "Action Taken", "type": "string", "display": true },
+            { "id": "Confidence", "type": "string", "display": true },
+            { "id": "Reason", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Moderation Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 900,
+        "height": 200,
+        "content": "## AI Social Media Comment Moderator\n\n**Setup:**\n1. Connect OpenAI API and Google Sheets OAuth2\n2. Set spreadsheet ID for moderation log\n3. POST to webhook: `{\"comment\": \"user comment text\", \"author\": \"username\", \"comment_id\": \"123\", \"post_context\": \"optional post the comment is on\"}`\n\nClassifies comments (positive/negative/spam/offensive), routes to appropriate action (auto-reply/flag/delete/escalate), and logs all moderation decisions."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 600]
+    }
+  ],
+  "connections": {
+    "Webhook - New Comment": {
+      "main": [[{ "node": "OpenAI - Classify Comment", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Classify Comment": {
+      "main": [[{ "node": "Code - Parse Classification", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Classification": {
+      "main": [[{ "node": "Switch - Action Router", "type": "main", "index": 0 }]]
+    },
+    "Switch - Action Router": {
+      "main": [
+        [{ "node": "Code - Auto Reply", "type": "main", "index": 0 }],
+        [{ "node": "Code - Flag for Review", "type": "main", "index": 0 }],
+        [{ "node": "Code - Delete Comment", "type": "main", "index": 0 }],
+        [{ "node": "Code - Flag for Review", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Auto Reply": {
+      "main": [[{ "node": "Google Sheets - Moderation Log", "type": "main", "index": 0 }]]
+    },
+    "Code - Flag for Review": {
+      "main": [[{ "node": "Google Sheets - Moderation Log", "type": "main", "index": 0 }]]
+    },
+    "Code - Delete Comment": {
+      "main": [[{ "node": "Google Sheets - Moderation Log", "type": "main", "index": 0 }]]
+    }
+  }
+}

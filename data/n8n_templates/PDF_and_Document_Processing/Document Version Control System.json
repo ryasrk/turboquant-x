@@ -1,0 +1,133 @@
+{
+  "name": "Document Version Control System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "document-version",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-doc",
+      "name": "Webhook New Document",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst crypto = require('crypto');\nconst results = [];\nfor (const item of items) {\n  const content = JSON.stringify(item.json.body || item.json);\n  const hash = crypto.createHash('sha256').update(content).digest('hex').substring(0, 12);\n  const version = `v${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${hash}`;\n  results.push({\n    json: {\n      version,\n      hash,\n      documentName: item.json.body?.documentName || 'untitled',\n      author: item.json.body?.author || 'system',\n      timestamp: new Date().toISOString(),\n      changeDescription: item.json.body?.changeDescription || 'No description',\n      contentSize: content.length\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "generate-hash",
+      "name": "Code Generate Version Hash",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "={{ $json.documentName }}_{{ $json.version }}",
+        "options": {}
+      },
+      "id": "drive-save",
+      "name": "Drive Save",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [680, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-history",
+      "name": "Sheets Version History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.author }}@company.com",
+        "subject": "=Document Version Created: {{ $json.documentName }} {{ $json.version }}",
+        "message": "=A new version has been created.\n\nDocument: {{ $json.documentName }}\nVersion: {{ $json.version }}\nHash: {{ $json.hash }}\nAuthor: {{ $json.author }}\nChange: {{ $json.changeDescription }}\nTimestamp: {{ $json.timestamp }}",
+        "options": {}
+      },
+      "id": "gmail-notify",
+      "name": "Gmail Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Document Version Control System\n\nNew document uploaded → Code generates SHA-256 version hash →\nSaved to Google Drive with version suffix →\nVersion history logged to Sheets → Email notification sent.\n\n**Setup:**\n1. Set Google Drive folder for versioned documents\n2. Set Google Sheets for version history log\n3. Set Gmail credentials\n4. POST { documentName, author, changeDescription } + binary to webhook"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook New Document": {
+      "main": [
+        [{ "node": "Code Generate Version Hash", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Generate Version Hash": {
+      "main": [
+        [{ "node": "Drive Save", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Save": {
+      "main": [
+        [{ "node": "Sheets Version History", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Version History": {
+      "main": [
+        [{ "node": "Gmail Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

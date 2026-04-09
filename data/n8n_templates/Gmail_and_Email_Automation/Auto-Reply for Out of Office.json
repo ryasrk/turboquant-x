@@ -1,0 +1,194 @@
+{
+  "name": "Auto-Reply for Out of Office",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "labelIds": ["INBOX"]
+        },
+        "options": {}
+      },
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Read Client List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $('Gmail Trigger').item.json.from }}",
+              "rightValue": "={{ $json.email }}",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If Sender Is Client",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Gmail Trigger').item.json.from }}",
+        "subject": "Re: {{ $('Gmail Trigger').item.json.subject }}",
+        "message": "Hi,\n\nThank you for your email. I am currently out of the office and will have limited access to email.\n\nI will be returning on [RETURN_DATE]. During my absence, please contact [BACKUP_CONTACT] at [BACKUP_EMAIL] for urgent matters.\n\nI will respond to your email upon my return.\n\nBest regards",
+        "options": {}
+      },
+      "name": "Gmail Auto-Reply OOO",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "sender", "value": "={{ $('Gmail Trigger').item.json.from }}" },
+              { "column": "subject", "value": "={{ $('Gmail Trigger').item.json.subject }}" },
+              { "column": "autoRepliedAt", "value": "={{ $now.toISO() }}" },
+              { "column": "isClient", "value": "true" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Auto-Reply for Out of Office\n\nAutomatically replies to client emails with an OOO message.\n\n**Flow:**\n1. Gmail trigger on new inbox email\n2. Read client list from Google Sheets\n3. If sender matches a client → send OOO reply\n4. Log auto-reply to Sheets\n\n**Setup:**\n- Connect Gmail OAuth2 credentials\n- Connect Google Sheets credentials\n- Client list sheet needs 'email' column\n- Customize the OOO message with return date and backup contact",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Client List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Client List": {
+      "main": [
+        [
+          {
+            "node": "If Sender Is Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Sender Is Client": {
+      "main": [
+        [
+          {
+            "node": "Gmail Auto-Reply OOO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Auto-Reply OOO": {
+      "main": [
+        [
+          {
+            "node": "Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "name": "Email Digest Compiler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 20 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily 8PM Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "labelIds": ["IMPORTANT", "INBOX"],
+          "receivedAfter": "={{ $now.startOf('day').toISO() }}"
+        },
+        "options": {}
+      },
+      "name": "Gmail Search Today's Important",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst emailCount = items.length;\n\nif (emailCount === 0) {\n  return [{ json: { htmlDigest: '<p>No important emails today. Enjoy your evening!</p>', emailCount: 0, date: new Date().toISOString().split('T')[0] } }];\n}\n\nlet summaries = '';\nfor (let i = 0; i < items.length; i++) {\n  const email = items[i].json;\n  const from = email.from || 'Unknown';\n  const subject = email.subject || 'No Subject';\n  const snippet = (email.snippet || email.textPlain || '').substring(0, 200);\n  const time = email.date ? new Date(email.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';\n  \n  summaries += `<tr>\n    <td style=\"padding:10px;border-bottom:1px solid #eee;\">${i + 1}</td>\n    <td style=\"padding:10px;border-bottom:1px solid #eee;\"><strong>${from}</strong></td>\n    <td style=\"padding:10px;border-bottom:1px solid #eee;\">${subject}</td>\n    <td style=\"padding:10px;border-bottom:1px solid #eee;color:#666;font-size:0.9em;\">${snippet}...</td>\n    <td style=\"padding:10px;border-bottom:1px solid #eee;\">${time}</td>\n  </tr>`;\n}\n\nconst htmlDigest = `<div style=\"font-family:Arial,sans-serif;max-width:700px;margin:auto;\">\n  <h2 style=\"color:#2563eb;\">Daily Email Digest</h2>\n  <p style=\"color:#666;\">Date: ${new Date().toISOString().split('T')[0]} | ${emailCount} important email(s)</p>\n  <table style=\"width:100%;border-collapse:collapse;\">\n    <thead><tr style=\"background:#f3f4f6;\"><th style=\"padding:10px;text-align:left;\">#</th><th style=\"padding:10px;text-align:left;\">From</th><th style=\"padding:10px;text-align:left;\">Subject</th><th style=\"padding:10px;text-align:left;\">Preview</th><th style=\"padding:10px;text-align:left;\">Time</th></tr></thead>\n    <tbody>${summaries}</tbody>\n  </table>\n</div>`;\n\nreturn [{ json: { htmlDigest, emailCount, date: new Date().toISOString().split('T')[0] } }];"
+      },
+      "name": "Summarize Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "me",
+        "subject": "Daily Digest: {{ $json.emailCount }} important emails - {{ $json.date }}",
+        "message": "={{ $json.htmlDigest }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Gmail Send Digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email Digest Compiler\n\nCompiles a daily summary of important emails and sends it at 8 PM.\n\n**Flow:**\n1. Daily schedule at 8 PM\n2. Gmail searches today's important/inbox emails\n3. Code summarizes into HTML digest table\n4. Gmail sends digest to self\n\n**Setup:**\n- Connect Gmail OAuth2 credentials\n- Adjust label filters for your important emails\n- Modify schedule time if desired",
+        "width": 380,
+        "height": 260
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Daily 8PM Schedule": {
+      "main": [
+        [
+          {
+            "node": "Gmail Search Today's Important",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Search Today's Important": {
+      "main": [
+        [
+          {
+            "node": "Summarize Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Emails": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

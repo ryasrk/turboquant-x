@@ -1,0 +1,73 @@
+{
+  "name": "Sheets to JSON API Endpoint",
+  "nodes": [
+    {
+      "name": "Webhook GET",
+      "type": "n8n-nodes-base.webhook",
+      "position": [300, 300],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "sheets-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "typeVersion": 2,
+      "webhookId": "sheets-json-api"
+    },
+    {
+      "name": "Read Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Format JSON Response",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(item => item.json);\n\nreturn [{ json: { success: true, count: rows.length, data: rows, timestamp: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [960, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [{ "name": "Content-Type", "value": "application/json" }]
+          }
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 850,
+        "height": 100,
+        "content": "### Sheets to JSON API Endpoint\nExposes Google Sheets data as a REST JSON API via webhook. GET request returns formatted sheet data with metadata."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook GET": { "main": [[{ "node": "Read Google Sheet", "type": "main", "index": 0 }]] },
+    "Read Google Sheet": { "main": [[{ "node": "Format JSON Response", "type": "main", "index": 0 }]] },
+    "Format JSON Response": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  }
+}

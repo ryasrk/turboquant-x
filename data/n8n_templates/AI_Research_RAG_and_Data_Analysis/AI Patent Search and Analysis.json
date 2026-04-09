@@ -1,0 +1,133 @@
+{
+  "name": "AI Patent Search and Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "patent-search",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.patentsview.org/patents/query?q={\"_text_any\":{\"patent_abstract\":\"{{ encodeURIComponent($json.body.query) }}\"}}&f=[\"patent_number\",\"patent_title\",\"patent_abstract\",\"patent_date\",\"assignee_organization\"]&o={\"per_page\":20}",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Patent API Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze these patent search results for relevance to the query: \"{{ $('Webhook').item.json.body.query }}\"\n\nPatents:\n{{ JSON.stringify($json.patents || [], null, 2) }}\n\nFor each patent, provide:\n1. Relevance score (1-10)\n2. Key innovation\n3. Potential overlap with query\n4. Commercialization status estimate\n\nReturn as JSON array: [{\"patent_number\": \"...\", \"relevance\": N, \"innovation\": \"...\", \"overlap\": \"...\", \"status\": \"...\"}]"
+            }
+          ]
+        },
+        "options": { "temperature": 0.2, "maxTokens": 3000 }
+      },
+      "name": "OpenAI Analyze Relevance",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst content = items[0].json.message.content;\n\nlet analyses;\ntry {\n  const jsonMatch = content.match(/\\[.*\\]/s);\n  analyses = jsonMatch ? JSON.parse(jsonMatch[0]) : [];\n} catch (e) {\n  analyses = [];\n}\n\n// Rank by relevance score\nanalyses.sort((a, b) => (b.relevance || 0) - (a.relevance || 0));\n\nreturn [{\n  json: {\n    query: $('Webhook').item.json.body.query,\n    totalResults: analyses.length,\n    highlyRelevant: analyses.filter(a => a.relevance >= 7).length,\n    rankedResults: analyses,\n    searchDate: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Rank Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $json.query }}",
+            "total_results": "={{ $json.totalResults }}",
+            "highly_relevant": "={{ $json.highlyRelevant }}",
+            "top_patents": "={{ JSON.stringify($json.rankedResults.slice(0, 5)) }}",
+            "date": "={{ $json.searchDate }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1130, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').item.json.body.email || '' }}",
+        "subject": "=Patent Search: {{ $json.query }} — {{ $json.highlyRelevant }} highly relevant",
+        "message": "=Patent Search Results\n\nQuery: {{ $json.query }}\nTotal Found: {{ $json.totalResults }}\nHighly Relevant (7+): {{ $json.highlyRelevant }}\n\nTop Results:\n{{ $json.rankedResults.slice(0, 10).map((r, i) => `${i+1}. [${r.relevance}/10] ${r.patent_number}: ${r.innovation}`).join('\\n') }}",
+        "options": {}
+      },
+      "name": "Email Results",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1130, 400],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Patent Search and Analysis\n\nSearches patents via PatentsView API, uses OpenAI to analyze relevance through scoring, ranks results, and delivers findings via Sheets and Email.\n\n**Setup:**\n1. Add OpenAI, Google Sheets, and Gmail credentials\n2. POST: `{\"query\": \"machine learning image recognition\", \"email\": \"user@example.com\"}`\n3. PatentsView API is free — no key required"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Patent API Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "Patent API Search": {
+      "main": [
+        [{ "node": "OpenAI Analyze Relevance", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Analyze Relevance": {
+      "main": [
+        [{ "node": "Rank Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Rank Results": {
+      "main": [
+        [
+          { "node": "Log to Sheets", "type": "main", "index": 0 },
+          { "node": "Email Results", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

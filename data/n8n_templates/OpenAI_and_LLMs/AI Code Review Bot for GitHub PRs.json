@@ -1,0 +1,138 @@
+{
+  "name": "AI Code Review Bot for GitHub PRs",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-pr-review",
+        "options": {}
+      },
+      "name": "Webhook - GitHub PR Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst payload = items[0].json.body;\nconst action = payload.action;\nconst pr = payload.pull_request || {};\nif (action !== 'opened' && action !== 'synchronize') {\n  return [];\n}\nconst owner = pr.base?.repo?.owner?.login || '';\nconst repo = pr.base?.repo?.name || '';\nconst prNumber = pr.number || 0;\nconst diffUrl = pr.diff_url || `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`;\nreturn [{\n  json: {\n    owner,\n    repo,\n    prNumber,\n    prTitle: pr.title || '',\n    prBody: pr.body || '',\n    diffUrl,\n    commentsUrl: pr.comments_url || `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments`\n  }\n}];"
+      },
+      "name": "Code - Extract PR Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.owner }}/{{ $json.repo }}/pulls/{{ $json.prNumber }}.diff",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "name": "HTTP - Fetch PR Diff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [750, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst diff = (items[0].json.data || items[0].json.body || '').toString();\n// Truncate diff if too long\nconst maxLen = 12000;\nconst truncatedDiff = diff.length > maxLen ? diff.substring(0, maxLen) + '\\n... [truncated]' : diff;\nreturn [{ json: { ...items[0].json, diff: truncatedDiff } }];"
+      },
+      "name": "Code - Trim Diff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an expert code reviewer. Review the following PR diff and provide:\n\n1. **Summary** — What this PR does in 2-3 sentences\n2. **Issues Found** — Bugs, security issues, performance problems\n3. **Suggestions** — Improvements, best practices, cleaner approaches\n4. **Positive** — What was done well\n5. **Rating** — 1-5 stars\n\nPR Title: {{ $json.prTitle }}\nPR Description: {{ $json.prBody }}\n\nDiff:\n```\n{{ $json.diff }}\n```\n\nFormat as a readable GitHub comment with markdown."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000
+        }
+      },
+      "name": "OpenAI - Review Code",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.commentsUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "body",
+              "value": "=🤖 **AI Code Review**\n\n{{ $json.message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP - Post Review Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1500, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 220,
+        "content": "## AI Code Review Bot for GitHub PRs\n\n**Setup:**\n1. Connect OpenAI API key\n2. Create GitHub Personal Access Token with `repo` scope\n3. Add HTTP Header Auth credential: Name=`Authorization`, Value=`Bearer YOUR_GITHUB_TOKEN`\n4. In your GitHub repo, add a webhook pointing to this n8n webhook URL with event `Pull requests`\n\nWhen a PR is opened/updated, the bot fetches the diff, sends it to GPT-4o for review, and posts the review as a PR comment."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 520]
+    }
+  ],
+  "connections": {
+    "Webhook - GitHub PR Event": {
+      "main": [[{ "node": "Code - Extract PR Info", "type": "main", "index": 0 }]]
+    },
+    "Code - Extract PR Info": {
+      "main": [[{ "node": "HTTP - Fetch PR Diff", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Fetch PR Diff": {
+      "main": [[{ "node": "Code - Trim Diff", "type": "main", "index": 0 }]]
+    },
+    "Code - Trim Diff": {
+      "main": [[{ "node": "OpenAI - Review Code", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Review Code": {
+      "main": [[{ "node": "HTTP - Post Review Comment", "type": "main", "index": 0 }]]
+    }
+  }
+}

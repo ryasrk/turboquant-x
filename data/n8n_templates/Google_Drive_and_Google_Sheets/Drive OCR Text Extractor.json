@@ -1,0 +1,137 @@
+{
+  "name": "Drive OCR Text Extractor",
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "List New Images",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "list",
+        "folderId": { "__rl": true, "mode": "list", "value": "" },
+        "options": {
+          "fields": ["name", "mimeType", "createdTime", "id"]
+        }
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Filter Images",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst imageTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/tiff', 'image/bmp', 'image/gif'];\nconst images = items.filter(item => imageTypes.includes(item.json.mimeType));\n\nreturn images.length > 0 ? images : [{ json: { noImages: true } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Download Image",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "download",
+        "fileId": { "__rl": true, "mode": "id", "value": "={{ $json.id }}" },
+        "options": {}
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Google Vision OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1180, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://vision.googleapis.com/v1/images:annotate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "requests",
+              "value": "={{ JSON.stringify([{ image: { content: $binary.data.data }, features: [{ type: 'TEXT_DETECTION' }] }]) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Write Extracted Text",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1400, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "OCR_Results" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileName": "={{ $json.name }}",
+            "extractedText": "={{ $json.responses?.[0]?.fullTextAnnotation?.text || 'No text found' }}",
+            "extractedAt": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Digest",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1620, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=OCR Digest - {{ $input.all().length }} images processed",
+        "message": "=OCR processing complete.\n\nImages processed: {{ $input.all().length }}\nResults written to OCR_Results sheet.",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1500,
+        "height": 100,
+        "content": "### Drive OCR Text Extractor\nScheduled workflow that finds new images in Google Drive, sends them to Google Vision API for OCR, stores extracted text in a Google Sheet, and emails a digest."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "List New Images", "type": "main", "index": 0 }]] },
+    "List New Images": { "main": [[{ "node": "Filter Images", "type": "main", "index": 0 }]] },
+    "Filter Images": { "main": [[{ "node": "Download Image", "type": "main", "index": 0 }]] },
+    "Download Image": { "main": [[{ "node": "Google Vision OCR", "type": "main", "index": 0 }]] },
+    "Google Vision OCR": { "main": [[{ "node": "Write Extracted Text", "type": "main", "index": 0 }]] },
+    "Write Extracted Text": { "main": [[{ "node": "Email Digest", "type": "main", "index": 0 }]] }
+  }
+}

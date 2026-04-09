@@ -1,0 +1,137 @@
+{
+  "name": "Telegram Weather Alert Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "name": "Schedule 6AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.openweathermap.org/data/2.5/weather?q={{$json.city || 'Jakarta'}}&appid=YOUR_API_KEY&units=metric",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Fetch Weather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const data = item.json;\n  const weather = data.weather?.[0] || {};\n  const main = data.main || {};\n  const wind = data.wind || {};\n  const isRain = weather.main === 'Rain' || weather.main === 'Thunderstorm' || weather.main === 'Drizzle';\n  const isExtreme = main.temp > 40 || main.temp < 0 || wind.speed > 20;\n  const shouldAlert = isRain || isExtreme;\n  results.push({\n    json: {\n      city: data.name,\n      condition: weather.main,\n      description: weather.description,\n      temp: main.temp,\n      humidity: main.humidity,\n      windSpeed: wind.speed,\n      isRain,\n      isExtreme,\n      shouldAlert,\n      timestamp: new Date().toISOString(),\n      date: new Date().toISOString().split('T')[0]\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Weather",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.shouldAlert}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Should Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 <b>Weather Alert - {{$json.city}}</b>\n\n🌤 Condition: {{$json.condition}} ({{$json.description}})\n🌡 Temperature: {{$json.temp}}°C\n💧 Humidity: {{$json.humidity}}%\n💨 Wind: {{$json.windSpeed}} m/s\n\n⚠️ {{$json.isRain ? '🌧 Rain expected! Bring an umbrella!' : ''}}{{$json.isExtreme ? '🔥 Extreme temperature detected!' : ''}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "WeatherLog" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Weather",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Weather Alert Bot\n\nSchedule 6AM → fetch weather from OpenWeatherMap → check for rain/extreme → alert Telegram group → log to Sheets.\n\n**Setup:**\n1. Get OpenWeatherMap API key (free tier)\n2. Replace YOUR_API_KEY in HTTP Request node\n3. Set city name in the URL\n4. Set Telegram group chat ID\n5. Create Google Sheet with columns: city, condition, description, temp, humidity, windSpeed, isRain, isExtreme, shouldAlert, timestamp, date",
+        "width": 450,
+        "height": 250
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Schedule 6AM": {
+      "main": [
+        [{ "node": "Fetch Weather", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Weather": {
+      "main": [
+        [{ "node": "Parse Weather", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Weather": {
+      "main": [
+        [{ "node": "Should Alert?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Should Alert?": {
+      "main": [
+        [{ "node": "Send Alert", "type": "main", "index": 0 }],
+        [{ "node": "Log Weather", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [{ "node": "Log Weather", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

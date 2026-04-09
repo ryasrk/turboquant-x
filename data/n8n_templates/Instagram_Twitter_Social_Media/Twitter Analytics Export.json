@@ -1,0 +1,124 @@
+{
+  "name": "Twitter Analytics Export",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "weeks", "weeksInterval": 1, "triggerAtDay": 0, "triggerAtHour": 8}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Tweet Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/users/{{ $json.user_id }}/tweets",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "tweet.fields", "value": "public_metrics,created_at,text"},
+            {"name": "max_results", "value": "100"},
+            {"name": "start_time", "value": "={{ new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Format Analytics",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst tweets = items[0].json.data || [];\n\nlet totalLikes = 0, totalRetweets = 0, totalReplies = 0, totalImpressions = 0;\n\nconst formatted = tweets.map(tweet => {\n  const m = tweet.public_metrics || {};\n  totalLikes += m.like_count || 0;\n  totalRetweets += m.retweet_count || 0;\n  totalReplies += m.reply_count || 0;\n  totalImpressions += m.impression_count || 0;\n\n  return {\n    tweet_id: tweet.id,\n    text: tweet.text.substring(0, 100),\n    created_at: tweet.created_at,\n    likes: m.like_count || 0,\n    retweets: m.retweet_count || 0,\n    replies: m.reply_count || 0,\n    impressions: m.impression_count || 0,\n    engagement_rate: m.impression_count > 0 ? (((m.like_count + m.retweet_count + m.reply_count) / m.impression_count) * 100).toFixed(2) : '0'\n  };\n});\n\nconst summary = {\n  week_ending: new Date().toISOString().split('T')[0],\n  total_tweets: tweets.length,\n  total_likes: totalLikes,\n  total_retweets: totalRetweets,\n  total_replies: totalReplies,\n  total_impressions: totalImpressions,\n  avg_engagement_rate: totalImpressions > 0 ? (((totalLikes + totalRetweets + totalReplies) / totalImpressions) * 100).toFixed(2) : '0',\n  top_tweet: formatted.sort((a, b) => b.likes - a.likes)[0]?.text || 'N/A'\n};\n\nreturn [{json: {...summary, tweet_details: formatted}}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save Detailed Metrics",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [850, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Weekly Analytics",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "week_ending": "={{ $json.week_ending }}",
+            "total_tweets": "={{ $json.total_tweets }}",
+            "total_likes": "={{ $json.total_likes }}",
+            "total_retweets": "={{ $json.total_retweets }}",
+            "total_replies": "={{ $json.total_replies }}",
+            "total_impressions": "={{ $json.total_impressions }}",
+            "avg_engagement_rate": "={{ $json.avg_engagement_rate }}",
+            "top_tweet": "={{ $json.top_tweet }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Send Weekly Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1050, 300],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "Weekly Twitter Analytics - {{ $json.week_ending }}",
+        "message": "📊 Weekly Twitter Analytics Report\n\nWeek ending: {{ $json.week_ending }}\n\nTotal tweets: {{ $json.total_tweets }}\nTotal likes: {{ $json.total_likes }}\nTotal retweets: {{ $json.total_retweets }}\nTotal replies: {{ $json.total_replies }}\nTotal impressions: {{ $json.total_impressions }}\nAvg engagement rate: {{ $json.avg_engagement_rate }}%\n\nTop tweet: {{ $json.top_tweet }}\n\nFull details in the Google Sheet.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Twitter Analytics Export\nRuns weekly on Sunday. Fetches the past 7 days of tweet analytics from the Twitter API, formats detailed metrics (likes, retweets, replies, impressions, engagement rate), saves to Google Sheets, and emails a weekly report with trends."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [[{"node": "Get Tweet Analytics", "type": "main", "index": 0}]]
+    },
+    "Get Tweet Analytics": {
+      "main": [[{"node": "Format Analytics", "type": "main", "index": 0}]]
+    },
+    "Format Analytics": {
+      "main": [[{"node": "Save Detailed Metrics", "type": "main", "index": 0}]]
+    },
+    "Save Detailed Metrics": {
+      "main": [[{"node": "Send Weekly Report", "type": "main", "index": 0}]]
+    }
+  }
+}

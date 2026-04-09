@@ -1,0 +1,205 @@
+{
+  "name": "Notion Job Application Tracker",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Job Application Tracker\nTrack job applications in Notion with follow-up date reminders via email.\n\n**Setup:**\n1. Configure webhook for new applications\n2. Set Notion jobs database ID\n3. Set follow-up email address\n4. Adjust follow-up days (default: 7)"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook New Application",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "new-job-application",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Add to Jobs DB",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.body.position || $json.position || 'Unknown Position' }} @ {{ $json.body.company || $json.company || 'Unknown' }}"
+            },
+            {
+              "name": "Company",
+              "type": "rich_text",
+              "richText": "={{ $json.body.company || $json.company || '' }}"
+            },
+            {
+              "name": "Position",
+              "type": "rich_text",
+              "richText": "={{ $json.body.position || $json.position || '' }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "Applied"
+            },
+            {
+              "name": "URL",
+              "type": "url",
+              "url": "={{ $json.body.url || $json.url || '' }}"
+            },
+            {
+              "name": "Applied Date",
+              "type": "date",
+              "date": "={{ $now.toISO() }}"
+            },
+            {
+              "name": "Follow Up Date",
+              "type": "date",
+              "date": "={{ $now.plus({ days: Number($json.body.followUpDays || $json.followUpDays || 7) }).toISO() }}"
+            },
+            {
+              "name": "Salary Range",
+              "type": "rich_text",
+              "richText": "={{ $json.body.salary || $json.salary || 'Not specified' }}"
+            },
+            {
+              "name": "Notes",
+              "type": "rich_text",
+              "richText": "={{ $json.body.notes || $json.notes || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Schedule Follow-Up Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 640],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query Follow-Ups Due",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 640],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Follow Up Date|date",
+              "condition": "on_or_before",
+              "returnType": "date",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            },
+            {
+              "key": "Status|select",
+              "condition": "equals",
+              "returnType": "string",
+              "value": "Applied"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Format Follow-Up Reminders",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 640],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const props = item.json.properties || {};\n  const name = props['Name']?.title?.map(t => t.plain_text).join('') || 'Unknown';\n  const company = props['Company']?.rich_text?.map(t => t.plain_text).join('') || '';\n  const position = props['Position']?.rich_text?.map(t => t.plain_text).join('') || '';\n  const appliedDate = props['Applied Date']?.date?.start || '';\n  const url = props['URL']?.url || '';\n\n  return {\n    json: {\n      name,\n      company,\n      position,\n      appliedDate,\n      url,\n      pageId: item.json.id\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Email Follow-Up Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "position": [900, 640],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=📋 Follow Up: {{ $json.position }} at {{ $json.company }}",
+        "message": "=Time to follow up on your job application!\n\nPosition: {{ $json.position }}\nCompany: {{ $json.company }}\nApplied: {{ $json.appliedDate }}\n{{ $json.url ? 'Listing: ' + $json.url : '' }}\n\nSuggested actions:\n1. Send a polite follow-up email to the recruiter\n2. Check if the position is still open\n3. Update your application status in Notion",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Webhook New Application": {
+      "main": [
+        [{ "node": "Notion Add to Jobs DB", "type": "main", "index": 0 }]
+      ]
+    },
+    "Schedule Follow-Up Check": {
+      "main": [
+        [{ "node": "Notion Query Follow-Ups Due", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query Follow-Ups Due": {
+      "main": [
+        [{ "node": "Format Follow-Up Reminders", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Follow-Up Reminders": {
+      "main": [
+        [{ "node": "Email Follow-Up Reminder", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

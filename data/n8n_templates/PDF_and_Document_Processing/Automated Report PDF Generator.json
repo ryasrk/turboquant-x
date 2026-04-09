@@ -1,0 +1,170 @@
+{
+  "name": "Automated Report PDF Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-monthly",
+      "name": "Schedule Monthly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "sheets-data",
+      "name": "Read Sheets Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(i => i.json);\nconst now = new Date();\nconst monthName = now.toLocaleString('en', { month: 'long', year: 'numeric' });\n\nconst tableRows = rows.map(r => {\n  const cols = Object.values(r).map(v => `<td style=\"border:1px solid #ddd;padding:8px;\">${v}</td>`).join('');\n  return `<tr>${cols}</tr>`;\n}).join('');\nconst headers = Object.keys(rows[0] || {}).map(h => `<th style=\"border:1px solid #ddd;padding:8px;background:#4CAF50;color:white;\">${h}</th>`).join('');\n\nconst totalRows = rows.length;\nconst numericCols = Object.keys(rows[0] || {}).filter(k => !isNaN(parseFloat(rows[0][k])));\nconst summaries = numericCols.map(col => {\n  const vals = rows.map(r => parseFloat(r[col]) || 0);\n  const sum = vals.reduce((a, b) => a + b, 0);\n  return `<p><strong>${col}:</strong> Total = ${sum.toFixed(2)}, Avg = ${(sum / vals.length).toFixed(2)}</p>`;\n}).join('');\n\nconst chartData = JSON.stringify({\n  labels: rows.slice(0, 10).map((r, i) => Object.values(r)[0] || `Row ${i}`),\n  values: rows.slice(0, 10).map(r => parseFloat(Object.values(r)[1]) || 0)\n});\n\nconst html = `<!DOCTYPE html><html><head><style>\n  body { font-family: Arial, sans-serif; margin: 40px; color: #333; }\n  h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }\n  table { border-collapse: collapse; width: 100%; margin: 20px 0; }\n  .summary { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; }\n  .footer { color: #999; font-size: 12px; margin-top: 40px; border-top: 1px solid #eee; padding-top: 10px; }\n</style></head><body>\n  <h1>Monthly Report - ${monthName}</h1>\n  <div class=\"summary\"><h3>Summary</h3><p>Total Records: ${totalRows}</p>${summaries}</div>\n  <h3>Data Table</h3>\n  <table><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table>\n  <div class=\"footer\">Generated automatically on ${now.toISOString()}</div>\n</body></html>`;\n\nreturn [{ json: { html, monthName, totalRows, generated: now.toISOString() } }];"
+      },
+      "id": "generate-report",
+      "name": "Code Generate HTML Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.html2pdf.app/v1/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ html: $json.html }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "convert-pdf",
+      "name": "HTTP to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "management@company.com",
+        "subject": "=Monthly Report - {{ $('Code Generate HTML Report').item.json.monthName }}",
+        "message": "=Please find the monthly report attached.\n\nPeriod: {{ $('Code Generate HTML Report').item.json.monthName }}\nTotal Records: {{ $('Code Generate HTML Report').item.json.totalRows }}\nGenerated: {{ $('Code Generate HTML Report').item.json.generated }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{}]
+          }
+        }
+      },
+      "id": "gmail-send",
+      "name": "Gmail Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "=Report_{{ $('Code Generate HTML Report').item.json.monthName }}",
+        "options": {}
+      },
+      "id": "drive-archive",
+      "name": "Drive Archive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1340, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Report PDF Generator\n\nScheduled monthly (1st at 9AM) → reads data from Sheets →\nCode generates HTML report with tables and summaries →\nConverts to PDF → emails to management → archives to Drive.\n\n**Setup:**\n1. Set Google Sheets data source\n2. Configure HTML-to-PDF API\n3. Set Gmail recipients\n4. Set Drive archive folder\n5. Adjust cron schedule if needed"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Schedule Monthly": {
+      "main": [
+        [{ "node": "Read Sheets Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sheets Data": {
+      "main": [
+        [{ "node": "Code Generate HTML Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Generate HTML Report": {
+      "main": [
+        [{ "node": "HTTP to PDF", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP to PDF": {
+      "main": [
+        [{ "node": "Gmail Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gmail Report": {
+      "main": [
+        [{ "node": "Drive Archive", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

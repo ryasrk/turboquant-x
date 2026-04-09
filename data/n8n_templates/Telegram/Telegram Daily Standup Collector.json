@@ -1,0 +1,215 @@
+{
+  "name": "Telegram Daily Standup Collector",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "name": "Schedule 9AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🌅 Good morning team!\n\nPlease share your standup update:\n1️⃣ What did you do yesterday?\n2️⃣ What will you do today?\n3️⃣ Any blockers?\n\nReply to this message with your update.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Send Standup Question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [500, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Collect Replies",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 550],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const msg = item.json.message || {};\n  results.push({\n    json: {\n      username: msg.from?.username || msg.from?.first_name || 'unknown',\n      userId: msg.from?.id,\n      update: msg.text || '',\n      chatId: msg.chat?.id,\n      timestamp: new Date().toISOString(),\n      date: new Date().toISOString().split('T')[0]\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 550]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Standups" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 550],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=✅ Standup recorded, @{{$json.username}}! Thanks for the update.",
+        "additionalFields": {}
+      },
+      "name": "Confirm Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 550],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 17,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "name": "Schedule 5PM Summary",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 800]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Standups" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Read Today Standups",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 800],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\nconst todayUpdates = items.filter(i => i.json.date === today);\nlet summary = `📋 <b>Daily Standup Summary - ${today}</b>\\n\\n`;\nif (todayUpdates.length === 0) {\n  summary += '⚠️ No standup updates received today.';\n} else {\n  todayUpdates.forEach((item, idx) => {\n    summary += `👤 <b>@${item.json.username}</b>\\n${item.json.update}\\n\\n`;\n  });\n  summary += `\\n📊 Total updates: ${todayUpdates.length}`;\n}\nreturn [{ json: { summary, count: todayUpdates.length } }];"
+      },
+      "name": "Aggregate Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 800]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{$json.summary}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Post Summary to Group",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 800],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Daily Standup Collector\n\n**Flow 1:** Schedule 9AM → send standup question to group\n**Flow 2:** Collect replies → parse → log to Sheets → confirm\n**Flow 3:** Schedule 5PM → aggregate today's updates → post summary\n\n**Setup:**\n1. Set Telegram Bot API credentials\n2. Set group chat ID in Send Standup Question and Post Summary nodes\n3. Create Google Sheet with columns: username, userId, update, chatId, timestamp, date",
+        "width": 450,
+        "height": 250
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Schedule 9AM": {
+      "main": [
+        [{ "node": "Send Standup Question", "type": "main", "index": 0 }]
+      ]
+    },
+    "Collect Replies": {
+      "main": [
+        [{ "node": "Parse Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Reply": {
+      "main": [
+        [{ "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log to Sheets": {
+      "main": [
+        [{ "node": "Confirm Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Schedule 5PM Summary": {
+      "main": [
+        [{ "node": "Read Today Standups", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Today Standups": {
+      "main": [
+        [{ "node": "Aggregate Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Summary": {
+      "main": [
+        [{ "node": "Post Summary to Group", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

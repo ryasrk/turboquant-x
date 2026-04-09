@@ -1,0 +1,224 @@
+{
+  "name": "AI Translation Pipeline with Quality Check",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "translate-text",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Translation Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=Translate the following text to {{ $json.body.target_language || 'English' }}.\n\nPreserve:\n- Tone and style\n- Technical terminology\n- Formatting and structure\n- Cultural nuances (localize idioms appropriately)\n\nReturn ONLY the translated text, nothing else.\n\nSource text:\n{{ $json.body.text }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 3000
+        }
+      },
+      "name": "OpenAI - Translate",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst translatedText = items[0].json.message.content;\nreturn [{\n  json: {\n    originalText: items[0].json.body?.text || '',\n    translatedText: translatedText,\n    targetLanguage: items[0].json.body?.target_language || 'English',\n    sourceLanguage: items[0].json.body?.source_language || 'Auto-detect'\n  }\n}];"
+      },
+      "name": "Code - Prepare for QA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a professional translation quality assessor. Rate this translation on a scale of 1-10.\n\nEvaluate:\n1. **Accuracy** (1-10): Does it convey the same meaning?\n2. **Fluency** (1-10): Does it read naturally in the target language?\n3. **Terminology** (1-10): Are technical terms correct?\n4. **Style** (1-10): Is the tone preserved?\n5. **Overall** (1-10): Weighted average\n\nReturn JSON:\n{\n  \"accuracy\": 9,\n  \"fluency\": 8,\n  \"terminology\": 9,\n  \"style\": 8,\n  \"overall\": 8.5,\n  \"issues\": [\"brief issue descriptions\"],\n  \"suggestions\": [\"improvement suggestions\"]\n}\n\nSource ({{ $json.sourceLanguage }}):\n{{ $json.originalText }}\n\nTranslation ({{ $json.targetLanguage }}):\n{{ $json.translatedText }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1000
+        }
+      },
+      "name": "OpenAI - Quality Score",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst qaResponse = items[0].json.message.content;\nlet qa;\ntry {\n  qa = JSON.parse(qaResponse);\n} catch(e) {\n  qa = { overall: 5, accuracy: 5, fluency: 5, terminology: 5, style: 5, issues: ['Could not parse QA'], suggestions: [] };\n}\nreturn [{\n  json: {\n    ...items[0].json,\n    qualityScore: qa.overall || 0,\n    accuracy: qa.accuracy || 0,\n    fluency: qa.fluency || 0,\n    terminology: qa.terminology || 0,\n    style: qa.style || 0,\n    issues: Array.isArray(qa.issues) ? qa.issues.join('; ') : '',\n    suggestions: Array.isArray(qa.suggestions) ? qa.suggestions.join('; ') : '',\n    approved: (qa.overall || 0) >= 8,\n    date: new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "name": "Code - Parse QA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.qualityScore }}",
+              "value2": 8,
+              "operation": "largerEqual"
+            }
+          ]
+        }
+      },
+      "name": "IF - Quality >= 8",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Source Language": "={{ $json.sourceLanguage }}",
+            "Target Language": "={{ $json.targetLanguage }}",
+            "Original": "={{ $json.originalText }}",
+            "Translation": "={{ $json.translatedText }}",
+            "Quality Score": "={{ $json.qualityScore }}",
+            "Status": "=Approved"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Source Language", "type": "string", "display": true },
+            { "id": "Target Language", "type": "string", "display": true },
+            { "id": "Original", "type": "string", "display": true },
+            { "id": "Translation", "type": "string", "display": true },
+            { "id": "Quality Score", "type": "string", "display": true },
+            { "id": "Status", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Approved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1750, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Source Language": "={{ $json.sourceLanguage }}",
+            "Target Language": "={{ $json.targetLanguage }}",
+            "Original": "={{ $json.originalText }}",
+            "Translation": "={{ $json.translatedText }}",
+            "Quality Score": "={{ $json.qualityScore }}",
+            "Issues": "={{ $json.issues }}",
+            "Suggestions": "={{ $json.suggestions }}",
+            "Status": "=Needs Review"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Source Language", "type": "string", "display": true },
+            { "id": "Target Language", "type": "string", "display": true },
+            { "id": "Original", "type": "string", "display": true },
+            { "id": "Translation", "type": "string", "display": true },
+            { "id": "Quality Score", "type": "string", "display": true },
+            { "id": "Issues", "type": "string", "display": true },
+            { "id": "Suggestions", "type": "string", "display": true },
+            { "id": "Status", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Flagged for Review",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1750, 450],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 900,
+        "height": 200,
+        "content": "## AI Translation Pipeline with Quality Check\n\n**Setup:**\n1. Connect OpenAI API and Google Sheets OAuth2\n2. Set spreadsheet IDs for approved translations and flagged-for-review sheets\n3. POST to webhook: `{\"text\": \"text to translate\", \"target_language\": \"Spanish\", \"source_language\": \"English\"}`\n\nTranslates text, then runs a second AI pass for quality scoring. Score >= 8 auto-approved, below 8 flagged for human review with issues and suggestions."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 550]
+    }
+  ],
+  "connections": {
+    "Webhook - Translation Request": {
+      "main": [[{ "node": "OpenAI - Translate", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Translate": {
+      "main": [[{ "node": "Code - Prepare for QA", "type": "main", "index": 0 }]]
+    },
+    "Code - Prepare for QA": {
+      "main": [[{ "node": "OpenAI - Quality Score", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Quality Score": {
+      "main": [[{ "node": "Code - Parse QA", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse QA": {
+      "main": [[{ "node": "IF - Quality >= 8", "type": "main", "index": 0 }]]
+    },
+    "IF - Quality >= 8": {
+      "main": [
+        [{ "node": "Google Sheets - Approved", "type": "main", "index": 0 }],
+        [{ "node": "Google Sheets - Flagged for Review", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

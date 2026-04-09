@@ -1,0 +1,230 @@
+{
+  "name": "Interview Scheduler with Calendar Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "onChange",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Applications"
+        },
+        "triggerColumn": "status",
+        "options": {}
+      },
+      "name": "Trigger - Status Change",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.status}}",
+              "value2": "interview",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "name": "Filter - Interview Stage",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "resource": "freeBusy",
+        "timeMin": "={{$now.toISO()}}",
+        "timeMax": "={{$now.plus({days: 7}).toISO()}}",
+        "calendars": [],
+        "options": {}
+      },
+      "name": "Check Calendar Availability",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 3,
+      "position": [690, 200],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const busySlots = $input.first().json.calendars || {};\nconst now = new Date();\nconst slots = [];\nfor (let d = 1; d <= 5; d++) {\n  const date = new Date(now);\n  date.setDate(date.getDate() + d);\n  if (date.getDay() === 0 || date.getDay() === 6) continue;\n  for (const hour of [10, 14, 16]) {\n    const slotStart = new Date(date);\n    slotStart.setHours(hour, 0, 0, 0);\n    const slotEnd = new Date(slotStart);\n    slotEnd.setHours(hour + 1);\n    slots.push({\n      start: slotStart.toISOString(),\n      end: slotEnd.toISOString(),\n      display: `${slotStart.toLocaleDateString()} at ${hour}:00`\n    });\n  }\n}\nconst candidate = $('Trigger - Status Change').first().json;\nreturn [{ json: { ...candidate, availableSlots: slots, selectedSlot: slots[0] } }];"
+      },
+      "name": "Find Available Slots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "mode": "list",
+          "value": "primary"
+        },
+        "start": "={{$json.selectedSlot.start}}",
+        "end": "={{$json.selectedSlot.end}}",
+        "additionalFields": {
+          "summary": "=Interview - {{$json.name}} for {{$json.position}}",
+          "description": "=Interview with {{$json.name}} for the {{$json.position}} position.\nCandidate Email: {{$json.email}}",
+          "attendees": "={{$json.email}}"
+        }
+      },
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 3,
+      "position": [1130, 200],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=Interview Scheduled - {{$json.position}}",
+        "emailType": "text",
+        "message": "=Dear {{$json.name}},\n\nGreat news! Your interview for the {{$json.position}} position has been scheduled.\n\nDate & Time: {{$json.selectedSlot.display}}\n\nA calendar invite has been sent to your email. Please confirm your attendance by accepting the invite.\n\nIf you need to reschedule, please reply to this email at least 24 hours before the scheduled time.\n\nBest regards,\nHR Team",
+        "options": {}
+      },
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1350, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Applications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "interviewDate": "={{$json.selectedSlot.display}}",
+            "interviewStatus": "scheduled"
+          }
+        },
+        "options": {}
+      },
+      "name": "Update Sheet Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1350, 420],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Interview Scheduler with Calendar Sync\n\n**Trigger:** Candidate status changes to \"interview\" in Google Sheets\n**Process:**\n1. Filter for interview stage changes\n2. Check Google Calendar for available slots\n3. Pick the first available slot\n4. Create calendar event with candidate as attendee\n5. Send confirmation email to candidate\n6. Update sheet with interview date/status\n\n**Setup:**\n- Google Sheets with 'status' column (set to 'interview' to trigger)\n- Google Calendar API credentials\n- Gmail credentials for confirmation emails",
+        "width": 400,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -40]
+    }
+  ],
+  "connections": {
+    "Trigger - Status Change": {
+      "main": [
+        [
+          {
+            "node": "Filter - Interview Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter - Interview Stage": {
+      "main": [
+        [
+          {
+            "node": "Check Calendar Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Calendar Availability": {
+      "main": [
+        [
+          {
+            "node": "Find Available Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Available Slots": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Sheet Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,182 @@
+{
+  "name": "PDF Watermark and Protect",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "watermark-pdf",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-pdf",
+      "name": "Webhook with PDF",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.pdfblocks.com/v1/add_watermark",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "watermark_text",
+              "value": "={{ $json.body.watermarkText || 'CONFIDENTIAL' }}"
+            },
+            {
+              "name": "opacity",
+              "value": "0.3"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "add-watermark",
+      "name": "HTTP Add Watermark",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const webhookData = $('Webhook with PDF').item.json;\n  results.push({\n    json: {\n      documentName: webhookData.body?.documentName || 'protected-document',\n      watermarkText: webhookData.body?.watermarkText || 'CONFIDENTIAL',\n      protectedAt: new Date().toISOString(),\n      protectedBy: webhookData.body?.protectedBy || 'system',\n      classification: webhookData.body?.classification || 'confidential',\n      metadata: {\n        author: webhookData.body?.author || 'Unknown',\n        department: webhookData.body?.department || 'General',\n        expiryDate: webhookData.body?.expiryDate || ''\n      }\n    },\n    binary: item.binary\n  });\n}\nreturn results;"
+      },
+      "id": "set-metadata",
+      "name": "Code Set Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "={{ $json.documentName }}_protected",
+        "options": {}
+      },
+      "id": "drive-save",
+      "name": "Drive Save Protected",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [900, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook with PDF').item.json.body.notifyEmail || 'security@company.com' }}",
+        "subject": "=Protected PDF Ready: {{ $json.documentName }}",
+        "message": "=Your watermarked and protected PDF is ready.\n\nDocument: {{ $json.documentName }}\nWatermark: {{ $json.watermarkText }}\nClassification: {{ $json.classification }}\nProtected at: {{ $json.protectedAt }}\n\nThe file has been saved to Google Drive.",
+        "options": {}
+      },
+      "id": "gmail-link",
+      "name": "Gmail with Link",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Sheets Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1340, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PDF Watermark and Protect\n\nUpload PDF via webhook → HTTP API adds watermark →\nCode sets metadata (classification, author, department) →\nSaved to Drive → email notification → Sheets log.\n\n**Setup:**\n1. Configure watermark API credentials\n2. Set Google Drive protected docs folder\n3. Set Gmail credentials\n4. Set Sheets audit log\n5. POST { documentName, watermarkText, classification, notifyEmail } + binary"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook with PDF": {
+      "main": [
+        [{ "node": "HTTP Add Watermark", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Add Watermark": {
+      "main": [
+        [{ "node": "Code Set Metadata", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Set Metadata": {
+      "main": [
+        [{ "node": "Drive Save Protected", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Save Protected": {
+      "main": [
+        [{ "node": "Gmail with Link", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gmail with Link": {
+      "main": [
+        [{ "node": "Sheets Log", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

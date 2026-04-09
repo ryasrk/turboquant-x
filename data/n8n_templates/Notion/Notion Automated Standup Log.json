@@ -1,0 +1,254 @@
+{
+  "name": "Notion Automated Standup Log",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Automated Standup Log\nCapture Slack standup messages, parse tasks, create daily Notion entries, backup to Sheets, weekly digest.\n\n**Setup:**\n1. Configure Slack trigger for standup channel\n2. Set Notion standup database ID\n3. Set Google Sheet for backup\n4. Standup format: \"Done: ... | Doing: ... | Blockers: ...\""
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Slack Standup Trigger",
+      "type": "n8n-nodes-base.slackTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "trigger": "onMessage",
+        "channelId": "",
+        "options": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Parse Standup",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const text = item.json.text || item.json.message?.text || '';\n  const user = item.json.user || item.json.message?.user || 'Unknown';\n  const userName = item.json.user_name || item.json.userName || user;\n  const timestamp = item.json.ts || '';\n\n  // Parse standup format: \"Done: ... | Doing: ... | Blockers: ...\"\n  // Also supports \"Yesterday: ... | Today: ... | Blockers: ...\"\n  const sections = text.split(/\\||\\n/).map(s => s.trim());\n\n  let done = '';\n  let doing = '';\n  let blockers = '';\n\n  sections.forEach(section => {\n    const lower = section.toLowerCase();\n    if (lower.startsWith('done:') || lower.startsWith('yesterday:') || lower.startsWith('completed:')) {\n      done = section.replace(/^(done|yesterday|completed):/i, '').trim();\n    } else if (lower.startsWith('doing:') || lower.startsWith('today:') || lower.startsWith('working on:')) {\n      doing = section.replace(/^(doing|today|working on):/i, '').trim();\n    } else if (lower.startsWith('blocker') || lower.startsWith('blocked:') || lower.startsWith('issues:')) {\n      blockers = section.replace(/^(blockers?|blocked|issues):/i, '').trim();\n    }\n  });\n\n  // If no structured format, use full text\n  if (!done && !doing && !blockers) {\n    doing = text;\n  }\n\n  return {\n    json: {\n      userName,\n      userId: user,\n      done,\n      doing,\n      blockers,\n      date: new Date().toISOString().split('T')[0],\n      fullText: text,\n      hasBlockers: blockers.length > 0 && blockers.toLowerCase() !== 'none'\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Daily Entry",
+      "type": "n8n-nodes-base.notion",
+      "position": [680, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "=Standup — {{ $json.userName }} — {{ $json.date }}"
+            },
+            {
+              "name": "Team Member",
+              "type": "rich_text",
+              "richText": "={{ $json.userName }}"
+            },
+            {
+              "name": "Date",
+              "type": "date",
+              "date": "={{ $json.date }}"
+            },
+            {
+              "name": "Has Blockers",
+              "type": "checkbox",
+              "checkbox": "={{ $json.hasBlockers }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=## ✅ Done\n{{ $json.done || 'Nothing reported' }}\n\n## 🔨 Doing Today\n{{ $json.doing || 'Nothing reported' }}\n\n## 🚧 Blockers\n{{ $json.blockers || 'None' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Google Sheets Backup",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [900, 400],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Standups"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $('Parse Standup').item.json.date }}",
+            "Team Member": "={{ $('Parse Standup').item.json.userName }}",
+            "Done": "={{ $('Parse Standup').item.json.done }}",
+            "Doing": "={{ $('Parse Standup').item.json.doing }}",
+            "Blockers": "={{ $('Parse Standup').item.json.blockers }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "name": "Weekly Digest Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 660],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 17 * * 5"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query Week Standups",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 660],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Date|date",
+              "condition": "past_week",
+              "returnType": "date"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Build Weekly Digest",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 660],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst byMember = {};\n\nitems.forEach(item => {\n  const props = item.json.properties || {};\n  const member = props['Team Member']?.rich_text?.map(t => t.plain_text).join('') || 'Unknown';\n  const date = props['Date']?.date?.start || '';\n  const hasBlockers = props['Has Blockers']?.checkbox || false;\n\n  if (!byMember[member]) byMember[member] = { entries: 0, blockerDays: 0 };\n  byMember[member].entries++;\n  if (hasBlockers) byMember[member].blockerDays++;\n});\n\nconst summary = Object.entries(byMember).map(([member, data]) =>\n  `• ${member}: ${data.entries} standup(s), ${data.blockerDays} day(s) with blockers`\n).join('\\n');\n\nconst totalEntries = items.length;\nconst totalBlockerDays = Object.values(byMember).reduce((sum, d) => sum + d.blockerDays, 0);\n\nreturn [{\n  json: {\n    weekOf: $now.minus({ days: 5 }).format('yyyy-MM-dd'),\n    totalEntries,\n    teamMembers: Object.keys(byMember).length,\n    totalBlockerDays,\n    summary\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Weekly Digest Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 660],
+      "parameters": {
+        "resource": "page",
+        "operation": "create",
+        "parentPageId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "title": "=Weekly Standup Digest — Week of {{ $json.weekOf }}",
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "=## Weekly Summary\n\nTotal standups: {{ $json.totalEntries }}\nTeam members: {{ $json.teamMembers }}\nBlocker days: {{ $json.totalBlockerDays }}\n\n## By Member\n{{ $json.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    }
+  ],
+  "connections": {
+    "Slack Standup Trigger": {
+      "main": [
+        [{ "node": "Parse Standup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Standup": {
+      "main": [
+        [{ "node": "Notion Create Daily Entry", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Daily Entry": {
+      "main": [
+        [{ "node": "Google Sheets Backup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Weekly Digest Schedule": {
+      "main": [
+        [{ "node": "Notion Query Week Standups", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query Week Standups": {
+      "main": [
+        [{ "node": "Build Weekly Digest", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Weekly Digest": {
+      "main": [
+        [{ "node": "Notion Weekly Digest Page", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

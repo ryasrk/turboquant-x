@@ -1,0 +1,100 @@
+{
+  "name": "AI Interview Transcript Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze-interview",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this interview transcript thoroughly:\n\n{{ $json.body.transcript }}\n\nExtract and return JSON:\n{\n  \"themes\": [{\"theme\": \"...\", \"frequency\": N, \"quotes\": [\"exact quote 1\", \"exact quote 2\"]}],\n  \"sentiment\": {\"overall\": \"positive|negative|neutral|mixed\", \"progression\": \"description of how sentiment changes\"},\n  \"keyQuotes\": [{\"quote\": \"...\", \"speaker\": \"...\", \"significance\": \"why this matters\"}],\n  \"actionItems\": [\"...\"],\n  \"followUpQuestions\": [\"...\"],\n  \"summary\": \"2-3 paragraph executive summary\"\n}"
+            }
+          ]
+        },
+        "options": { "temperature": 0.2, "maxTokens": 3000 }
+      },
+      "name": "OpenAI Extract Insights",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [470, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst content = items[0].json.message.content;\n\nlet analysis;\ntry {\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/s);\n  analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: content };\n} catch (e) {\n  analysis = { summary: content, parseError: true };\n}\n\nconst transcript = $('Webhook').item.json.body.transcript || '';\nconst wordCount = transcript.split(/\\s+/).length;\n\n// Count speakers\nconst speakerMatches = transcript.match(/^[A-Z][a-zA-Z\\s]+:/gm) || [];\nconst speakers = [...new Set(speakerMatches.map(s => s.replace(':', '').trim()))];\n\nreturn [{\n  json: {\n    wordCount,\n    speakerCount: speakers.length,\n    speakers,\n    themeCount: (analysis.themes || []).length,\n    themes: analysis.themes || [],\n    sentiment: analysis.sentiment || {},\n    keyQuotes: analysis.keyQuotes || [],\n    actionItems: analysis.actionItems || [],\n    followUpQuestions: analysis.followUpQuestions || [],\n    summary: analysis.summary || '',\n    analyzedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Structure Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.analyzedAt }}",
+            "speakers": "={{ $json.speakers.join(', ') }}",
+            "word_count": "={{ $json.wordCount }}",
+            "themes": "={{ $json.themes.map(t => t.theme).join(', ') }}",
+            "sentiment": "={{ $json.sentiment.overall || '' }}",
+            "key_quotes": "={{ $json.keyQuotes.map(q => q.quote).join(' | ') }}",
+            "action_items": "={{ $json.actionItems.join('; ') }}",
+            "summary": "={{ $json.summary }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Interview Transcript Analyzer\n\nReceives an interview transcript, uses OpenAI to extract key themes, notable quotes, sentiment, and action items, then structures findings into a Google Sheets report.\n\n**Setup:**\n1. Add OpenAI and Google Sheets credentials\n2. POST: `{\"transcript\": \"Interviewer: ... Response: ...\"}`\n3. Works best with speaker-labeled transcripts"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "OpenAI Extract Insights", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Extract Insights": {
+      "main": [
+        [{ "node": "Structure Findings", "type": "main", "index": 0 }]
+      ]
+    },
+    "Structure Findings": {
+      "main": [
+        [{ "node": "Save to Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

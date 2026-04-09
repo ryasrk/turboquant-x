@@ -1,0 +1,253 @@
+{
+  "name": "WooCommerce Inventory Sync with Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 30 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://your-store.com/wp-json/wc/v3/products",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "per_page", "value": "100" },
+            { "name": "status", "value": "publish" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "name": "Get WooCommerce Products",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const products = $input.all().map(item => ({\n  productId: item.json.id,\n  sku: item.json.sku || 'N/A',\n  name: item.json.name,\n  wooStock: item.json.stock_quantity || 0,\n  price: item.json.price,\n  status: item.json.stock_status,\n  lastUpdated: new Date().toISOString()\n}));\n\nreturn products.map(p => ({ json: p }));"
+      },
+      "name": "Parse WooCommerce Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Master Inventory" },
+        "options": {}
+      },
+      "name": "Read Sheets Master Inventory",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [690, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "mergeByFields",
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "sku",
+              "field2": "SKU"
+            }
+          ]
+        },
+        "joinMode": "keepMatches",
+        "options": {}
+      },
+      "name": "Compare Stock Levels",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [910, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst discrepancies = [];\nconst updates = [];\n\nfor (const item of items) {\n  const wooStock = parseInt(item.json.wooStock) || 0;\n  const sheetStock = parseInt(item.json['Sheet Stock']) || 0;\n  \n  if (wooStock !== sheetStock) {\n    discrepancies.push({\n      sku: item.json.sku,\n      name: item.json.name,\n      wooStock,\n      sheetStock,\n      difference: wooStock - sheetStock,\n      timestamp: new Date().toISOString()\n    });\n  }\n  \n  updates.push({\n    sku: item.json.sku,\n    name: item.json.name,\n    currentStock: wooStock,\n    syncedAt: new Date().toISOString()\n  });\n}\n\nreturn [{ json: { discrepancies, updates, hasDiscrepancies: discrepancies.length > 0 } }];"
+      },
+      "name": "Detect Discrepancies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasDiscrepancies }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Has Discrepancies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1350, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Discrepancy Log" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now.toISO() }}",
+            "Discrepancies": "={{ JSON.stringify($json.discrepancies) }}",
+            "Count": "={{ $json.discrepancies.length }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Discrepancies to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1570, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "⚠️ Inventory Discrepancy Alert - {{ $json.discrepancies.length }} items",
+        "emailType": "html",
+        "message": "<h2>Inventory Sync Discrepancy Detected</h2><p><strong>{{ $json.discrepancies.length }}</strong> product(s) have stock discrepancies between WooCommerce and your master sheet.</p><p>Please review the Discrepancy Log sheet for details.</p><p><em>Auto-generated by n8n Inventory Sync at {{ $now.toISO() }}</em></p>",
+        "options": {
+          "senderName": "Inventory Bot"
+        }
+      },
+      "name": "Alert Email on Discrepancy",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1790, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Master Inventory" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Last Synced": "={{ $now.toISO() }}",
+            "Sync Status": "OK - No discrepancies"
+          }
+        },
+        "options": {}
+      },
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1570, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## WooCommerce Inventory Sync with Google Sheets\n\n**How to use:**\n1. Update the WooCommerce API URL in 'Get WooCommerce Products' node\n2. Set up HTTP Basic Auth with your WooCommerce consumer key/secret\n3. Connect Google Sheets with your master inventory spreadsheet\n4. Create sheets: 'Master Inventory' (with SKU, Name, Sheet Stock columns) and 'Discrepancy Log'\n5. Set alert email recipient in 'Alert Email on Discrepancy' node\n\n**Schedule:** Runs every 30 minutes automatically.\n\n**Master Inventory Sheet columns:** SKU, Name, Sheet Stock, Last Synced, Sync Status\n\n**Behavior:**\n- Fetches all published WooCommerce products\n- Compares stock levels with Google Sheets master\n- Logs discrepancies and sends email alert if found\n- Updates sync timestamp on successful run",
+        "width": 420,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -80]
+    }
+  ],
+  "connections": {
+    "Schedule Every 30 Min": {
+      "main": [
+        [
+          { "node": "Get WooCommerce Products", "type": "main", "index": 0 },
+          { "node": "Read Sheets Master Inventory", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get WooCommerce Products": {
+      "main": [
+        [{ "node": "Parse WooCommerce Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse WooCommerce Data": {
+      "main": [
+        [{ "node": "Compare Stock Levels", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sheets Master Inventory": {
+      "main": [
+        [{ "node": "Compare Stock Levels", "type": "main", "index": 1 }]
+      ]
+    },
+    "Compare Stock Levels": {
+      "main": [
+        [{ "node": "Detect Discrepancies", "type": "main", "index": 0 }]
+      ]
+    },
+    "Detect Discrepancies": {
+      "main": [
+        [{ "node": "Has Discrepancies?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Discrepancies?": {
+      "main": [
+        [{ "node": "Log Discrepancies to Sheets", "type": "main", "index": 0 }],
+        [{ "node": "Update Sync Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Discrepancies to Sheets": {
+      "main": [
+        [{ "node": "Alert Email on Discrepancy", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

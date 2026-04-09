@@ -1,0 +1,149 @@
+{
+  "name": "Instagram Post Scheduler with Caption",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 9}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Read Content Calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [450, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": "",
+        "sheetName": "Content Calendar",
+        "options": {
+          "range": "A:F"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Filter Todays Posts",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\nconst todayPosts = items.filter(item => item.json.scheduled_date === today && item.json.status !== 'posted');\nreturn todayPosts.map(item => ({\n  json: {\n    image_url: item.json.image_url,\n    caption: item.json.caption,\n    hashtags: item.json.hashtags,\n    row_number: item.json.row_number\n  }\n}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Post to Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.ig_user_id }}/media",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "image_url", "value": "={{ $json.image_url }}"},
+            {"name": "caption", "value": "={{ $json.caption }} {{ $json.hashtags }}"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Publish Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.ig_user_id }}/media_publish",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "creation_id", "value": "={{ $json.id }}"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Update Sheets Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1250, 300],
+      "parameters": {
+        "operation": "update",
+        "documentId": "",
+        "sheetName": "Content Calendar",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "posted",
+            "posted_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Instagram Post Scheduler with Caption\nRuns daily at 9 AM. Reads a Google Sheets content calendar, filters today's scheduled posts, uploads images + captions via the Instagram Graph API, then updates the sheet status."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[{"node": "Read Content Calendar", "type": "main", "index": 0}]]
+    },
+    "Read Content Calendar": {
+      "main": [[{"node": "Filter Todays Posts", "type": "main", "index": 0}]]
+    },
+    "Filter Todays Posts": {
+      "main": [[{"node": "Post to Instagram", "type": "main", "index": 0}]]
+    },
+    "Post to Instagram": {
+      "main": [[{"node": "Publish Media", "type": "main", "index": 0}]]
+    },
+    "Publish Media": {
+      "main": [[{"node": "Update Sheets Status", "type": "main", "index": 0}]]
+    }
+  }
+}

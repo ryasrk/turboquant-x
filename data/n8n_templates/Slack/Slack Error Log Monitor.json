@@ -1,0 +1,209 @@
+{
+  "name": "Slack Error Log Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.ERROR_LOG_ENDPOINT || 'https://api.example.com/logs/errors' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ new Date(Date.now() - 5 * 60 * 1000).toISOString() }}"
+            },
+            {
+              "name": "level",
+              "value": "error"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.httpHeaderAuth.value }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Fetch Error Logs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst errors = Array.isArray(items[0].json) ? items[0].json : items[0].json.errors || [];\n\nif (errors.length === 0) {\n  return [{json: {hasErrors: false, message: 'No new errors'}}];\n}\n\n// Deduplicate by error message\nconst seen = new Map();\nfor (const err of errors) {\n  const key = err.message || err.error || JSON.stringify(err);\n  if (!seen.has(key)) {\n    seen.set(key, {\n      message: key,\n      count: 1,\n      service: err.service || err.source || 'unknown',\n      level: err.level || 'error',\n      stackTrace: (err.stack || err.stackTrace || '').slice(0, 500),\n      firstSeen: err.timestamp || new Date().toISOString()\n    });\n  } else {\n    seen.get(key).count++;\n  }\n}\n\nconst unique = Array.from(seen.values());\nlet alertMsg = `:rotating_light: *Error Alert* — ${unique.length} unique error(s) in last 5 min\\n\\n`;\n\nfor (const err of unique.slice(0, 5)) {\n  alertMsg += `:x: *${err.service}* (x${err.count}):\\n`;\n  alertMsg += `\\`\\`\\`${err.message}\\`\\`\\`\\n`;\n  if (err.stackTrace) {\n    alertMsg += `Stack: \\`${err.stackTrace.split('\\n')[0]}\\`\\n`;\n  }\n  alertMsg += '\\n';\n}\n\nif (unique.length > 5) {\n  alertMsg += `_...and ${unique.length - 5} more errors_`;\n}\n\nreturn [{json: {\n  hasErrors: true,\n  alertMsg,\n  errorCount: errors.length,\n  uniqueCount: unique.length,\n  errors: unique,\n  checkedAt: new Date().toISOString()\n}}];"
+      },
+      "name": "Process Errors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.hasErrors }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If New Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#alerts",
+          "mode": "name"
+        },
+        "text": "={{ $json.alertMsg }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1140, 240],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Error History",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Error History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1360, 240],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Error Log Monitor\n\nReal-time error monitoring with Slack alerts.\n\n**Flow:**\n1. Check every 5 minutes\n2. Fetch error logs from API\n3. Deduplicate and count errors\n4. If new errors → Slack #alerts\n5. Log to Sheets for history\n\n**Features:**\n- Deduplication by error message\n- Stack trace excerpt\n- Error count per service\n- Top 5 errors shown, rest summarized\n\n**Setup:**\n- Set ERROR_LOG_ENDPOINT variable\n- Configure HTTP auth credentials",
+        "width": 340,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 240]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch Error Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Error Logs": {
+      "main": [
+        [
+          {
+            "node": "Process Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Errors": {
+      "main": [
+        [
+          {
+            "node": "If New Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If New Errors": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Sheets Error History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

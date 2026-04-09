@@ -1,0 +1,120 @@
+{
+  "name": "Automated Meeting Notes Email",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-notes",
+        "options": {}
+      },
+      "name": "Webhook - Meeting Notes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const d = item.json.body;\n  const meetingTitle = d.title || 'Meeting Notes';\n  const date = d.date || new Date().toISOString().split('T')[0];\n  const attendees = d.attendees || [];\n  const decisions = d.decisions || [];\n  const actionItems = d.actionItems || [];\n  const notes = d.notes || '';\n  const nextMeeting = d.nextMeeting || '';\n  \n  // Build attendees list\n  const attendeesList = attendees.map(a => {\n    if (typeof a === 'string') return `<li>${a}</li>`;\n    return `<li><strong>${a.name}</strong> (${a.email})${a.role ? ' - ' + a.role : ''}</li>`;\n  }).join('');\n  \n  // Build decisions list\n  const decisionsList = decisions.map((d, i) => `<li><strong>D${i + 1}:</strong> ${d}</li>`).join('');\n  \n  // Build action items table\n  let actionRows = '';\n  for (const action of actionItems) {\n    actionRows += `<tr>\n      <td style=\"padding:6px;border:1px solid #ddd;\">${action.task || ''}</td>\n      <td style=\"padding:6px;border:1px solid #ddd;\">${action.owner || ''}</td>\n      <td style=\"padding:6px;border:1px solid #ddd;\">${action.deadline || ''}</td>\n      <td style=\"padding:6px;border:1px solid #ddd;\">${action.priority || 'normal'}</td>\n    </tr>`;\n  }\n  \n  const html = `<div style=\"font-family:Arial,sans-serif;max-width:700px;margin:auto;\">\n    <div style=\"background:#1e40af;color:white;padding:15px 20px;\">\n      <h2 style=\"margin:0;\">${meetingTitle}</h2>\n      <p style=\"margin:5px 0 0;opacity:0.9;\">${date}</p>\n    </div>\n    <div style=\"padding:20px;\">\n      <h3>Attendees</h3>\n      <ul>${attendeesList}</ul>\n      \n      ${notes ? `<h3>Notes</h3><p>${notes}</p>` : ''}\n      \n      ${decisions.length > 0 ? `<h3>Decisions Made</h3><ol>${decisionsList}</ol>` : ''}\n      \n      ${actionItems.length > 0 ? `<h3>Action Items</h3>\n      <table style=\"width:100%;border-collapse:collapse;\">\n        <thead><tr style=\"background:#f3f4f6;\"><th style=\"padding:6px;border:1px solid #ddd;\">Task</th><th style=\"padding:6px;border:1px solid #ddd;\">Owner</th><th style=\"padding:6px;border:1px solid #ddd;\">Deadline</th><th style=\"padding:6px;border:1px solid #ddd;\">Priority</th></tr></thead>\n        <tbody>${actionRows}</tbody>\n      </table>` : ''}\n      \n      ${nextMeeting ? `<p style=\"margin-top:20px;padding:10px;background:#f0fdf4;border-left:4px solid #22c55e;\"><strong>Next Meeting:</strong> ${nextMeeting}</p>` : ''}\n    </div>\n  </div>`;\n  \n  // Extract email addresses for sending\n  const emails = attendees.map(a => typeof a === 'string' ? a : a.email).filter(Boolean);\n  \n  results.push({\n    json: {\n      meetingTitle: meetingTitle,\n      date: date,\n      htmlBody: html,\n      attendeeEmails: emails.join(', '),\n      attendeeCount: attendees.length,\n      decisionCount: decisions.length,\n      actionItemCount: actionItems.length,\n      sentAt: new Date().toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Format Meeting Notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.attendeeEmails }}",
+        "subject": "Meeting Notes: {{ $json.meetingTitle }} - {{ $json.date }}",
+        "message": "={{ $json.htmlBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Gmail to All Attendees",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Meeting Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Meeting Notes Email\n\nFormats and distributes meeting notes to all attendees.\n\n**Flow:**\n1. Webhook receives meeting notes data\n2. Code formats into professional HTML with sections\n3. Gmail sends to all attendees\n4. Log to Sheets\n\n**Webhook payload:**\n```json\n{\n  \"title\": \"Sprint Review\",\n  \"date\": \"2025-01-15\",\n  \"attendees\": [\n    {\"name\": \"John\", \"email\": \"john@co.com\", \"role\": \"PM\"},\n    {\"name\": \"Jane\", \"email\": \"jane@co.com\"}\n  ],\n  \"decisions\": [\"Approved feature X\", \"Delayed Y to Q2\"],\n  \"actionItems\": [\n    {\"task\": \"Write spec\", \"owner\": \"John\", \"deadline\": \"Jan 20\", \"priority\": \"high\"}\n  ],\n  \"notes\": \"General discussion...\",\n  \"nextMeeting\": \"Jan 22 at 2pm\"\n}\n```",
+        "width": 420,
+        "height": 420
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -150]
+    }
+  ],
+  "connections": {
+    "Webhook - Meeting Notes": {
+      "main": [
+        [
+          {
+            "node": "Format Meeting Notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Meeting Notes": {
+      "main": [
+        [
+          {
+            "node": "Gmail to All Attendees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail to All Attendees": {
+      "main": [
+        [
+          {
+            "node": "Sheets Meeting Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

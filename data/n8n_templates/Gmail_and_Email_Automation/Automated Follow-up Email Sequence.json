@@ -1,0 +1,234 @@
+{
+  "name": "Automated Follow-up Email Sequence",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "add-followup-contact",
+        "options": {}
+      },
+      "name": "Webhook - Add Contact",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.email }}",
+        "subject": "={{ $json.body.subject || 'Following up on our conversation' }}",
+        "message": "Hi {{ $json.body.name }},\n\nThank you for your interest. I wanted to reach out and see if you had any questions about {{ $json.body.topic || 'our services' }}.\n\nI'd love to schedule a quick call to discuss how we can help.\n\nBest regards",
+        "options": {}
+      },
+      "name": "Send Initial Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "email", "value": "={{ $('Webhook - Add Contact').item.json.body.email }}" },
+              { "column": "name", "value": "={{ $('Webhook - Add Contact').item.json.body.name }}" },
+              { "column": "initialSentAt", "value": "={{ $now.toISO() }}" },
+              { "column": "replied", "value": "false" },
+              { "column": "status", "value": "initial_sent" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "days"
+      },
+      "name": "Wait 3 Days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {
+          "column": "email",
+          "value": "={{ $('Webhook - Add Contact').item.json.body.email }}"
+        },
+        "options": {}
+      },
+      "name": "Check Reply Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.replied }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If No Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook - Add Contact').item.json.body.email }}",
+        "subject": "Re: {{ $('Webhook - Add Contact').item.json.body.subject || 'Following up on our conversation' }}",
+        "message": "Hi {{ $('Webhook - Add Contact').item.json.body.name }},\n\nI wanted to follow up on my previous email. I understand you're busy, but I'd love to connect when you have a moment.\n\nWould any of these times work for a quick 15-minute call?\n- Tomorrow morning\n- Thursday afternoon\n- Friday morning\n\nLooking forward to hearing from you.\n\nBest regards",
+        "options": {}
+      },
+      "name": "Send Follow-up",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1750, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Follow-up Email Sequence\n\nSends initial email and follows up after 3 days if no reply.\n\n**Flow:**\n1. Webhook receives contact details\n2. Send initial email via Gmail\n3. Log contact to Sheets\n4. Wait 3 days\n5. Check Sheets for reply status\n6. If no reply → send follow-up email\n\n**Setup:**\n- Connect Gmail OAuth2 credentials\n- Connect Google Sheets credentials\n- Create spreadsheet with columns: email, name, initialSentAt, replied, status\n- POST to webhook: {\"email\": \"...\", \"name\": \"...\", \"subject\": \"...\", \"topic\": \"...\"}",
+        "width": 400,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -90]
+    }
+  ],
+  "connections": {
+    "Webhook - Add Contact": {
+      "main": [
+        [
+          {
+            "node": "Send Initial Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Initial Email": {
+      "main": [
+        [
+          {
+            "node": "Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Wait 3 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 3 Days": {
+      "main": [
+        [
+          {
+            "node": "Check Reply Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Reply Status": {
+      "main": [
+        [
+          {
+            "node": "If No Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If No Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

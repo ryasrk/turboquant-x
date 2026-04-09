@@ -1,0 +1,121 @@
+{
+  "name": "Asana Task Automation",
+  "nodes": [
+    {
+      "name": "Webhook Asana Task",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "asana-task",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Parse Asana Task",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const events = payload.events || [payload];\n  const event = events[0] || {};\n  const resource = event.resource || {};\n  const parent = event.parent || {};\n  const now = new Date();\n  const dueDate = resource.due_on ? new Date(resource.due_on) : null;\n  const isOverdue = dueDate ? dueDate < now && !resource.completed : false;\n  return {\n    json: {\n      taskId: resource.gid || '',\n      taskName: resource.name || '',\n      assignee: resource.assignee?.name || 'Unassigned',\n      assigneeEmail: resource.assignee?.email || '',\n      projectName: parent.name || '',\n      dueDate: resource.due_on || '',\n      isOverdue: isOverdue,\n      completed: resource.completed || false,\n      status: resource.completed ? 'Completed' : (isOverdue ? 'Overdue' : 'In Progress'),\n      notes: (resource.notes || '').substring(0, 300),\n      action: event.action || 'updated',\n      timestamp: now.toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Check Overdue",
+      "type": "n8n-nodes-base.if",
+      "position": [710, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isOverdue }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Slack Overdue Reminder",
+      "type": "n8n-nodes-base.slack",
+      "position": [940, 200],
+      "parameters": {
+        "channel": "",
+        "text": "=⏰ *Overdue Task Alert!*\n\nTask: {{ $json.taskName }}\nAssignee: {{ $json.assignee }}\nDue: {{ $json.dueDate }}\nProject: {{ $json.projectName }}\n\nPlease update the status ASAP.",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sheets Status Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 400],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail Weekly Summary",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1170, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Asana Task Update: {{ $json.taskName }}",
+        "message": "=Task Update from Asana\n\nTask: {{ $json.taskName }}\nStatus: {{ $json.status }}\nAssignee: {{ $json.assignee }}\nDue: {{ $json.dueDate }}\nProject: {{ $json.projectName }}\nAction: {{ $json.action }}\n\nNotes: {{ $json.notes }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Asana Task Automation\nReceives Asana task webhooks, checks for overdue tasks, sends Slack reminders, logs to Sheets, and emails weekly summaries.\n\n**Setup:**\n1. Configure Asana webhook to this workflow URL\n2. Set Slack channel for overdue alerts\n3. Connect Google Sheets and Gmail\n4. Note: Asana webhooks require an initial handshake verification"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Asana Task": {
+      "main": [[{ "node": "Parse Asana Task", "type": "main", "index": 0 }]]
+    },
+    "Parse Asana Task": {
+      "main": [[{ "node": "Check Overdue", "type": "main", "index": 0 }]]
+    },
+    "Check Overdue": {
+      "main": [
+        [{ "node": "Slack Overdue Reminder", "type": "main", "index": 0 }],
+        [{ "node": "Sheets Status Log", "type": "main", "index": 0 }]
+      ]
+    },
+    "Slack Overdue Reminder": {
+      "main": [[{ "node": "Sheets Status Log", "type": "main", "index": 0 }]]
+    },
+    "Sheets Status Log": {
+      "main": [[{ "node": "Gmail Weekly Summary", "type": "main", "index": 0 }]]
+    }
+  }
+}

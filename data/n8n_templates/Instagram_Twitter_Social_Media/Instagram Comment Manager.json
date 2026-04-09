@@ -1,0 +1,174 @@
+{
+  "name": "Instagram Comment Manager",
+  "nodes": [
+    {
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 30}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Recent Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.ig_user_id }}/media",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "fields", "value": "id,comments{id,text,username,timestamp}"},
+            {"name": "limit", "value": "10"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Filter and Classify",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst spamKeywords = ['buy now','click here','free followers','dm me for','check my bio','earn money','visit my','onlyfans','crypto giveaway'];\nconst questionKeywords = ['?','how','what','when','where','why','can you','do you','is this','does'];\nconst results = [];\n\nfor (const item of items) {\n  const mediaList = item.json.data || [];\n  for (const media of mediaList) {\n    const comments = media.comments?.data || [];\n    for (const comment of comments) {\n      const text = comment.text.toLowerCase();\n      const isSpam = spamKeywords.some(kw => text.includes(kw));\n      const isQuestion = questionKeywords.some(kw => text.includes(kw));\n      results.push({\n        json: {\n          comment_id: comment.id,\n          media_id: media.id,\n          username: comment.username,\n          text: comment.text,\n          timestamp: comment.timestamp,\n          classification: isSpam ? 'spam' : isQuestion ? 'question' : 'normal'\n        }\n      });\n    }\n  }\n}\nreturn results;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Route by Type",
+      "type": "n8n-nodes-base.switch",
+      "position": [850, 300],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.classification }}",
+        "rules": {
+          "rules": [
+            {"value2": "spam", "output": 0},
+            {"value2": "question", "output": 1},
+            {"value2": "normal", "output": 2}
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Delete Spam Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1100, 150],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.comment_id }}",
+        "method": "DELETE",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Reply to Question",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1100, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.comment_id }}/replies",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "message", "value": "Thanks for your question, @{{ $json.username }}! We'll get back to you shortly. Check our bio link for quick answers!"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Log All Actions",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1350, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Comment Log",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 80],
+      "parameters": {
+        "content": "## Instagram Comment Manager\nRuns every 30 minutes. Fetches recent comments, classifies them (spam/question/normal), auto-deletes spam, auto-replies to questions with a helpful response, and logs all actions to Google Sheets."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [[{"node": "Get Recent Media", "type": "main", "index": 0}]]
+    },
+    "Get Recent Media": {
+      "main": [[{"node": "Filter and Classify", "type": "main", "index": 0}]]
+    },
+    "Filter and Classify": {
+      "main": [[{"node": "Route by Type", "type": "main", "index": 0}]]
+    },
+    "Route by Type": {
+      "main": [
+        [{"node": "Delete Spam Comment", "type": "main", "index": 0}],
+        [{"node": "Reply to Question", "type": "main", "index": 0}],
+        [{"node": "Log All Actions", "type": "main", "index": 0}]
+      ]
+    },
+    "Delete Spam Comment": {
+      "main": [[{"node": "Log All Actions", "type": "main", "index": 0}]]
+    },
+    "Reply to Question": {
+      "main": [[{"node": "Log All Actions", "type": "main", "index": 0}]]
+    }
+  }
+}

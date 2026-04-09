@@ -1,0 +1,245 @@
+{
+  "name": "Laporan Keuangan Bulanan (Monthly Financial Report)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 1 * *"
+            }
+          ]
+        }
+      },
+      "name": "Jadwal Bulanan",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 560]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "Pendapatan"
+        },
+        "options": {
+          "range": "A:F"
+        }
+      },
+      "name": "Baca Data Pendapatan",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "Pengeluaran"
+        },
+        "options": {
+          "range": "A:F"
+        }
+      },
+      "name": "Baca Data Pengeluaran",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 720],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// === Laporan Keuangan Bulanan ===\n// Menghitung total pendapatan, pengeluaran, laba kotor, laba bersih, pajak\n\nconst namaBulan = [\n  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',\n  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'\n];\n\nconst now = new Date();\nconst bulanLalu = new Date(now.getFullYear(), now.getMonth() - 1, 1);\nconst bulan = namaBulan[bulanLalu.getMonth()];\nconst tahun = bulanLalu.getFullYear();\nconst periode = `${bulan} ${tahun}`;\n\n// Data pendapatan dari node sebelumnya\nconst pendapatanData = $input.all().filter(i => i.json._sheet === 'Pendapatan' || i.json.Kategori);\nconst pengeluaranData = $input.all().filter(i => i.json._sheet === 'Pengeluaran' || i.json.JenisBiaya);\n\n// Kategori Pendapatan\nconst kategoriPendapatan = {};\nlet totalPendapatan = 0;\nfor (const row of pendapatanData) {\n  const kategori = row.json.Kategori || 'Lainnya';\n  const jumlah = parseFloat(row.json.Jumlah) || 0;\n  kategoriPendapatan[kategori] = (kategoriPendapatan[kategori] || 0) + jumlah;\n  totalPendapatan += jumlah;\n}\n\n// Kategori Pengeluaran\nconst kategoriPengeluaran = {};\nlet totalPengeluaran = 0;\nfor (const row of pengeluaranData) {\n  const kategori = row.json.JenisBiaya || row.json.Kategori || 'Lainnya';\n  const jumlah = parseFloat(row.json.Jumlah) || 0;\n  kategoriPengeluaran[kategori] = (kategoriPengeluaran[kategori] || 0) + jumlah;\n  totalPengeluaran += jumlah;\n}\n\n// Hitung HPP (Harga Pokok Penjualan) dari kategori terkait\nconst hpp = (kategoriPengeluaran['HPP'] || 0) + (kategoriPengeluaran['Bahan Baku'] || 0);\n\n// Beban Operasional\nconst bebanOperasional = (kategoriPengeluaran['Gaji'] || 0)\n  + (kategoriPengeluaran['Sewa'] || 0)\n  + (kategoriPengeluaran['Listrik/Air'] || 0)\n  + (kategoriPengeluaran['Marketing'] || 0)\n  + (kategoriPengeluaran['Operasional'] || 0);\n\n// Perhitungan Laba\nconst labaKotor = totalPendapatan - hpp;\nconst labaBersihSebelumPajak = labaKotor - bebanOperasional;\nconst tarifPajak = 0.22; // PPh Badan 22%\nconst pajak = Math.max(0, labaBersihSebelumPajak * tarifPajak);\nconst labaBersih = labaBersihSebelumPajak - pajak;\n\n// Format Rupiah\nconst formatRupiah = (angka) => {\n  return 'Rp ' + angka.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 });\n};\n\n// Breakdown per kategori untuk laporan\nconst breakdownPendapatan = Object.entries(kategoriPendapatan)\n  .map(([k, v]) => `  - ${k}: ${formatRupiah(v)}`).join('\\n');\nconst breakdownPengeluaran = Object.entries(kategoriPengeluaran)\n  .map(([k, v]) => `  - ${k}: ${formatRupiah(v)}`).join('\\n');\n\n// Margin\nconst marginKotor = totalPendapatan > 0 ? ((labaKotor / totalPendapatan) * 100).toFixed(1) : '0.0';\nconst marginBersih = totalPendapatan > 0 ? ((labaBersih / totalPendapatan) * 100).toFixed(1) : '0.0';\n\nreturn {\n  json: {\n    periode,\n    bulan,\n    tahun,\n    totalPendapatan,\n    totalPengeluaran,\n    hpp,\n    labaKotor,\n    bebanOperasional,\n    labaBersihSebelumPajak,\n    pajak,\n    labaBersih,\n    marginKotor: `${marginKotor}%`,\n    marginBersih: `${marginBersih}%`,\n    totalPendapatanFormatted: formatRupiah(totalPendapatan),\n    totalPengeluaranFormatted: formatRupiah(totalPengeluaran),\n    hppFormatted: formatRupiah(hpp),\n    labaKotorFormatted: formatRupiah(labaKotor),\n    bebanOperasionalFormatted: formatRupiah(bebanOperasional),\n    pajakFormatted: formatRupiah(pajak),\n    labaBersihFormatted: formatRupiah(labaBersih),\n    breakdownPendapatan,\n    breakdownPengeluaran,\n    kategoriPendapatan,\n    kategoriPengeluaran,\n    tanggalLaporan: now.toISOString().split('T')[0]\n  }\n};"
+      },
+      "name": "Hitung Laporan Keuangan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 560]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "Ringkasan Bulanan"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Periode": "={{ $json.periode }}",
+            "Total Pendapatan": "={{ $json.totalPendapatan }}",
+            "Total Pengeluaran": "={{ $json.totalPengeluaran }}",
+            "HPP": "={{ $json.hpp }}",
+            "Laba Kotor": "={{ $json.labaKotor }}",
+            "Beban Operasional": "={{ $json.bebanOperasional }}",
+            "Pajak": "={{ $json.pajak }}",
+            "Laba Bersih": "={{ $json.labaBersih }}",
+            "Margin Kotor": "={{ $json.marginKotor }}",
+            "Margin Bersih": "={{ $json.marginBersih }}",
+            "Tanggal Laporan": "={{ $json.tanggalLaporan }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Simpan Ringkasan Bulanan",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=📊 Laporan Keuangan {{ $json.periode }} - Ringkasan Bulanan",
+        "emailType": "html",
+        "message": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 700px; margin: 0 auto; background: #f8f9fa; padding: 20px;\">\n  <div style=\"background: #1a5276; color: white; padding: 24px; border-radius: 8px 8px 0 0;\">\n    <h1 style=\"margin: 0; font-size: 22px;\">📊 Laporan Keuangan Bulanan</h1>\n    <p style=\"margin: 8px 0 0; opacity: 0.9; font-size: 16px;\">Periode: {{ $json.periode }}</p>\n  </div>\n\n  <div style=\"background: white; padding: 24px; border-radius: 0 0 8px 8px;\">\n    <h2 style=\"color: #1a5276; border-bottom: 2px solid #1a5276; padding-bottom: 8px;\">Ringkasan Keuangan</h2>\n\n    <table style=\"width: 100%; border-collapse: collapse; margin: 16px 0;\">\n      <tr style=\"background: #eaf2f8;\">\n        <td style=\"padding: 12px; font-weight: bold;\">Total Pendapatan</td>\n        <td style=\"padding: 12px; text-align: right; color: #27ae60; font-weight: bold;\">{{ $json.totalPendapatanFormatted }}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 12px;\">Harga Pokok Penjualan (HPP)</td>\n        <td style=\"padding: 12px; text-align: right; color: #e74c3c;\">{{ $json.hppFormatted }}</td>\n      </tr>\n      <tr style=\"background: #eaf2f8;\">\n        <td style=\"padding: 12px; font-weight: bold;\">Laba Kotor</td>\n        <td style=\"padding: 12px; text-align: right; font-weight: bold;\">{{ $json.labaKotorFormatted }} ({{ $json.marginKotor }})</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 12px;\">Beban Operasional</td>\n        <td style=\"padding: 12px; text-align: right; color: #e74c3c;\">{{ $json.bebanOperasionalFormatted }}</td>\n      </tr>\n      <tr style=\"background: #eaf2f8;\">\n        <td style=\"padding: 12px;\">Pajak (PPh 22%)</td>\n        <td style=\"padding: 12px; text-align: right; color: #e74c3c;\">{{ $json.pajakFormatted }}</td>\n      </tr>\n      <tr style=\"background: #1a5276; color: white;\">\n        <td style=\"padding: 14px; font-weight: bold; font-size: 16px;\">Laba Bersih</td>\n        <td style=\"padding: 14px; text-align: right; font-weight: bold; font-size: 16px;\">{{ $json.labaBersihFormatted }} ({{ $json.marginBersih }})</td>\n      </tr>\n    </table>\n\n    <h3 style=\"color: #1a5276;\">📈 Breakdown Pendapatan</h3>\n    <pre style=\"background: #f0f4f8; padding: 12px; border-radius: 4px; font-size: 13px;\">{{ $json.breakdownPendapatan }}</pre>\n\n    <h3 style=\"color: #1a5276;\">📉 Breakdown Pengeluaran</h3>\n    <pre style=\"background: #fdf2f2; padding: 12px; border-radius: 4px; font-size: 13px;\">{{ $json.breakdownPengeluaran }}</pre>\n\n    <p style=\"color: #7f8c8d; font-size: 12px; margin-top: 24px; border-top: 1px solid #eee; padding-top: 12px;\">\n      Laporan ini dibuat secara otomatis pada {{ $json.tanggalLaporan }}.<br>\n      Kategori: Penjualan, Jasa, Gaji, Sewa, Listrik/Air, Marketing, Operasional, Pajak\n    </p>\n  </div>\n</div>",
+        "options": {}
+      },
+      "name": "Email Laporan ke Manajemen",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1260, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=📊 *Laporan Keuangan {{ $json.periode }}*\n\n💰 Pendapatan: {{ $json.totalPendapatanFormatted }}\n💸 Pengeluaran: {{ $json.totalPengeluaranFormatted }}\n📦 HPP: {{ $json.hppFormatted }}\n\n📈 Laba Kotor: {{ $json.labaKotorFormatted }} ({{ $json.marginKotor }})\n🏢 Beban Operasional: {{ $json.bebanOperasionalFormatted }}\n🏛️ Pajak: {{ $json.pajakFormatted }}\n\n✅ *Laba Bersih: {{ $json.labaBersihFormatted }}*\n📊 Margin Bersih: {{ $json.marginBersih }}\n\n_Laporan otomatis {{ $json.tanggalLaporan }}_",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Notifikasi Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1260, 720],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 📊 Laporan Keuangan Bulanan (Monthly Financial Report)\n\n### Deskripsi\nTemplate ini menghasilkan laporan keuangan bulanan secara otomatis.\nBerjalan setiap tanggal 1 pukul 07:00 WIB.\n\n### Alur Kerja\n1. **Jadwal** — Trigger otomatis setiap awal bulan\n2. **Baca Pendapatan** — Ambil data dari sheet 'Pendapatan' (Penjualan, Jasa)\n3. **Baca Pengeluaran** — Ambil data dari sheet 'Pengeluaran' (Gaji, Sewa, Listrik/Air, Marketing, Operasional, Pajak)\n4. **Hitung Laporan** — Kalkulasi total, laba kotor, laba bersih, pajak PPh 22%\n5. **Simpan Ringkasan** — Tulis ke sheet 'Ringkasan Bulanan'\n6. **Email** — Kirim laporan HTML ke manajemen\n7. **Telegram** — Kirim ringkasan cepat ke grup\n\n### Rumus\n- **Laba Kotor** = Total Pendapatan - HPP\n- **Laba Bersih** = Laba Kotor - Beban Operasional - Pajak\n- **Pajak** = 22% × (Laba Kotor - Beban Operasional)\n\n### Setup\n1. Buat Google Sheet dengan sheet: Pendapatan, Pengeluaran, Ringkasan Bulanan\n2. Kolom Pendapatan: Tanggal, Kategori, Deskripsi, Jumlah, Metode\n3. Kolom Pengeluaran: Tanggal, JenisBiaya, Deskripsi, Jumlah, Metode\n4. Hubungkan credential Google Sheets, Gmail, dan Telegram\n5. Isi chatId Telegram dan email tujuan",
+        "width": 480,
+        "height": 580
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-100, 280]
+    }
+  ],
+  "connections": {
+    "Jadwal Bulanan": {
+      "main": [
+        [
+          {
+            "node": "Baca Data Pendapatan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Baca Data Pengeluaran",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baca Data Pendapatan": {
+      "main": [
+        [
+          {
+            "node": "Hitung Laporan Keuangan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baca Data Pengeluaran": {
+      "main": [
+        [
+          {
+            "node": "Hitung Laporan Keuangan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hitung Laporan Keuangan": {
+      "main": [
+        [
+          {
+            "node": "Simpan Ringkasan Bulanan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notifikasi Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simpan Ringkasan Bulanan": {
+      "main": [
+        [
+          {
+            "node": "Email Laporan ke Manajemen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

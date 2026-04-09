@@ -1,0 +1,161 @@
+{
+  "name": "Database Migration Rollback Notifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "migration-failure",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Migration Failure Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body || $input.first().json;\n\nconst migrationName = body.migration_name || 'unknown';\nconst errorMessage = body.error_message || 'No error details provided';\nconst database = body.database || 'unknown';\nconst environment = body.environment || 'unknown';\nconst timestamp = body.timestamp || new Date().toISOString();\n\n// Parse error type\nlet errorType = 'UNKNOWN';\nlet rollbackCommand = '';\n\nif (errorMessage.includes('duplicate') || errorMessage.includes('already exists')) {\n  errorType = 'DUPLICATE_OBJECT';\n  rollbackCommand = `-- Rollback duplicate:\\nDROP TABLE IF EXISTS <table>;\\n-- Then re-run migration`;\n} else if (errorMessage.includes('foreign key') || errorMessage.includes('constraint')) {\n  errorType = 'CONSTRAINT_VIOLATION';\n  rollbackCommand = `-- Rollback constraint issue:\\n-- Disable FK checks, rollback, re-enable\\nSET session_replication_role = 'replica';\\n-- Run rollback migration\\nSET session_replication_role = 'origin';`;\n} else if (errorMessage.includes('timeout') || errorMessage.includes('lock')) {\n  errorType = 'LOCK_TIMEOUT';\n  rollbackCommand = `-- Rollback lock timeout:\\nSELECT pg_cancel_backend(pid)\\nFROM pg_stat_activity\\nWHERE state = 'active' AND query LIKE '%migration%';\\n-- Retry migration during low traffic`;\n} else {\n  rollbackCommand = `-- Generic rollback:\\n-- Check migration tool for down() method\\n-- Run: migrate rollback --step=1`;\n}\n\nreturn [{\n  json: {\n    migration_name: migrationName,\n    error_message: errorMessage,\n    error_type: errorType,\n    database: database,\n    environment: environment,\n    rollback_command: rollbackCommand,\n    severity: environment === 'production' ? 'CRITICAL' : 'WARNING',\n    timestamp: timestamp\n  }\n}];"
+      },
+      "name": "Parse Migration Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_DBA_CHAT_ID",
+        "text": "=🚨 *Database Migration Failed*\n\n*Environment:* {{ $json.environment }}\n*Database:* {{ $json.database }}\n*Migration:* `{{ $json.migration_name }}`\n*Severity:* {{ $json.severity }}\n*Error Type:* {{ $json.error_type }}\n\n*Error:*\n```\n{{ $json.error_message }}\n```\n\n*Suggested Rollback:*\n```sql\n{{ $json.rollback_command }}\n```\n\n_{{ $json.timestamp }}_",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [700, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Migration Failures"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [700, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "alerts@yourcompany.com",
+        "toEmail": "dba-team@yourcompany.com",
+        "subject": "=🚨 [{{ $json.severity }}] Migration Failed: {{ $json.migration_name }} ({{ $json.environment }})",
+        "emailType": "text",
+        "message": "=Database Migration Failure Report\n================================\n\nEnvironment: {{ $json.environment }}\nDatabase: {{ $json.database }}\nMigration: {{ $json.migration_name }}\nError Type: {{ $json.error_type }}\nSeverity: {{ $json.severity }}\nTimestamp: {{ $json.timestamp }}\n\nError Message:\n{{ $json.error_message }}\n\nSuggested Rollback:\n{{ $json.rollback_command }}\n\n---\nThis is an automated alert from the migration monitoring system.",
+        "options": {}
+      },
+      "name": "Email DBA Team",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [700, 600],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'received', migration: $json.migration_name, severity: $json.severity }) }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [940, 400]
+    },
+    {
+      "parameters": {
+        "content": "## Database Migration Rollback Notifier\n\n**Trigger:** Webhook POST on migration failure\n\n**Payload expected:**\n```json\n{\n  \"migration_name\": \"20240101_add_users_table\",\n  \"error_message\": \"relation already exists\",\n  \"database\": \"mydb\",\n  \"environment\": \"production\"\n}\n```\n\n**Actions:**\n1. Parse error and determine type\n2. Generate rollback instructions\n3. Alert via Telegram (immediate)\n4. Log to Google Sheets (audit)\n5. Email DBA team (detailed)\n\n**Setup:**\n- Configure webhook URL in CI/CD pipeline\n- Set Telegram bot + chat ID\n- Google Sheets for logging\n- SMTP for email alerts",
+        "height": 400,
+        "width": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -140]
+    }
+  ],
+  "connections": {
+    "Migration Failure Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Migration Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Migration Error": {
+      "main": [
+        [
+          {
+            "node": "Telegram Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email DBA Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

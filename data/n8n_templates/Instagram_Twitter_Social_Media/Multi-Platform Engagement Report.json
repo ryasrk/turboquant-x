@@ -1,0 +1,193 @@
+{
+  "name": "Multi-Platform Engagement Report",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "weeks", "weeksInterval": 1, "triggerAtDay": 1, "triggerAtHour": 8}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Twitter Engagement",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [500, 150],
+      "parameters": {
+        "url": "https://api.twitter.com/2/users/{{ $json.twitter_user_id }}/tweets",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "tweet.fields", "value": "public_metrics,created_at"},
+            {"name": "max_results", "value": "100"},
+            {"name": "start_time", "value": "={{ new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Get Instagram Engagement",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [500, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.ig_user_id }}/media",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "fields", "value": "id,like_count,comments_count,timestamp"},
+            {"name": "limit", "value": "50"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Get LinkedIn Engagement",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [500, 450],
+      "parameters": {
+        "url": "https://api.linkedin.com/v2/organizationalEntityShareStatistics",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "q", "value": "organizationalEntity"},
+            {"name": "organizationalEntity", "value": "urn:li:organization:YOUR_ORG_ID"},
+            {"name": "timeIntervals.timeGranularityType", "value": "DAY"},
+            {"name": "timeIntervals.timeRange.start", "value": "={{ Date.now() - 7 * 24 * 60 * 60 * 1000 }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Merge All Platforms",
+      "type": "n8n-nodes-base.merge",
+      "position": [750, 300],
+      "parameters": {
+        "mode": "append"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Aggregate Report",
+      "type": "n8n-nodes-base.code",
+      "position": [950, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst weekEnd = new Date().toISOString().split('T')[0];\n\nlet twitter = {likes: 0, retweets: 0, replies: 0, posts: 0};\nlet instagram = {likes: 0, comments: 0, posts: 0};\nlet linkedin = {likes: 0, shares: 0, comments: 0, posts: 0};\n\nfor (const item of items) {\n  const data = item.json.data || item.json.elements || [];\n  if (Array.isArray(data)) {\n    for (const entry of data) {\n      if (entry.public_metrics) {\n        // Twitter\n        twitter.likes += entry.public_metrics.like_count || 0;\n        twitter.retweets += entry.public_metrics.retweet_count || 0;\n        twitter.replies += entry.public_metrics.reply_count || 0;\n        twitter.posts++;\n      } else if (entry.like_count !== undefined) {\n        // Instagram\n        instagram.likes += entry.like_count || 0;\n        instagram.comments += entry.comments_count || 0;\n        instagram.posts++;\n      }\n    }\n  }\n  // LinkedIn stats\n  if (item.json.elements) {\n    for (const el of item.json.elements) {\n      const stats = el.totalShareStatistics || {};\n      linkedin.likes += stats.likeCount || 0;\n      linkedin.shares += stats.shareCount || 0;\n      linkedin.comments += stats.commentCount || 0;\n      linkedin.posts++;\n    }\n  }\n}\n\nconst totalEngagement = twitter.likes + twitter.retweets + twitter.replies + instagram.likes + instagram.comments + linkedin.likes + linkedin.shares + linkedin.comments;\n\nreturn [{\n  json: {\n    week_ending: weekEnd,\n    twitter_likes: twitter.likes,\n    twitter_retweets: twitter.retweets,\n    twitter_replies: twitter.replies,\n    twitter_posts: twitter.posts,\n    instagram_likes: instagram.likes,\n    instagram_comments: instagram.comments,\n    instagram_posts: instagram.posts,\n    linkedin_likes: linkedin.likes,\n    linkedin_shares: linkedin.shares,\n    linkedin_comments: linkedin.comments,\n    linkedin_posts: linkedin.posts,\n    total_engagement: totalEngagement,\n    best_platform: twitter.likes >= instagram.likes && twitter.likes >= linkedin.likes ? 'Twitter' : instagram.likes >= linkedin.likes ? 'Instagram' : 'LinkedIn'\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save Dashboard",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1150, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Engagement Dashboard",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Send Report Email",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1350, 300],
+      "parameters": {
+        "sendTo": "marketing@example.com",
+        "subject": "Weekly Multi-Platform Engagement Report - {{ $json.week_ending }}",
+        "message": "📊 Weekly Engagement Report ({{ $json.week_ending }})\n\n🐦 Twitter:\n  Posts: {{ $json.twitter_posts }} | Likes: {{ $json.twitter_likes }} | RT: {{ $json.twitter_retweets }} | Replies: {{ $json.twitter_replies }}\n\n📸 Instagram:\n  Posts: {{ $json.instagram_posts }} | Likes: {{ $json.instagram_likes }} | Comments: {{ $json.instagram_comments }}\n\n💼 LinkedIn:\n  Posts: {{ $json.linkedin_posts }} | Likes: {{ $json.linkedin_likes }} | Shares: {{ $json.linkedin_shares }} | Comments: {{ $json.linkedin_comments }}\n\n🏆 Total Engagement: {{ $json.total_engagement }}\n🥇 Best Platform: {{ $json.best_platform }}\n\nFull dashboard in Google Sheets.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 60],
+      "parameters": {
+        "content": "## Multi-Platform Engagement Report\nRuns weekly on Monday. Fetches engagement data in parallel from Twitter, Instagram, and LinkedIn APIs. Aggregates likes, comments, shares across all platforms, identifies the best performer, saves to a Google Sheets dashboard, and emails a comprehensive weekly report."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          {"node": "Get Twitter Engagement", "type": "main", "index": 0},
+          {"node": "Get Instagram Engagement", "type": "main", "index": 0},
+          {"node": "Get LinkedIn Engagement", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Get Twitter Engagement": {
+      "main": [[{"node": "Merge All Platforms", "type": "main", "index": 0}]]
+    },
+    "Get Instagram Engagement": {
+      "main": [[{"node": "Merge All Platforms", "type": "main", "index": 0}]]
+    },
+    "Get LinkedIn Engagement": {
+      "main": [[{"node": "Merge All Platforms", "type": "main", "index": 0}]]
+    },
+    "Merge All Platforms": {
+      "main": [[{"node": "Aggregate Report", "type": "main", "index": 0}]]
+    },
+    "Aggregate Report": {
+      "main": [[{"node": "Save Dashboard", "type": "main", "index": 0}]]
+    },
+    "Save Dashboard": {
+      "main": [[{"node": "Send Report Email", "type": "main", "index": 0}]]
+    }
+  }
+}

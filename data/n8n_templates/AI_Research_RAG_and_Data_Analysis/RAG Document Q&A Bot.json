@@ -1,0 +1,106 @@
+{
+  "name": "RAG Document Q&A Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag-qa",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "range": "A:Z",
+        "options": {}
+      },
+      "name": "Read Documents from Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst question = items[0].json.body.question;\nconst documents = items.map(item => ({\n  title: item.json.title || '',\n  content: item.json.content || '',\n  source: item.json.source || ''\n}));\n\nconst contextChunks = documents.map((doc, i) => \n  `[Source ${i+1}: ${doc.title}]\\n${doc.content}`\n).join('\\n\\n---\\n\\n');\n\nreturn [{\n  json: {\n    question,\n    context: contextChunks,\n    sourceCount: documents.length,\n    sources: documents.map(d => d.source)\n  }\n}];"
+      },
+      "name": "Build RAG Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a research assistant. Answer the question using ONLY the provided context. Include citations in [Source N] format.\n\nContext:\n{{ $json.context }}\n\nQuestion: {{ $json.question }}\n\nProvide a detailed answer with citations."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 1500
+        }
+      },
+      "name": "OpenAI Answer with Citations",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [910, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ answer: $json.message.content, sources: $('Build RAG Context').item.json.sources, sourceCount: $('Build RAG Context').item.json.sourceCount }) }}"
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "content": "## RAG Document Q&A Bot\n\nThis workflow receives a question via webhook, retrieves documents from Google Sheets as a knowledge base, builds context chunks, and uses OpenAI to answer with source citations.\n\n**Setup:**\n1. Configure Google Sheets credentials and sheet ID\n2. Add OpenAI API key\n3. Populate sheets with title, content, and source columns\n4. POST to webhook with `{\"question\": \"...\"}`"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Read Documents from Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Documents from Sheets": {
+      "main": [
+        [{ "node": "Build RAG Context", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build RAG Context": {
+      "main": [
+        [{ "node": "OpenAI Answer with Citations", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Answer with Citations": {
+      "main": [
+        [{ "node": "Webhook Response", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

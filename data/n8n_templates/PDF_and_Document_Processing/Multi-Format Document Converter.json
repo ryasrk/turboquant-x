@@ -1,0 +1,147 @@
+{
+  "name": "Multi-Format Document Converter",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "convert-document",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-upload",
+      "name": "Webhook Upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const binaryKeys = Object.keys(item.binary || {});\n  for (const key of binaryKeys) {\n    const bin = item.binary[key];\n    const ext = (bin.fileName || '').split('.').pop().toLowerCase();\n    let sourceFormat = 'unknown';\n    if (['pdf'].includes(ext) || bin.mimeType === 'application/pdf') sourceFormat = 'pdf';\n    else if (['docx', 'doc'].includes(ext)) sourceFormat = 'docx';\n    else if (['html', 'htm'].includes(ext)) sourceFormat = 'html';\n    else if (['txt'].includes(ext)) sourceFormat = 'text';\n    else if (['xlsx', 'xls'].includes(ext)) sourceFormat = 'excel';\n    const targetFormat = item.json.body?.targetFormat || (sourceFormat === 'pdf' ? 'docx' : 'pdf');\n    results.push({\n      json: {\n        fileKey: key,\n        fileName: bin.fileName,\n        sourceFormat,\n        targetFormat,\n        mimeType: bin.mimeType\n      },\n      binary: { [key]: bin }\n    });\n  }\n}\nreturn results;"
+      },
+      "id": "detect-format",
+      "name": "Code Detect Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.cloudconvert.com/v2/convert",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "={{ $json.fileKey }}"
+            },
+            {
+              "name": "input_format",
+              "value": "={{ $json.sourceFormat }}"
+            },
+            {
+              "name": "output_format",
+              "value": "={{ $json.targetFormat }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "convert-api",
+      "name": "HTTP Convert Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "={{ $('Code Detect Format').item.json.fileName.replace(/\\.[^.]+$/, '') }}.{{ $('Code Detect Format').item.json.targetFormat }}",
+        "options": {}
+      },
+      "id": "drive-save",
+      "name": "Drive Save",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [900, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook Upload').item.json.body.notifyEmail || 'user@company.com' }}",
+        "subject": "=Document Converted: {{ $('Code Detect Format').item.json.sourceFormat }} → {{ $('Code Detect Format').item.json.targetFormat }}",
+        "message": "=Your document has been converted.\n\nOriginal: {{ $('Code Detect Format').item.json.fileName }} ({{ $('Code Detect Format').item.json.sourceFormat }})\nConverted to: {{ $('Code Detect Format').item.json.targetFormat }}\n\nThe converted file has been saved to Google Drive.",
+        "options": {}
+      },
+      "id": "gmail-notify",
+      "name": "Gmail Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Multi-Format Document Converter\n\nUpload any document → Code detects format (PDF/DOCX/HTML/TXT/Excel) →\nHTTP conversion API converts to target format → saved to Drive → email notification.\n\nSupports: PDF↔DOCX, PDF↔HTML, DOCX→PDF, HTML→PDF, Excel→PDF\n\n**Setup:**\n1. Configure document conversion API (e.g., CloudConvert)\n2. Set Google Drive destination folder\n3. Set Gmail credentials\n4. POST { targetFormat: 'pdf', notifyEmail: '...' } + binary file"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Upload": {
+      "main": [
+        [{ "node": "Code Detect Format", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Detect Format": {
+      "main": [
+        [{ "node": "HTTP Convert Document", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Convert Document": {
+      "main": [
+        [{ "node": "Drive Save", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Save": {
+      "main": [
+        [{ "node": "Gmail Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

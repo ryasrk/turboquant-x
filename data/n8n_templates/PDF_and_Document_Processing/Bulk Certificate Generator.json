@@ -1,0 +1,133 @@
+{
+  "name": "Bulk Certificate Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-certificates",
+        "options": {}
+      },
+      "id": "webhook-names",
+      "name": "Webhook Names List",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst body = items[0].json.body;\nconst names = body.recipients || [];\nconst template = body.certificateType || 'Completion';\nconst course = body.courseName || 'Training Program';\nconst issueDate = body.issueDate || new Date().toISOString().split('T')[0];\nconst results = [];\nfor (const recipient of names) {\n  const html = `<!DOCTYPE html><html><head><style>\n    body { font-family: 'Georgia', serif; text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; }\n    .cert { background: white; border: 3px solid gold; padding: 60px; margin: 20px auto; max-width: 800px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }\n    h1 { color: #2c3e50; font-size: 36px; border-bottom: 2px solid gold; padding-bottom: 10px; }\n    .name { font-size: 28px; color: #8e44ad; margin: 30px 0; }\n    .details { font-size: 16px; color: #555; }\n  </style></head><body><div class=\"cert\">\n    <h1>Certificate of ${template}</h1>\n    <p class=\"details\">This is to certify that</p>\n    <p class=\"name\">${recipient.name}</p>\n    <p class=\"details\">has successfully completed</p>\n    <p class=\"name\" style=\"font-size:22px\">${course}</p>\n    <p class=\"details\">Issued on: ${issueDate}</p>\n    <br/><p class=\"details\">Certificate ID: CERT-${Date.now()}-${Math.random().toString(36).substring(7)}</p>\n  </div></body></html>`;\n  results.push({ json: { html, recipientName: recipient.name, recipientEmail: recipient.email, course, issueDate } });\n}\nreturn results;"
+      },
+      "id": "generate-html",
+      "name": "Code Generate HTML Certificates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.html2pdf.app/v1/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ html: $json.html, apiKey: 'YOUR_API_KEY' }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "html-to-pdf",
+      "name": "HTTP to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "name": "=Certificate_{{ $json.recipientName }}_{{ $json.issueDate }}",
+        "options": {}
+      },
+      "id": "drive-save",
+      "name": "Drive Save",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [900, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipientEmail }}",
+        "subject": "=Your Certificate of Completion: {{ $json.course }}",
+        "message": "=Dear {{ $json.recipientName }},\n\nCongratulations! Your certificate for {{ $json.course }} is attached.\n\nIssued on: {{ $json.issueDate }}\n\nBest regards,\nTraining Team",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{}]
+          }
+        }
+      },
+      "id": "gmail-per-recipient",
+      "name": "Gmail Per Recipient",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Bulk Certificate Generator\n\nReceives a list of names/emails via webhook →\nCode generates styled HTML certificates per person →\nConverts to PDF → saves to Drive → emails each recipient.\n\n**Setup:**\n1. Configure HTML-to-PDF API key\n2. Set Google Drive folder\n3. Set Gmail credentials\n4. POST { recipients: [{name, email}], courseName, certificateType, issueDate }"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Names List": {
+      "main": [
+        [{ "node": "Code Generate HTML Certificates", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Generate HTML Certificates": {
+      "main": [
+        [{ "node": "HTTP to PDF", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP to PDF": {
+      "main": [
+        [{ "node": "Drive Save", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drive Save": {
+      "main": [
+        [{ "node": "Gmail Per Recipient", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

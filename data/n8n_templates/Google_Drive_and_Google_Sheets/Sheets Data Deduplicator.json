@@ -1,0 +1,104 @@
+{
+  "name": "Sheets Data Deduplicator",
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 6 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Sheet Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Find Duplicates",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst seen = new Map();\nconst unique = [];\nconst duplicates = [];\n\nfor (const item of items) {\n  const key = JSON.stringify(item.json);\n  if (seen.has(key)) {\n    duplicates.push(item.json);\n  } else {\n    seen.set(key, true);\n    unique.push(item.json);\n  }\n}\n\nreturn [{ json: { unique, duplicates, totalRows: items.length, uniqueCount: unique.length, duplicateCount: duplicates.length } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Clear Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "clear",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Write Deduped Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1180, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1400, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Dedup Report: {{ $json.duplicateCount }} duplicates removed",
+        "message": "=Deduplication completed.\n\nTotal rows: {{ $json.totalRows }}\nUnique rows: {{ $json.uniqueCount }}\nDuplicates removed: {{ $json.duplicateCount }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1300,
+        "height": 100,
+        "content": "### Sheets Data Deduplicator\nScheduled workflow that reads a Google Sheet, identifies and removes duplicate rows, writes back clean data, and emails a summary report."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Read Sheet Data", "type": "main", "index": 0 }]] },
+    "Read Sheet Data": { "main": [[{ "node": "Find Duplicates", "type": "main", "index": 0 }]] },
+    "Find Duplicates": { "main": [[{ "node": "Clear Sheet", "type": "main", "index": 0 }]] },
+    "Clear Sheet": { "main": [[{ "node": "Write Deduped Data", "type": "main", "index": 0 }]] },
+    "Write Deduped Data": { "main": [[{ "node": "Send Email Report", "type": "main", "index": 0 }]] }
+  }
+}

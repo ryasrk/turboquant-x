@@ -1,0 +1,99 @@
+{
+  "name": "Data Quality Scoring Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "data-quality-score",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst dataset = items[0].json.body.data || items[0].json.body.dataset || [];\n\nif (!Array.isArray(dataset) || dataset.length === 0) {\n  return [{ json: { error: 'No dataset provided', scores: {} } }];\n}\n\nconst columns = Object.keys(dataset[0]);\nconst totalRows = dataset.length;\n\n// Completeness: % of non-null/empty values\nconst completeness = {};\nfor (const col of columns) {\n  const filled = dataset.filter(row => row[col] !== null && row[col] !== undefined && row[col] !== '').length;\n  completeness[col] = parseFloat((filled / totalRows * 100).toFixed(1));\n}\nconst avgCompleteness = parseFloat((Object.values(completeness).reduce((a, b) => a + b, 0) / columns.length).toFixed(1));\n\n// Consistency: check for mixed types per column\nconst consistency = {};\nfor (const col of columns) {\n  const types = new Set(dataset.map(row => typeof row[col]));\n  consistency[col] = types.size === 1 ? 100 : parseFloat((100 - (types.size - 1) * 25).toFixed(1));\n}\nconst avgConsistency = parseFloat((Object.values(consistency).reduce((a, b) => a + b, 0) / columns.length).toFixed(1));\n\n// Uniqueness: % of unique values per column\nconst uniqueness = {};\nfor (const col of columns) {\n  const values = dataset.map(row => row[col]);\n  const unique = new Set(values).size;\n  uniqueness[col] = parseFloat((unique / totalRows * 100).toFixed(1));\n}\n\n// Duplicates: full-row duplicates\nconst rowStrings = dataset.map(row => JSON.stringify(row));\nconst uniqueRows = new Set(rowStrings).size;\nconst duplicateRate = parseFloat(((1 - uniqueRows / totalRows) * 100).toFixed(1));\n\nconst overallScore = parseFloat(((avgCompleteness + avgConsistency + (100 - duplicateRate)) / 3).toFixed(1));\n\nreturn [{\n  json: {\n    totalRows,\n    totalColumns: columns.length,\n    overallScore,\n    completeness: { average: avgCompleteness, byColumn: completeness },\n    consistency: { average: avgConsistency, byColumn: consistency },\n    uniqueness: { byColumn: uniqueness },\n    duplicateRate,\n    duplicateRows: totalRows - uniqueRows,\n    columnNames: columns\n  }\n}];"
+      },
+      "name": "Calculate Quality Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this data quality scorecard and provide actionable recommendations:\n\n{{ JSON.stringify($json, null, 2) }}\n\nProvide:\n1. **Overall Assessment** — grade (A-F) and summary\n2. **Critical Issues** — quality problems that need immediate attention\n3. **Recommendations** — specific steps to improve data quality\n4. **Priority Actions** — ordered by impact"
+            }
+          ]
+        },
+        "options": { "temperature": 0.2, "maxTokens": 1500 }
+      },
+      "name": "OpenAI Recommendations",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ new Date().toISOString() }}",
+            "overall_score": "={{ $('Calculate Quality Scores').item.json.overallScore }}",
+            "completeness": "={{ $('Calculate Quality Scores').item.json.completeness.average }}",
+            "consistency": "={{ $('Calculate Quality Scores').item.json.consistency.average }}",
+            "duplicate_rate": "={{ $('Calculate Quality Scores').item.json.duplicateRate }}",
+            "total_rows": "={{ $('Calculate Quality Scores').item.json.totalRows }}",
+            "recommendations": "={{ $json.message.content }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Scorecard",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Data Quality Scoring Pipeline\n\nReceives a dataset via webhook, calculates completeness, consistency, uniqueness, and duplicate rates, then uses OpenAI to interpret results and provide recommendations. Results are saved as a scorecard.\n\n**Setup:**\n1. Add OpenAI and Google Sheets credentials\n2. POST: `{\"data\": [{\"col1\": \"val\", \"col2\": \"val\"}, ...]}`\n3. Returns overall quality score and per-column metrics"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Calculate Quality Scores", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Quality Scores": {
+      "main": [
+        [{ "node": "OpenAI Recommendations", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Recommendations": {
+      "main": [
+        [{ "node": "Write Scorecard", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "name": "Google Drive File Backup to Email",
+  "nodes": [
+    {
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "List Modified Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "list",
+        "folderId": { "__rl": true, "mode": "list", "value": "" },
+        "options": {
+          "fields": ["name", "mimeType", "modifiedTime", "size"]
+        }
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Filter This Week",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst oneWeekAgo = new Date();\noneWeekAgo.setDate(oneWeekAgo.getDate() - 7);\n\nconst recentFiles = items.filter(item => {\n  const modTime = new Date(item.json.modifiedTime || item.json.modifiedDate);\n  return modTime >= oneWeekAgo;\n});\n\nreturn recentFiles.length > 0 ? recentFiles : [{ json: { noFiles: true, message: 'No files modified this week' } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Download Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "download",
+        "fileId": { "__rl": true, "mode": "id", "value": "={{ $json.id }}" },
+        "options": {}
+      },
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail with Attachment",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1180, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Weekly Drive Backup - {{ new Date().toISOString().split('T')[0] }}",
+        "message": "=Attached are the files modified this week from your Google Drive.\n\nFiles backed up: {{ $input.all().length }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{ "property": "data" }]
+          }
+        }
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Log to Backup Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1400, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "BackupLog" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ new Date().toISOString() }}",
+            "filesCount": "={{ $input.all().length }}",
+            "status": "backed_up"
+          }
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1300,
+        "height": 100,
+        "content": "### Google Drive File Backup to Email\nWeekly workflow that finds files modified in the past week, downloads them, emails them as attachments, and logs the backup to a Google Sheet."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": { "main": [[{ "node": "List Modified Files", "type": "main", "index": 0 }]] },
+    "List Modified Files": { "main": [[{ "node": "Filter This Week", "type": "main", "index": 0 }]] },
+    "Filter This Week": { "main": [[{ "node": "Download Files", "type": "main", "index": 0 }]] },
+    "Download Files": { "main": [[{ "node": "Gmail with Attachment", "type": "main", "index": 0 }]] },
+    "Gmail with Attachment": { "main": [[{ "node": "Log to Backup Sheet", "type": "main", "index": 0 }]] }
+  }
+}

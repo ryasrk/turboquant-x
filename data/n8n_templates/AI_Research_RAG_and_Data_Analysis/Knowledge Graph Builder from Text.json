@@ -1,0 +1,124 @@
+{
+  "name": "Knowledge Graph Builder from Text",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "build-knowledge-graph",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Extract all entities and relationships from this text. Return valid JSON:\n\n{\n  \"entities\": [{\"id\": \"e1\", \"name\": \"...\", \"type\": \"Person|Organization|Concept|Place|Event|Technology\", \"description\": \"brief\"}],\n  \"relationships\": [{\"source\": \"e1\", \"target\": \"e2\", \"type\": \"works_for|created|related_to|part_of|uses|located_in\", \"description\": \"brief\"}]\n}\n\nText:\n{{ $json.body.text }}"
+            }
+          ]
+        },
+        "options": { "temperature": 0.1, "maxTokens": 3000 }
+      },
+      "name": "OpenAI Extract Entities",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [470, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst content = items[0].json.message.content;\n\nlet graph;\ntry {\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/s);\n  graph = jsonMatch ? JSON.parse(jsonMatch[0]) : { entities: [], relationships: [] };\n} catch (e) {\n  graph = { entities: [], relationships: [] };\n}\n\n// Build adjacency info\nconst entityMap = {};\nfor (const entity of graph.entities) {\n  entityMap[entity.id] = { ...entity, connections: 0 };\n}\n\nfor (const rel of graph.relationships) {\n  if (entityMap[rel.source]) entityMap[rel.source].connections++;\n  if (entityMap[rel.target]) entityMap[rel.target].connections++;\n}\n\n// Prepare nodes sheet data\nconst nodes = graph.entities.map(e => ({\n  id: e.id,\n  name: e.name,\n  type: e.type,\n  description: e.description || '',\n  connections: entityMap[e.id] ? entityMap[e.id].connections : 0\n}));\n\n// Prepare edges sheet data\nconst edges = graph.relationships.map((r, i) => ({\n  edge_id: `r${i+1}`,\n  source_id: r.source,\n  source_name: entityMap[r.source] ? entityMap[r.source].name : r.source,\n  target_id: r.target,\n  target_name: entityMap[r.target] ? entityMap[r.target].name : r.target,\n  relationship: r.type,\n  description: r.description || ''\n}));\n\nreturn [{\n  json: {\n    entityCount: nodes.length,\n    relationshipCount: edges.length,\n    nodes,\n    edges,\n    entityTypes: [...new Set(nodes.map(n => n.type))],\n    relationshipTypes: [...new Set(edges.map(e => e.relationship))]\n  }\n}];"
+      },
+      "name": "Build Graph Structure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": "Nodes",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.nodes.map(n => n.id).join('\\n') }}",
+            "name": "={{ $json.nodes.map(n => n.name).join('\\n') }}",
+            "type": "={{ $json.nodes.map(n => n.type).join('\\n') }}",
+            "connections": "={{ $json.nodes.map(n => n.connections).join('\\n') }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Nodes to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": "Edges",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source": "={{ $json.edges.map(e => e.source_name).join('\\n') }}",
+            "target": "={{ $json.edges.map(e => e.target_name).join('\\n') }}",
+            "relationship": "={{ $json.edges.map(e => e.relationship).join('\\n') }}",
+            "description": "={{ $json.edges.map(e => e.description).join('\\n') }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Write Edges to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [910, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Knowledge Graph Builder from Text\n\nReceives text via webhook, uses OpenAI to extract entities and relationships, builds a graph structure, and outputs nodes and edges to separate Google Sheets tabs.\n\n**Setup:**\n1. Configure Google Sheets with 'Nodes' and 'Edges' sheets\n2. Add OpenAI API key\n3. POST: `{\"text\": \"Your text content here...\"}`"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "OpenAI Extract Entities", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Extract Entities": {
+      "main": [
+        [{ "node": "Build Graph Structure", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Graph Structure": {
+      "main": [
+        [
+          { "node": "Write Nodes to Sheets", "type": "main", "index": 0 },
+          { "node": "Write Edges to Sheets", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

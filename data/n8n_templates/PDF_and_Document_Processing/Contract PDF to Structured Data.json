@@ -1,0 +1,145 @@
+{
+  "name": "Contract PDF to Structured Data",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contract-parse",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-contract",
+      "name": "Webhook Contract File",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/image",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "language",
+              "value": "eng"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ocr-extract",
+      "name": "HTTP OCR Extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = item.json.ParsedResults?.[0]?.ParsedText || '';\n  const effectiveDate = (text.match(/(?:effective|start)\\s*date\\s*:?\\s*(\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{2,4})/i) || [])[1] || '';\n  const expiryDate = (text.match(/(?:expiry|end|termination)\\s*date\\s*:?\\s*(\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{2,4})/i) || [])[1] || '';\n  const parties = text.match(/(?:between|party\\s*[ab12])\\s*:?\\s*([A-Z][A-Za-z\\s&.,]+(?:Ltd|LLC|Inc|Corp|Co)?)/gi) || [];\n  const amounts = text.match(/\\$[\\d,]+\\.?\\d*/g) || [];\n  const terms = text.match(/(?:term|duration)\\s*:?\\s*(.+?)(?:\\.|\\n)/i) || [];\n  results.push({\n    json: {\n      effectiveDate,\n      expiryDate,\n      parties: parties.map(p => p.trim()),\n      totalAmounts: amounts,\n      termDuration: (terms[1] || '').trim(),\n      contractType: (text.match(/(?:agreement|contract)\\s+(?:type|for)\\s*:?\\s*(.+?)(?:\\.|\\n)/i) || [])[1] || 'General',\n      extractedSections: text.substring(0, 2000)\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "regex-extract",
+      "name": "Code Regex Extract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-structured",
+      "name": "Sheets Structured Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.notifyEmail || 'legal@company.com' }}",
+        "subject": "Contract Parsed: {{ $json.contractType }}",
+        "message": "=Contract has been parsed and structured.\n\nParties: {{ $json.parties.join(', ') }}\nEffective Date: {{ $json.effectiveDate }}\nExpiry Date: {{ $json.expiryDate }}\nTerm: {{ $json.termDuration }}\nAmounts Found: {{ $json.totalAmounts.join(', ') }}\n\nData has been added to Google Sheets.",
+        "options": {}
+      },
+      "id": "gmail-notify",
+      "name": "Gmail Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Contract PDF to Structured Data\n\nUpload a contract PDF → OCR extracts text → Code node uses regex to extract:\n- Effective/expiry dates\n- Parties involved\n- Amounts\n- Term duration\n- Contract type\n\nStructured data saved to Sheets, notification sent via Gmail.\n\n**Setup:**\n1. Configure OCR API key\n2. Set Google Sheets document\n3. Set Gmail credentials"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Contract File": {
+      "main": [
+        [{ "node": "HTTP OCR Extract", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP OCR Extract": {
+      "main": [
+        [{ "node": "Code Regex Extract", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Regex Extract": {
+      "main": [
+        [{ "node": "Sheets Structured Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Structured Data": {
+      "main": [
+        [{ "node": "Gmail Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

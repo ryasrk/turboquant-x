@@ -1,0 +1,171 @@
+{
+  "name": "CI CD Pipeline Failure Notifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cicd-failure-webhook",
+        "options": {}
+      },
+      "name": "Webhook from CI CD",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\n// Support GitHub Actions and GitLab CI webhook payloads\nlet parsed = {};\n\nif (body.action && body.workflow_run) {\n  // GitHub Actions\n  const run = body.workflow_run;\n  parsed = {\n    source: 'GitHub Actions',\n    repo: run.repository?.full_name || body.repository?.full_name || 'unknown',\n    workflow: run.name || 'unknown',\n    branch: run.head_branch || 'unknown',\n    commit: run.head_sha?.substring(0, 7) || 'unknown',\n    commitMessage: run.head_commit?.message || 'N/A',\n    author: run.actor?.login || run.triggering_actor?.login || 'unknown',\n    status: run.conclusion || run.status || 'unknown',\n    url: run.html_url || '',\n    runId: run.id || '',\n    failedAt: run.updated_at || new Date().toISOString()\n  };\n} else if (body.object_kind === 'pipeline') {\n  // GitLab CI\n  parsed = {\n    source: 'GitLab CI',\n    repo: body.project?.path_with_namespace || 'unknown',\n    workflow: body.object_attributes?.name || `Pipeline #${body.object_attributes?.id}`,\n    branch: body.object_attributes?.ref || 'unknown',\n    commit: body.commit?.id?.substring(0, 7) || 'unknown',\n    commitMessage: body.commit?.message || 'N/A',\n    author: body.user?.name || body.user?.username || 'unknown',\n    status: body.object_attributes?.status || 'unknown',\n    url: body.object_attributes?.url || body.project?.web_url || '',\n    runId: body.object_attributes?.id || '',\n    failedAt: body.object_attributes?.finished_at || new Date().toISOString()\n  };\n} else {\n  parsed = {\n    source: 'Unknown CI',\n    repo: body.repo || body.repository || 'unknown',\n    workflow: body.workflow || body.pipeline || 'unknown',\n    branch: body.branch || body.ref || 'unknown',\n    commit: body.commit || body.sha || 'unknown',\n    commitMessage: body.message || 'N/A',\n    author: body.author || body.user || 'unknown',\n    status: body.status || body.conclusion || 'failed',\n    url: body.url || '',\n    runId: body.run_id || body.id || '',\n    failedAt: new Date().toISOString()\n  };\n}\n\nparsed.timestamp = new Date().toISOString();\nreturn [{ json: parsed }];"
+      },
+      "name": "Parse CI CD Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-failure",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "failure",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "condition-failed",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "failed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "name": "Is Failure?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "channel": "",
+        "text": "=:rotating_light: *CI/CD Pipeline Failure*\n\nSource: {{ $json.source }}\nRepo: `{{ $json.repo }}`\nWorkflow: {{ $json.workflow }}\nBranch: `{{ $json.branch }}`\nCommit: `{{ $json.commit }}`\nMessage: {{ $json.commitMessage }}\nAuthor: {{ $json.author }}\n\n:link: {{ $json.url }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Failure Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [920, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "CICDFailures"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "source": "={{ $json.source }}",
+            "repo": "={{ $json.repo }}",
+            "workflow": "={{ $json.workflow }}",
+            "branch": "={{ $json.branch }}",
+            "commit": "={{ $json.commit }}",
+            "commit_message": "={{ $json.commitMessage }}",
+            "author": "={{ $json.author }}",
+            "status": "={{ $json.status }}",
+            "url": "={{ $json.url }}",
+            "run_id": "={{ $json.runId }}"
+          }
+        }
+      },
+      "name": "Google Sheets Failure Tracking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [920, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## CI/CD Pipeline Failure Notifier\n\n**Trigger:** Webhook from GitHub Actions or GitLab CI\n**Function:** Parses failure payload, extracts error context, notifies team.\n\n**Supports:**\n- GitHub Actions (workflow_run events)\n- GitLab CI (pipeline events)\n- Generic CI payloads\n\n**Notifications:** Slack channel with full error context.\n**Tracking:** All failures logged to Google Sheets.\n\n### Setup\n1. Copy webhook URL and add to CI/CD pipeline notifications\n2. Configure Slack credentials and channel\n3. Set Google Sheets document ID\n4. For GitHub Actions: set up workflow_run webhook event\n5. For GitLab CI: set up pipeline webhook",
+        "width": 440,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -100]
+    }
+  ],
+  "connections": {
+    "Webhook from CI CD": {
+      "main": [
+        [
+          {
+            "node": "Parse CI CD Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CI CD Payload": {
+      "main": [
+        [
+          {
+            "node": "Is Failure?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Failure?": {
+      "main": [
+        [
+          {
+            "node": "Slack Failure Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets Failure Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "name": "Sheets Data Validation and Cleanup",
+  "nodes": [
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [300, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "days", "daysInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Read Raw Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "RawData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Validate and Clean",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst cleaned = [];\nconst errors = [];\n\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst phoneRegex = /^[\\+]?[0-9\\s\\-\\(\\)]{7,15}$/;\nconst dateRegex = /^\\d{4}-\\d{2}-\\d{2}$/;\n\nfor (let i = 0; i < items.length; i++) {\n  const row = { ...items[i].json };\n  const rowErrors = [];\n  const rowNum = i + 2; // +2 for header and 0-index\n\n  // Email validation\n  if (row.email) {\n    row.email = row.email.trim().toLowerCase();\n    if (!emailRegex.test(row.email)) {\n      rowErrors.push({ row: rowNum, field: 'email', value: row.email, issue: 'Invalid email format' });\n    }\n  }\n\n  // Phone validation\n  if (row.phone) {\n    row.phone = row.phone.replace(/[^0-9+\\-\\s()]/g, '').trim();\n    if (!phoneRegex.test(row.phone)) {\n      rowErrors.push({ row: rowNum, field: 'phone', value: row.phone, issue: 'Invalid phone format' });\n    }\n  }\n\n  // Date validation\n  if (row.date) {\n    const d = row.date.trim();\n    if (!dateRegex.test(d) || isNaN(new Date(d).getTime())) {\n      rowErrors.push({ row: rowNum, field: 'date', value: d, issue: 'Invalid date format (expected YYYY-MM-DD)' });\n    }\n  }\n\n  // Trim all string fields\n  for (const key of Object.keys(row)) {\n    if (typeof row[key] === 'string') row[key] = row[key].trim();\n  }\n\n  cleaned.push(row);\n  errors.push(...rowErrors);\n}\n\nreturn [{ json: { cleaned, errors, totalRows: items.length, errorCount: errors.length, cleanedAt: new Date().toISOString() } }];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Cleaned Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "CleanedData" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Error Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1180, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Data Validation Report - {{ $json.errorCount }} errors found",
+        "message": "=Data Validation & Cleanup Report\n\nTotal rows processed: {{ $json.totalRows }}\nErrors found: {{ $json.errorCount }}\nCleaned at: {{ $json.cleanedAt }}\n\nErrors:\n{{ JSON.stringify($json.errors, null, 2) }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Sheets Data Validation and Cleanup\nDaily workflow that reads raw data, validates email formats, phone numbers, and dates, trims whitespace, writes cleaned data back, and emails an error report."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Read Raw Data", "type": "main", "index": 0 }]] },
+    "Read Raw Data": { "main": [[{ "node": "Validate and Clean", "type": "main", "index": 0 }]] },
+    "Validate and Clean": { "main": [[{ "node": "Write Cleaned Data", "type": "main", "index": 0 }]] },
+    "Write Cleaned Data": { "main": [[{ "node": "Email Error Report", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "name": "AI Trend Spotter from Social Data",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] }
+      },
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.reddit.com/r/technology/hot.json?limit=25",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Fetch Reddit Tech",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Fetch HN Top IDs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Process Reddit data\nconst redditData = $('Fetch Reddit Tech').first().json;\nconst redditPosts = ((redditData.data || {}).children || []).map(p => ({\n  source: 'reddit',\n  title: p.data ? p.data.title : '',\n  score: p.data ? p.data.score : 0,\n  comments: p.data ? p.data.num_comments : 0,\n  subreddit: p.data ? p.data.subreddit : '',\n  created: p.data ? new Date(p.data.created_utc * 1000).toISOString() : ''\n}));\n\n// HN IDs (we'll work with what we have)\nconst hnIds = $('Fetch HN Top IDs').first().json || [];\n\n// Aggregate mentions by keyword\nconst allTitles = redditPosts.map(p => p.title).join(' ');\nconst words = allTitles.toLowerCase().split(/\\W+/).filter(w => w.length > 4);\nconst stopWords = new Set(['about', 'after', 'being', 'could', 'would', 'should', 'their', 'there', 'these', 'those', 'which', 'where', 'while', 'other', 'every', 'under', 'still', 'first']);\nconst wordFreq = {};\nfor (const w of words) {\n  if (!stopWords.has(w)) wordFreq[w] = (wordFreq[w] || 0) + 1;\n}\n\nconst trendingKeywords = Object.entries(wordFreq)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 20)\n  .map(([word, count]) => ({ word, count }));\n\nconst topPosts = redditPosts.sort((a, b) => b.score - a.score).slice(0, 10);\n\nreturn [{\n  json: {\n    date: new Date().toISOString(),\n    totalPostsAnalyzed: redditPosts.length,\n    trendingKeywords,\n    topPosts,\n    hnStoriesAvailable: Array.isArray(hnIds) ? hnIds.length : 0\n  }\n}];"
+      },
+      "name": "Aggregate Mentions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze these social media trends and identify emerging patterns:\n\nTrending Keywords:\n{{ JSON.stringify($json.trendingKeywords, null, 2) }}\n\nTop Posts:\n{{ JSON.stringify($json.topPosts, null, 2) }}\n\nProvide:\n1. **Top 5 Emerging Trends** — what topics are gaining momentum\n2. **Sentiment Analysis** — overall mood around each trend\n3. **Potential Impact** — business/tech implications\n4. **Recommended Actions** — how to capitalize on these trends\n5. **Watch List** — keywords to monitor next week"
+            }
+          ]
+        },
+        "options": { "temperature": 0.3, "maxTokens": 2000 }
+      },
+      "name": "OpenAI Identify Trends",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [910, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $('Aggregate Mentions').item.json.date }}",
+            "top_keywords": "={{ $('Aggregate Mentions').item.json.trendingKeywords.slice(0, 10).map(k => `${k.word}(${k.count})`).join(', ') }}",
+            "posts_analyzed": "={{ $('Aggregate Mentions').item.json.totalPostsAnalyzed }}",
+            "trend_analysis": "={{ $json.message.content }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Update Dashboard Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1130, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=📈 *Daily Trend Report*\n\n{{ $json.message.content.substring(0, 3000) }}\n\nPosts analyzed: {{ $('Aggregate Mentions').item.json.totalPostsAnalyzed }}"
+      },
+      "name": "Telegram Update",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1130, 400],
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## AI Trend Spotter from Social Data\n\nDaily workflow that fetches posts from Reddit and Hacker News, aggregates keyword mentions, uses OpenAI to identify emerging trends, and updates a dashboard sheet plus Telegram.\n\n**Setup:**\n1. Add OpenAI, Google Sheets, and Telegram credentials\n2. Set Telegram chat ID\n3. Optionally add more social API sources\n4. Reddit and HN APIs are free — no keys"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [
+          { "node": "Fetch Reddit Tech", "type": "main", "index": 0 },
+          { "node": "Fetch HN Top IDs", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Reddit Tech": {
+      "main": [
+        [{ "node": "Aggregate Mentions", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch HN Top IDs": {
+      "main": [
+        [{ "node": "Aggregate Mentions", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Mentions": {
+      "main": [
+        [{ "node": "OpenAI Identify Trends", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Identify Trends": {
+      "main": [
+        [
+          { "node": "Update Dashboard Sheet", "type": "main", "index": 0 },
+          { "node": "Telegram Update", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

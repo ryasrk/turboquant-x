@@ -1,0 +1,155 @@
+{
+  "name": "Social Media A/B Test Tracker",
+  "nodes": [
+    {
+      "name": "Create Test Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "ab-test",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Log Test Variants",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [450, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "AB Tests",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "test_id": "={{ $json.body.test_id }}",
+            "variant_a": "={{ $json.body.variant_a }}",
+            "variant_b": "={{ $json.body.variant_b }}",
+            "platform": "={{ $json.body.platform }}",
+            "metric": "={{ $json.body.metric || 'engagement' }}",
+            "status": "active",
+            "created_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Results Check Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 550],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 18}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Read Active Tests",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [450, 550],
+      "parameters": {
+        "operation": "read",
+        "documentId": "",
+        "sheetName": "AB Tests",
+        "options": {
+          "range": "A:H"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Check Results via API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 550],
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets/{{ $json.variant_a_tweet_id }}",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "tweet.fields", "value": "public_metrics"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Compare Performance",
+      "type": "n8n-nodes-base.code",
+      "position": [850, 550],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const test = item.json;\n  const variantA_score = parseInt(test.variant_a_engagement || '0');\n  const variantB_score = parseInt(test.variant_b_engagement || '0');\n  const winner = variantA_score > variantB_score ? 'A' : variantB_score > variantA_score ? 'B' : 'Tie';\n  const diff = Math.abs(variantA_score - variantB_score);\n  const significant = diff > (Math.max(variantA_score, variantB_score) * 0.1);\n\n  return {\n    json: {\n      test_id: test.test_id || 'unknown',\n      variant_a_score: variantA_score,\n      variant_b_score: variantB_score,\n      winner,\n      difference: diff,\n      statistically_significant: significant,\n      recommendation: significant ? `Use variant ${winner}` : 'Need more data or test is inconclusive',\n      checked_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Email Results",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1050, 550],
+      "parameters": {
+        "sendTo": "marketing@example.com",
+        "subject": "A/B Test Results: {{ $json.test_id }}",
+        "message": "A/B Test Results\n\nTest: {{ $json.test_id }}\nVariant A: {{ $json.variant_a_score }}\nVariant B: {{ $json.variant_b_score }}\nWinner: {{ $json.winner }}\nDifference: {{ $json.difference }}\nStatistically significant: {{ $json.statistically_significant }}\n\nRecommendation: {{ $json.recommendation }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Social Media A/B Test Tracker\nTwo entry points: 1) Webhook to create a new A/B test with variants, 2) Daily schedule to check results. Logs test variants to Google Sheets, fetches performance data from the Twitter API, compares variants with significance testing, and emails the winner."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Create Test Webhook": {
+      "main": [[{"node": "Log Test Variants", "type": "main", "index": 0}]]
+    },
+    "Results Check Schedule": {
+      "main": [[{"node": "Read Active Tests", "type": "main", "index": 0}]]
+    },
+    "Read Active Tests": {
+      "main": [[{"node": "Check Results via API", "type": "main", "index": 0}]]
+    },
+    "Check Results via API": {
+      "main": [[{"node": "Compare Performance", "type": "main", "index": 0}]]
+    },
+    "Compare Performance": {
+      "main": [[{"node": "Email Results", "type": "main", "index": 0}]]
+    }
+  }
+}

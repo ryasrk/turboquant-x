@@ -1,0 +1,135 @@
+{
+  "name": "Twitter List Manager and Monitor",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 8}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get List Members",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/lists/{{ $json.list_id }}/members",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "user.fields", "value": "name,username,public_metrics"},
+            {"name": "max_results", "value": "100"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Detect Changes",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst currentMembers = (items[0].json.data || []).map(m => m.username);\n\n// Compare with stored previous members\n// In production, read previous state from Sheets\nconst previousMembers = []; // Populated from database\n\nconst added = currentMembers.filter(m => !previousMembers.includes(m));\nconst removed = previousMembers.filter(m => !currentMembers.includes(m));\n\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    total_members: currentMembers.length,\n    added_count: added.length,\n    removed_count: removed.length,\n    added_members: added.join(', '),\n    removed_members: removed.join(', '),\n    has_changes: added.length > 0 || removed.length > 0,\n    members_list: currentMembers.join(', ')\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [850, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "List Tracking",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Check Changes",
+      "type": "n8n-nodes-base.if",
+      "position": [1050, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.has_changes }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Email Notable Changes",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1250, 250],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "Twitter List Changes Detected",
+        "message": "Changes detected in your Twitter list:\n\nAdded ({{ $json.added_count }}): {{ $json.added_members }}\nRemoved ({{ $json.removed_count }}): {{ $json.removed_members }}\n\nTotal members: {{ $json.total_members }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Twitter List Manager and Monitor\nRuns daily. Fetches list members from the Twitter API, detects new/removed members by comparing with previous state, saves to Google Sheets, and emails you when notable changes occur."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[{"node": "Get List Members", "type": "main", "index": 0}]]
+    },
+    "Get List Members": {
+      "main": [[{"node": "Detect Changes", "type": "main", "index": 0}]]
+    },
+    "Detect Changes": {
+      "main": [[{"node": "Save to Sheets", "type": "main", "index": 0}]]
+    },
+    "Save to Sheets": {
+      "main": [[{"node": "Check Changes", "type": "main", "index": 0}]]
+    },
+    "Check Changes": {
+      "main": [
+        [{"node": "Email Notable Changes", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  }
+}

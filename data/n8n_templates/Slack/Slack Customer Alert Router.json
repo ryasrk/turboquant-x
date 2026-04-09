@@ -1,0 +1,299 @@
+{
+  "name": "Slack Customer Alert Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "customer-alert",
+        "options": {}
+      },
+      "name": "CRM Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst alert = items[0].json;\n\nreturn [{json: {\n  severity: (alert.severity || 'low').toLowerCase(),\n  customer: alert.customer || 'Unknown',\n  issue: alert.issue || '',\n  description: alert.description || '',\n  accountValue: alert.accountValue || 0,\n  assignee: alert.assignee || '',\n  crmLink: alert.crmLink || '',\n  timestamp: new Date().toISOString()\n}}];"
+      },
+      "name": "Parse Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "critical",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Critical"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "high",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "High"
+            }
+          ],
+          "fallbackOutput": {
+            "renameOutput": true,
+            "outputKey": "Normal"
+          }
+        }
+      },
+      "name": "Switch Severity",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#critical-alerts",
+          "mode": "name"
+        },
+        "text": ":rotating_light: *CRITICAL CUSTOMER ALERT*\n\n*Customer:* {{ $json.customer }}\n*Issue:* {{ $json.issue }}\n*Account Value:* ${{ $json.accountValue }}\n*Details:* {{ $json.description }}\n*CRM:* {{ $json.crmLink }}\n\n@channel — Immediate attention required!",
+        "otherOptions": {}
+      },
+      "name": "Post Critical",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [960, 180],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#support-escalations",
+          "mode": "name"
+        },
+        "text": ":warning: *High Priority Alert*\n\n*Customer:* {{ $json.customer }}\n*Issue:* {{ $json.issue }}\n*Details:* {{ $json.description }}\n*CRM:* {{ $json.crmLink }}",
+        "otherOptions": {}
+      },
+      "name": "Post High",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [960, 340],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#support",
+          "mode": "name"
+        },
+        "text": ":ticket: *Support Ticket*\n\n*Customer:* {{ $json.customer }}\n*Issue:* {{ $json.issue }}\n*Details:* {{ $json.description }}",
+        "otherOptions": {}
+      },
+      "name": "Post Normal",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [960, 500],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $json.assignee }}",
+          "mode": "id"
+        },
+        "text": ":bell: You've been assigned a *{{ $json.severity }}* customer issue.\n\n*Customer:* {{ $json.customer }}\n*Issue:* {{ $json.issue }}\n*CRM:* {{ $json.crmLink }}",
+        "otherOptions": {}
+      },
+      "name": "DM Assignee",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1200, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Alert Tracking",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Tracking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1420, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Customer Alert Router\n\nRoute customer alerts by severity level.\n\n**Flow:**\n1. CRM triggers webhook\n2. Parse and normalize alert data\n3. Switch by severity:\n   - Critical → #critical-alerts\n   - High → #support-escalations\n   - Normal → #support\n4. DM assigned support agent\n5. Log to Google Sheets\n\n**Webhook payload:**\n```json\n{\n  \"severity\": \"critical\",\n  \"customer\": \"Acme Corp\",\n  \"issue\": \"Service outage\",\n  \"assignee\": \"U12345\",\n  \"accountValue\": 50000\n}\n```",
+        "width": 340,
+        "height": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 160]
+    }
+  ],
+  "connections": {
+    "CRM Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Alert": {
+      "main": [
+        [
+          {
+            "node": "Switch Severity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Severity": {
+      "main": [
+        [
+          {
+            "node": "Post Critical",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post High",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post Normal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Critical": {
+      "main": [
+        [
+          {
+            "node": "DM Assignee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post High": {
+      "main": [
+        [
+          {
+            "node": "DM Assignee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Normal": {
+      "main": [
+        [
+          {
+            "node": "DM Assignee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DM Assignee": {
+      "main": [
+        [
+          {
+            "node": "Sheets Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

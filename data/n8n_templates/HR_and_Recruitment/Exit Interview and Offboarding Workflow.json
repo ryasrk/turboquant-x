@@ -1,0 +1,257 @@
+{
+  "name": "Exit Interview and Offboarding Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "employee-resignation",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "name": "Webhook - Resignation Received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body || $input.first().json;\nconst employee = {\n  name: body.name || '',\n  email: body.email || '',\n  position: body.position || '',\n  department: body.department || '',\n  managerEmail: body.managerEmail || '',\n  lastDay: body.lastDay || '',\n  reason: body.reason || '',\n  resignationDate: new Date().toISOString().slice(0, 10)\n};\nreturn [{ json: employee }];"
+      },
+      "name": "Parse Resignation Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "Exit Interview Scheduling",
+        "emailType": "text",
+        "message": "=Dear {{$json.name}},\n\nWe have received your resignation and understand your last working day will be {{$json.lastDay}}.\n\nWe'd like to schedule an exit interview to gather your valuable feedback. Please reply with your preferred time slot from the following:\n\n- Option A: 2 weeks before your last day at 10 AM\n- Option B: 1 week before your last day at 2 PM\n- Option C: Your last day at 11 AM\n\nYour feedback is important to us and will help us improve our workplace.\n\nBest regards,\nHR Team",
+        "options": {}
+      },
+      "name": "Schedule Exit Interview",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [690, 160],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "Exit Feedback Form",
+        "emailType": "html",
+        "message": "=<h2>Exit Feedback Form</h2><p>Dear {{$json.name}},</p><p>Please take a few minutes to complete this confidential exit feedback. Your responses help us improve.</p><h3>Please rate (1-5) and comment on:</h3><ol><li>Overall job satisfaction</li><li>Management and leadership</li><li>Work-life balance</li><li>Career growth opportunities</li><li>Compensation and benefits</li><li>Team collaboration</li><li>Company culture</li></ol><p><strong>What was the primary reason for leaving?</strong></p><p><strong>What could we have done to retain you?</strong></p><p><strong>Would you recommend this company to others? Why or why not?</strong></p><p>Please reply to this email with your responses.</p><p>Thank you,<br>HR Team</p>",
+        "options": {}
+      },
+      "name": "Send Feedback Form",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [690, 340],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const emp = $input.first().json;\nconst checklist = [\n  { task: 'Disable email account', assignee: 'IT', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Revoke VPN and network access', assignee: 'IT', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Collect company laptop/equipment', assignee: 'IT', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Deactivate badge/building access', assignee: 'Security', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Remove from software subscriptions', assignee: 'IT', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Transfer project ownership', assignee: 'Manager', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Process final paycheck', assignee: 'Finance', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Calculate unused PTO payout', assignee: 'Finance', deadline: emp.lastDay, status: 'pending' },\n  { task: 'COBRA/benefits termination notice', assignee: 'HR', deadline: emp.lastDay, status: 'pending' },\n  { task: 'Update org chart', assignee: 'HR', deadline: emp.lastDay, status: 'pending' }\n];\nreturn [{ json: { ...emp, offboardingChecklist: checklist } }];"
+      },
+      "name": "Create Revoke Access Checklist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [690, 520]
+    },
+    {
+      "parameters": {
+        "sendTo": "it-team@company.com,security@company.com,finance@company.com",
+        "subject": "=Offboarding Checklist - {{$json.name}} (Last Day: {{$json.lastDay}})",
+        "emailType": "text",
+        "message": "=Offboarding Notice\n\nEmployee: {{$json.name}}\nPosition: {{$json.position}}\nDepartment: {{$json.department}}\nLast Working Day: {{$json.lastDay}}\n\nPlease complete your assigned offboarding tasks before the last day:\n\nIT Team:\n- Disable email account\n- Revoke VPN and network access\n- Collect company laptop/equipment\n- Remove from software subscriptions\n\nSecurity:\n- Deactivate badge/building access\n\nFinance:\n- Process final paycheck\n- Calculate unused PTO payout\n\nPlease confirm completion of each task.\n\nHR Automation",
+        "options": {}
+      },
+      "name": "Notify Teams - Offboarding",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [940, 520],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "finance@company.com",
+        "subject": "=Final Settlement Calculation - {{$json.name}}",
+        "emailType": "text",
+        "message": "=Finance Team,\n\nPlease prepare the final settlement for:\n\nEmployee: {{$json.name}}\nPosition: {{$json.position}}\nDepartment: {{$json.department}}\nLast Working Day: {{$json.lastDay}}\n\nItems to calculate:\n1. Salary up to last working day\n2. Unused PTO/leave payout\n3. Any pending reimbursements\n4. Bonus proration (if applicable)\n5. Deductions (advances, equipment, etc.)\n\nPlease have the calculation ready 3 days before the last working day.\n\nHR Automation",
+        "options": {}
+      },
+      "name": "Final Settlement Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [940, 700],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Offboarding Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employeeName": "={{$json.name}}",
+            "position": "={{$json.position}}",
+            "department": "={{$json.department}}",
+            "resignationDate": "={{$json.resignationDate}}",
+            "lastDay": "={{$json.lastDay}}",
+            "exitInterviewScheduled": "yes",
+            "feedbackFormSent": "yes",
+            "offboardingStarted": "yes",
+            "status": "in_progress"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Offboarding",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1180, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Exit Interview and Offboarding Workflow\n\n**Trigger:** Webhook receives resignation notification\n**Process:**\n1. Parse resignation details\n2. Send exit interview scheduling email\n3. Send confidential feedback form\n4. Generate access revocation checklist\n5. Notify IT, Security, Finance with offboarding tasks\n6. Send final settlement calculation reminder\n7. Log everything to Offboarding sheet\n\n**Setup:**\n- Configure webhook endpoint\n- 'Offboarding Log' sheet for tracking\n- Gmail credentials\n- Update team email addresses",
+        "width": 420,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -60]
+    }
+  ],
+  "connections": {
+    "Webhook - Resignation Received": {
+      "main": [
+        [
+          {
+            "node": "Parse Resignation Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Resignation Data": {
+      "main": [
+        [
+          {
+            "node": "Schedule Exit Interview",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Feedback Form",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Revoke Access Checklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Revoke Access Checklist": {
+      "main": [
+        [
+          {
+            "node": "Notify Teams - Offboarding",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Final Settlement Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Exit Interview": {
+      "main": [
+        [
+          {
+            "node": "Log Offboarding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Feedback Form": {
+      "main": [
+        [
+          {
+            "node": "Log Offboarding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Teams - Offboarding": {
+      "main": [
+        [
+          {
+            "node": "Log Offboarding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Settlement Reminder": {
+      "main": [
+        [
+          {
+            "node": "Log Offboarding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

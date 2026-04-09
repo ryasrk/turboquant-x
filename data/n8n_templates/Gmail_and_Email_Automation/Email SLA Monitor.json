@@ -1,0 +1,193 @@
+{
+  "name": "Email SLA Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "labelIds": ["INBOX"],
+          "q": "is:unread -from:me"
+        },
+        "options": {}
+      },
+      "name": "Gmail Search Unreplied",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\nconst SLA_HOURS = 4;\nconst results = [];\nconst breached = [];\nconst warning = [];\n\nfor (const item of items) {\n  const emailDate = new Date(item.json.date || item.json.internalDate);\n  const ageMs = now - emailDate;\n  const ageHours = ageMs / (1000 * 60 * 60);\n  \n  const from = item.json.from || 'Unknown';\n  const subject = item.json.subject || 'No Subject';\n  \n  if (ageHours > SLA_HOURS) {\n    breached.push({\n      from: from,\n      subject: subject,\n      ageHours: Math.round(ageHours * 10) / 10,\n      receivedAt: emailDate.toISOString(),\n      slaStatus: 'BREACHED'\n    });\n  } else if (ageHours > SLA_HOURS * 0.75) {\n    warning.push({\n      from: from,\n      subject: subject,\n      ageHours: Math.round(ageHours * 10) / 10,\n      receivedAt: emailDate.toISOString(),\n      slaStatus: 'WARNING'\n    });\n  }\n}\n\nconst allAlerts = [...breached, ...warning];\n\nif (allAlerts.length === 0) {\n  return [{ json: { hasAlerts: false, breachedCount: 0, warningCount: 0, message: 'All emails within SLA' } }];\n}\n\nlet alertTable = '';\nfor (const alert of allAlerts) {\n  const color = alert.slaStatus === 'BREACHED' ? '#ef4444' : '#f59e0b';\n  alertTable += `<tr><td style=\"padding:6px;border:1px solid #ddd;color:${color};font-weight:bold;\">${alert.slaStatus}</td><td style=\"padding:6px;border:1px solid #ddd;\">${alert.from}</td><td style=\"padding:6px;border:1px solid #ddd;\">${alert.subject}</td><td style=\"padding:6px;border:1px solid #ddd;\">${alert.ageHours}h</td></tr>`;\n}\n\nconst html = `<div style=\"font-family:Arial,sans-serif;\">\n  <h2 style=\"color:#ef4444;\">Email SLA Alert</h2>\n  <p>Breached: ${breached.length} | Warning: ${warning.length}</p>\n  <table style=\"width:100%;border-collapse:collapse;\">\n    <thead><tr style=\"background:#f3f4f6;\"><th style=\"padding:6px;border:1px solid #ddd;\">Status</th><th style=\"padding:6px;border:1px solid #ddd;\">From</th><th style=\"padding:6px;border:1px solid #ddd;\">Subject</th><th style=\"padding:6px;border:1px solid #ddd;\">Age</th></tr></thead>\n    <tbody>${alertTable}</tbody>\n  </table>\n</div>`;\n\nreturn [{\n  json: {\n    hasAlerts: true,\n    breachedCount: breached.length,\n    warningCount: warning.length,\n    htmlReport: html,\n    checkedAt: now.toISOString(),\n    slaHours: SLA_HOURS\n  }\n}];"
+      },
+      "name": "Check Email Age",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasAlerts }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "name": "If SLA Breached",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "manager@yourcompany.com",
+        "subject": "🚨 Email SLA Alert: {{ $json.breachedCount }} breached, {{ $json.warningCount }} warning",
+        "message": "={{ $json.htmlReport }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Gmail Escalation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets SLA Report",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email SLA Monitor\n\nHourly check for unreplied emails breaching the 4-hour SLA.\n\n**Flow:**\n1. Hourly schedule\n2. Gmail searches unread, unreplied inbox emails\n3. Code checks age vs 4-hour SLA threshold\n4. If breached → Gmail escalation email + Sheets report\n\n**SLA Levels:**\n- **BREACHED:** > 4 hours unreplied (red)\n- **WARNING:** > 3 hours unreplied (yellow)\n\n**Setup:**\n- Connect Gmail and Sheets credentials\n- Set escalation email address\n- Adjust SLA_HOURS in Code node if needed",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Gmail Search Unreplied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Search Unreplied": {
+      "main": [
+        [
+          {
+            "node": "Check Email Age",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Email Age": {
+      "main": [
+        [
+          {
+            "node": "If SLA Breached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If SLA Breached": {
+      "main": [
+        [
+          {
+            "node": "Gmail Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Escalation": {
+      "main": [
+        [
+          {
+            "node": "Sheets SLA Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

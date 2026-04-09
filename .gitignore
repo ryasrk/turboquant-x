@@ -16,6 +16,7 @@ models/*.gguf
 # Secrets
 .env
 config/.env
+data/turboquant.db
 
 # IDE
 .vscode/

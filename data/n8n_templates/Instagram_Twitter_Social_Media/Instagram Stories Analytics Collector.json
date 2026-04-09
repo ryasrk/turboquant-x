@@ -1,0 +1,165 @@
+{
+  "name": "Instagram Stories Analytics Collector",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 7}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get Stories Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.ig_user_id }}/stories",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "fields", "value": "id,media_type,timestamp,permalink"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Get Story Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.id }}/insights",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "metric", "value": "impressions,reach,replies,exits"},
+            {"name": "access_token", "value": "={{ $credentials.access_token }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Parse Metrics",
+      "type": "n8n-nodes-base.code",
+      "position": [850, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const insights = item.json.data || [];\n  const metrics = {};\n  for (const insight of insights) {\n    metrics[insight.name] = insight.values?.[0]?.value || 0;\n  }\n  return {\n    json: {\n      story_id: item.json.id || 'unknown',\n      date: new Date().toISOString().split('T')[0],\n      impressions: metrics.impressions || 0,\n      reach: metrics.reach || 0,\n      replies: metrics.replies || 0,\n      exits: metrics.exits || 0,\n      retention_rate: metrics.impressions > 0 ? (((metrics.impressions - metrics.exits) / metrics.impressions) * 100).toFixed(1) : '0'\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1050, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "Stories Analytics",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Check If Sunday",
+      "type": "n8n-nodes-base.if",
+      "position": [1250, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ new Date().getDay() }}",
+              "value2": "0",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Weekly Report Email",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1450, 250],
+      "parameters": {
+        "sendTo": "marketing@example.com",
+        "subject": "Weekly Instagram Stories Report",
+        "message": "Your weekly Instagram Stories analytics report is ready.\n\nKey metrics: impressions, reach, replies, exits, and retention rates are logged in the Google Sheet.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Instagram Stories Analytics Collector\nRuns daily at 7 AM. Fetches stories and their insights (reach, impressions, replies, exits) from the Instagram Graph API, calculates retention rate, saves to Google Sheets, and sends a weekly report email on Sundays."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[{"node": "Get Stories Insights", "type": "main", "index": 0}]]
+    },
+    "Get Stories Insights": {
+      "main": [[{"node": "Get Story Metrics", "type": "main", "index": 0}]]
+    },
+    "Get Story Metrics": {
+      "main": [[{"node": "Parse Metrics", "type": "main", "index": 0}]]
+    },
+    "Parse Metrics": {
+      "main": [[{"node": "Save to Sheets", "type": "main", "index": 0}]]
+    },
+    "Save to Sheets": {
+      "main": [[{"node": "Check If Sunday", "type": "main", "index": 0}]]
+    },
+    "Check If Sunday": {
+      "main": [
+        [{"node": "Weekly Report Email", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  }
+}

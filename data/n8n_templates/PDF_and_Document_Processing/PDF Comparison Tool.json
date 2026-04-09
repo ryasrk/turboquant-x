@@ -1,0 +1,188 @@
+{
+  "name": "PDF Comparison Tool",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "compare-pdfs",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-pdfs",
+      "name": "Webhook with 2 PDFs",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/image",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "pdf1"
+            },
+            {
+              "name": "language",
+              "value": "eng"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "extract-text-1",
+      "name": "HTTP Extract Text PDF 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/image",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "pdf2"
+            },
+            {
+              "name": "language",
+              "value": "eng"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "extract-text-2",
+      "name": "HTTP Extract Text PDF 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 420],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst text1Lines = ($('HTTP Extract Text PDF 1').item.json.ParsedResults?.[0]?.ParsedText || '').split('\\n');\nconst text2Lines = ($('HTTP Extract Text PDF 2').item.json.ParsedResults?.[0]?.ParsedText || '').split('\\n');\nconst changes = [];\nconst maxLines = Math.max(text1Lines.length, text2Lines.length);\nfor (let i = 0; i < maxLines; i++) {\n  const line1 = (text1Lines[i] || '').trim();\n  const line2 = (text2Lines[i] || '').trim();\n  if (line1 !== line2) {\n    let changeType = 'modified';\n    if (!line1 && line2) changeType = 'added';\n    else if (line1 && !line2) changeType = 'removed';\n    changes.push({\n      json: {\n        lineNumber: i + 1,\n        changeType,\n        pdf1Text: line1,\n        pdf2Text: line2\n      }\n    });\n  }\n}\nconst summary = {\n  json: {\n    totalLines: maxLines,\n    changedLines: changes.length,\n    addedLines: changes.filter(c => c.json.changeType === 'added').length,\n    removedLines: changes.filter(c => c.json.changeType === 'removed').length,\n    modifiedLines: changes.filter(c => c.json.changeType === 'modified').length,\n    similarityPercent: ((1 - changes.length / Math.max(maxLines, 1)) * 100).toFixed(1)\n  }\n};\nreturn [summary, ...changes];"
+      },
+      "id": "diff-code",
+      "name": "Code Diff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-changes",
+      "name": "Sheets Changes List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook with 2 PDFs').item.json.body.notifyEmail || 'user@company.com' }}",
+        "subject": "PDF Comparison Report",
+        "message": "=PDF Comparison Complete\n\nSimilarity: {{ $('Code Diff').first().json.similarityPercent }}%\nTotal Lines: {{ $('Code Diff').first().json.totalLines }}\nChanges: {{ $('Code Diff').first().json.changedLines }}\n- Added: {{ $('Code Diff').first().json.addedLines }}\n- Removed: {{ $('Code Diff').first().json.removedLines }}\n- Modified: {{ $('Code Diff').first().json.modifiedLines }}\n\nDetailed changes have been saved to Google Sheets.",
+        "options": {}
+      },
+      "id": "gmail-report",
+      "name": "Gmail Diff Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PDF Comparison Tool\n\nUpload 2 PDFs via webhook → OCR both in parallel →\nCode performs line-by-line diff → changes list saved to Sheets →\nFormatted diff report emailed.\n\n**Output includes:** Added/removed/modified lines, similarity percentage.\n\n**Setup:**\n1. Configure OCR API credentials\n2. Set Google Sheets for changes\n3. Set Gmail credentials\n4. POST with binary fields 'pdf1' and 'pdf2' + { notifyEmail }"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook with 2 PDFs": {
+      "main": [
+        [
+          { "node": "HTTP Extract Text PDF 1", "type": "main", "index": 0 },
+          { "node": "HTTP Extract Text PDF 2", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "HTTP Extract Text PDF 1": {
+      "main": [
+        [{ "node": "Code Diff", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Extract Text PDF 2": {
+      "main": [
+        [{ "node": "Code Diff", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Diff": {
+      "main": [
+        [{ "node": "Sheets Changes List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Changes List": {
+      "main": [
+        [{ "node": "Gmail Diff Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

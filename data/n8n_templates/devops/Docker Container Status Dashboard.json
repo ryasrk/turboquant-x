@@ -1,0 +1,277 @@
+{
+  "name": "Docker Container Status Dashboard",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 10 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "command": "docker ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}|{{.Ports}}'"
+      },
+      "name": "SSH Docker PS",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [480, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json.stdout;\nconst lines = output.trim().split('\\n').filter(l => l.length > 0);\nconst containers = lines.map(line => {\n  const [name, status, image, ports] = line.split('|');\n  return {\n    name: name || '',\n    status: status || '',\n    image: image || '',\n    ports: ports || '',\n    isRunning: (status || '').toLowerCase().includes('up'),\n    timestamp: new Date().toISOString()\n  };\n});\nreturn containers.map(c => ({ json: c }));"
+      },
+      "name": "Parse Container Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "criticalContainers",
+              "value": "nginx,postgres,redis,app-backend"
+            }
+          ]
+        }
+      },
+      "name": "Set Critical Containers",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-stopped",
+              "leftValue": "={{ $json.isRunning }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Filter Stopped Containers",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst criticals = ($('Set Critical Containers').first().json.criticalContainers || '').split(',');\nconst isCritical = criticals.some(c => item.name.includes(c.trim()));\nreturn [{ json: { ...item, isCritical } }];"
+      },
+      "name": "Check If Critical",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-critical",
+              "leftValue": "={{ $json.isCritical }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Is Critical Container",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1580, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🐳 *CRITICAL: Docker Container Down*\n\nContainer: `{{ $json.name }}`\nImage: {{ $json.image }}\nLast Status: {{ $json.status }}\nTimestamp: {{ $json.timestamp }}\n\n🔴 Critical service is offline!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Critical Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1800, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "ContainerLog"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "container_name": "={{ $json.name }}",
+            "image": "={{ $json.image }}",
+            "status": "={{ $json.status }}",
+            "is_running": "={{ $json.isRunning }}",
+            "is_critical": "={{ $json.isCritical || false }}"
+          }
+        }
+      },
+      "name": "Google Sheets Container Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1360, 440],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Docker Container Status Dashboard\n\n**Schedule:** Every 10 minutes\n**Function:** SSHs into server, runs `docker ps -a`, parses container statuses.\n\n**Alerts:** Telegram notification for stopped critical containers.\n**Logging:** All container statuses logged to Google Sheets.\n\n### Setup\n1. Configure SSH credentials for the Docker host\n2. Update critical container names in 'Set Critical Containers'\n3. Configure Telegram Bot credentials and chat ID\n4. Set Google Sheets document ID",
+        "width": 400,
+        "height": 280
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -60]
+    }
+  ],
+  "connections": {
+    "Schedule Every 10 Min": {
+      "main": [
+        [
+          {
+            "node": "SSH Docker PS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH Docker PS": {
+      "main": [
+        [
+          {
+            "node": "Parse Container Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Container Status": {
+      "main": [
+        [
+          {
+            "node": "Set Critical Containers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Critical Containers": {
+      "main": [
+        [
+          {
+            "node": "Filter Stopped Containers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Stopped Containers": {
+      "main": [
+        [
+          {
+            "node": "Check If Critical",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets Container Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Critical": {
+      "main": [
+        [
+          {
+            "node": "Is Critical Container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Critical Container": {
+      "main": [
+        [
+          {
+            "node": "Telegram Critical Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

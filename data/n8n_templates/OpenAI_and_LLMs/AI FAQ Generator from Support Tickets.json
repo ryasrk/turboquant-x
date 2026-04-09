@@ -1,0 +1,143 @@
+{
+  "name": "AI FAQ Generator from Support Tickets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "weeks", "weeksInterval": 1 }] }
+      },
+      "name": "Schedule - Weekly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "options": { "range": "" }
+      },
+      "name": "Google Sheets - Read Tickets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst tickets = items.map((item, i) => {\n  const d = item.json;\n  return `[${i+1}] Subject: ${d.Subject || d.subject || d.Title || ''} | Description: ${d.Description || d.description || d.Body || ''} | Category: ${d.Category || d.category || 'N/A'}`;\n}).join('\\n');\nreturn [{ json: { ticketSummary: tickets, ticketCount: items.length } }];"
+      },
+      "name": "Code - Prepare Tickets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a customer support expert. Analyze the following {{ $json.ticketCount }} support tickets and:\n\n1. Cluster them into common question themes\n2. For each theme, generate a FAQ entry with:\n   - Clear question (as a customer would ask it)\n   - Comprehensive answer\n   - Category tag\n\nReturn JSON:\n{\n  \"faq_entries\": [\n    {\n      \"question\": \"How do I...?\",\n      \"answer\": \"To do X, you need to...\",\n      \"category\": \"Account\",\n      \"frequency\": \"high/medium/low\",\n      \"related_ticket_count\": 5\n    }\n  ],\n  \"total_themes\": 8,\n  \"top_issue\": \"most common issue description\"\n}\n\nSupport Tickets:\n{{ $json.ticketSummary }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 3000
+        }
+      },
+      "name": "OpenAI - Generate FAQ",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { faq_entries: [{ question: 'Parse error', answer: aiResponse, category: 'N/A', frequency: 'N/A' }] };\n}\nconst faqEntries = parsed.faq_entries || [];\nreturn faqEntries.map(faq => ({\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    question: faq.question,\n    answer: faq.answer,\n    category: faq.category || '',\n    frequency: faq.frequency || '',\n    relatedTickets: faq.related_ticket_count || 0\n  }\n}));"
+      },
+      "name": "Code - Parse FAQ Entries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date Added": "={{ $json.date }}",
+            "Question": "={{ $json.question }}",
+            "Answer": "={{ $json.answer }}",
+            "Category": "={{ $json.category }}",
+            "Frequency": "={{ $json.frequency }}",
+            "Related Tickets": "={{ $json.relatedTickets }}"
+          },
+          "schema": [
+            { "id": "Date Added", "type": "string", "display": true },
+            { "id": "Question", "type": "string", "display": true },
+            { "id": "Answer", "type": "string", "display": true },
+            { "id": "Category", "type": "string", "display": true },
+            { "id": "Frequency", "type": "string", "display": true },
+            { "id": "Related Tickets", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - FAQ Database",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 200,
+        "content": "## AI FAQ Generator from Support Tickets\n\n**Setup:**\n1. Connect OpenAI API and Google Sheets OAuth2\n2. Set the 'Read Tickets' node to your support tickets spreadsheet (must have Subject/Description columns)\n3. Set the 'FAQ Database' node to a separate FAQ spreadsheet\n\nRuns weekly: reads all support tickets, uses GPT-4o to cluster common questions, generates FAQ entries, and saves them to a FAQ database spreadsheet."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Schedule - Weekly": {
+      "main": [[{ "node": "Google Sheets - Read Tickets", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Read Tickets": {
+      "main": [[{ "node": "Code - Prepare Tickets", "type": "main", "index": 0 }]]
+    },
+    "Code - Prepare Tickets": {
+      "main": [[{ "node": "OpenAI - Generate FAQ", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Generate FAQ": {
+      "main": [[{ "node": "Code - Parse FAQ Entries", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse FAQ Entries": {
+      "main": [[{ "node": "Google Sheets - FAQ Database", "type": "main", "index": 0 }]]
+    }
+  }
+}

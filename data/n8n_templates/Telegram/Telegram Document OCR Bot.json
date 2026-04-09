@@ -1,0 +1,218 @@
+{
+  "name": "Telegram Document OCR Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const msg = item.json.message || {};\n  const chatId = msg.chat?.id;\n  const username = msg.from?.username || 'user';\n  let hasPhoto = false;\n  let fileId = '';\n  \n  if (msg.photo) {\n    hasPhoto = true;\n    fileId = msg.photo[msg.photo.length - 1].file_id;\n  } else if (msg.document && (msg.document.mime_type || '').startsWith('image/')) {\n    hasPhoto = true;\n    fileId = msg.document.file_id;\n  }\n  \n  results.push({\n    json: { hasPhoto, fileId, chatId, username, timestamp: new Date().toISOString() }\n  });\n}\nreturn results;"
+      },
+      "name": "Detect Photo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.hasPhoto}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Has Photo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "📷 Please send a photo or image file to extract text.",
+        "additionalFields": {}
+      },
+      "name": "No Photo Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 450],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "🔄 Processing image... Please wait.",
+        "additionalFields": {}
+      },
+      "name": "Send Processing",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{$credentials.telegramApi}}/getFile?file_id={{$node['Detect Photo'].json.fileId}}",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Get File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ocr.space/parse/imageurl",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "YOUR_OCR_API_KEY" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "url", "value": "=https://api.telegram.org/file/bot{{$credentials.telegramApi}}/{{$json.result.file_path}}" },
+            { "name": "language", "value": "eng" },
+            { "name": "isOverlayRequired", "value": "false" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "OCR API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst result = items[0].json;\nconst parsedResults = result.ParsedResults || [];\nlet extractedText = '';\nlet isSuccess = false;\n\nif (parsedResults.length > 0 && parsedResults[0].ParsedText) {\n  extractedText = parsedResults[0].ParsedText.trim();\n  isSuccess = true;\n} else {\n  extractedText = result.ErrorMessage || 'No text detected in image.';\n}\n\nconst truncated = extractedText.length > 3000 ? extractedText.substring(0, 3000) + '\\n\\n... (truncated)' : extractedText;\n\nreturn [{\n  json: {\n    extractedText: truncated,\n    fullText: extractedText,\n    charCount: extractedText.length,\n    isSuccess,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Parse OCR Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Detect Photo'].json.chatId}}",
+        "text": "=📝 <b>Extracted Text:</b>\n\n{{$json.extractedText}}\n\n📊 Characters: {{$json.charCount}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send OCR Result",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2000, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "OCRLog" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2250, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Document OCR Bot\n\nUser sends photo → OCR API extracts text → reply with text → save to Sheets.\n\n**Setup:**\n1. Get OCR.space API key (free: 25K req/month)\n2. Replace YOUR_OCR_API_KEY in OCR API Request headers\n3. Set Telegram Bot credentials\n4. Create Google Sheet 'OCRLog': extractedText, charCount, isSuccess, timestamp",
+        "width": 420,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Detect Photo", "type": "main", "index": 0 }]
+      ]
+    },
+    "Detect Photo": {
+      "main": [
+        [{ "node": "Has Photo?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Photo?": {
+      "main": [
+        [{ "node": "Send Processing", "type": "main", "index": 0 }],
+        [{ "node": "No Photo Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Processing": {
+      "main": [
+        [{ "node": "Get File Path", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get File Path": {
+      "main": [
+        [{ "node": "OCR API Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "OCR API Request": {
+      "main": [
+        [{ "node": "Parse OCR Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse OCR Result": {
+      "main": [
+        [{ "node": "Send OCR Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send OCR Result": {
+      "main": [
+        [{ "node": "Save to Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

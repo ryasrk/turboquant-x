@@ -1,0 +1,153 @@
+{
+  "name": "Notion Reading List Aggregator",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Reading List Aggregator\nSave articles via webhook, fetch metadata, add to Notion reading list, confirm via Telegram.\n\n**Setup:**\n1. Set webhook path\n2. Set Notion reading list database ID\n3. Configure Telegram bot"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook Article URL",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "save-article",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "HTTP Fetch Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 400],
+      "parameters": {
+        "url": "={{ $json.body.url || $json.url }}",
+        "method": "GET",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Extract Metadata",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const html = item.json.data || item.json.body || '';\n  const url = $('Webhook Article URL').first().json.body?.url || $('Webhook Article URL').first().json.url || '';\n  const tags = $('Webhook Article URL').first().json.body?.tags || $('Webhook Article URL').first().json.tags || '';\n\n  // Extract title from HTML\n  const titleMatch = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\n  const title = titleMatch ? titleMatch[1].trim() : url;\n\n  // Extract meta description\n  const descMatch = html.match(/<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"']+)[\"']/i)\n    || html.match(/<meta[^>]*content=[\"']([^\"']+)[\"'][^>]*name=[\"']description[\"']/i);\n  const description = descMatch ? descMatch[1].trim().substring(0, 500) : '';\n\n  // Extract og:image\n  const imgMatch = html.match(/<meta[^>]*property=[\"']og:image[\"'][^>]*content=[\"']([^\"']+)[\"']/i);\n  const image = imgMatch ? imgMatch[1] : '';\n\n  return {\n    json: {\n      title,\n      description,\n      url,\n      image,\n      tags: tags,\n      savedDate: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Add to Reading List",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.title }}"
+            },
+            {
+              "name": "URL",
+              "type": "url",
+              "url": "={{ $json.url }}"
+            },
+            {
+              "name": "Description",
+              "type": "rich_text",
+              "richText": "={{ $json.description }}"
+            },
+            {
+              "name": "Tags",
+              "type": "multi_select",
+              "multiSelect": "={{ $json.tags }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "Unread"
+            },
+            {
+              "name": "Saved Date",
+              "type": "date",
+              "date": "={{ $json.savedDate }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Telegram Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1120, 400],
+      "parameters": {
+        "chatId": "",
+        "text": "=📚 *Article Saved to Reading List*\n\nTitle: {{ $('Extract Metadata').item.json.title }}\nURL: {{ $('Extract Metadata').item.json.url }}\n\n{{ $('Extract Metadata').item.json.description ? '📝 ' + $('Extract Metadata').item.json.description.substring(0, 200) + '...' : '' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 1.2
+    }
+  ],
+  "connections": {
+    "Webhook Article URL": {
+      "main": [
+        [{ "node": "HTTP Fetch Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Fetch Page": {
+      "main": [
+        [{ "node": "Extract Metadata", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Metadata": {
+      "main": [
+        [{ "node": "Notion Add to Reading List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Add to Reading List": {
+      "main": [
+        [{ "node": "Telegram Confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

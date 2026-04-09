@@ -1,0 +1,223 @@
+{
+  "name": "Payroll Change Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payroll-change",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "name": "Webhook - Salary/Role Change",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body || $input.first().json;\nconst change = {\n  employeeName: body.employeeName || '',\n  employeeEmail: body.employeeEmail || '',\n  employeeId: body.employeeId || '',\n  department: body.department || '',\n  changeType: body.changeType || '',\n  previousValue: body.previousValue || '',\n  newValue: body.newValue || '',\n  effectiveDate: body.effectiveDate || '',\n  approvedBy: body.approvedBy || '',\n  reason: body.reason || '',\n  submittedAt: new Date().toISOString()\n};\n\nconst errors = [];\nif (!change.employeeName) errors.push('Missing employee name');\nif (!change.employeeEmail) errors.push('Missing employee email');\nif (!change.changeType) errors.push('Missing change type');\nif (!change.effectiveDate) errors.push('Missing effective date');\nif (!change.approvedBy) errors.push('Missing approver');\n\nreturn [{ json: { ...change, isValid: errors.length === 0, validationErrors: errors } }];"
+      },
+      "name": "Validate Change Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.isValid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "finance-payroll@company.com",
+        "subject": "=Payroll Update Required: {{$json.changeType}} - {{$json.employeeName}}",
+        "emailType": "text",
+        "message": "=Finance/Payroll Team,\n\nA payroll change has been submitted and requires processing:\n\nEmployee: {{$json.employeeName}} (ID: {{$json.employeeId}})\nDepartment: {{$json.department}}\nChange Type: {{$json.changeType}}\nPrevious: {{$json.previousValue}}\nNew: {{$json.newValue}}\nEffective Date: {{$json.effectiveDate}}\nApproved By: {{$json.approvedBy}}\nReason: {{$json.reason}}\n\nPlease update the payroll system before the next pay cycle.\n\nHR Automation",
+        "options": {}
+      },
+      "name": "Notify Finance",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.employeeEmail}}",
+        "subject": "=Confirmation: {{$json.changeType}} Update",
+        "emailType": "text",
+        "message": "=Dear {{$json.employeeName}},\n\nThis is to confirm that a {{$json.changeType}} change has been processed for your records:\n\nChange Type: {{$json.changeType}}\nEffective Date: {{$json.effectiveDate}}\nApproved By: {{$json.approvedBy}}\n\nThe change will be reflected in your next pay cycle. If you have any questions, please contact HR.\n\nBest regards,\nHR Team",
+        "options": {}
+      },
+      "name": "Email Employee Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 380],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Payroll Audit Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employeeName": "={{$json.employeeName}}",
+            "employeeId": "={{$json.employeeId}}",
+            "department": "={{$json.department}}",
+            "changeType": "={{$json.changeType}}",
+            "previousValue": "={{$json.previousValue}}",
+            "newValue": "={{$json.newValue}}",
+            "effectiveDate": "={{$json.effectiveDate}}",
+            "approvedBy": "={{$json.approvedBy}}",
+            "reason": "={{$json.reason}}",
+            "financeNotified": "yes",
+            "employeeNotified": "yes",
+            "processedAt": "={{$now.toISO()}}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Audit Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1130, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "hr-admin@company.com",
+        "subject": "=VALIDATION FAILED: Payroll Change Request",
+        "emailType": "text",
+        "message": "=A payroll change request was received but failed validation.\n\nSubmitted Data:\nEmployee: {{$json.employeeName}}\nEmail: {{$json.employeeEmail}}\nChange Type: {{$json.changeType}}\n\nValidation Errors:\n{{$json.validationErrors.join('\\n- ')}}\n\nPlease review and resubmit with complete information.\n\nHR Automation",
+        "options": {}
+      },
+      "name": "Notify Validation Error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 540],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Payroll Change Notification\n\n**Trigger:** Webhook on salary/role change submission\n**Process:**\n1. Receive change request via webhook\n2. Validate required fields (name, email, type, date, approver)\n3. If valid:\n   - Notify Finance/Payroll team\n   - Send confirmation to employee\n   - Log to audit trail in Sheets\n4. If invalid: Send validation error to HR admin\n\n**Setup:**\n- Configure webhook endpoint\n- 'Payroll Audit Log' sheet for audit trail\n- Gmail credentials\n- Update finance/HR email addresses\n- Webhook expects: employeeName, employeeEmail, employeeId, department, changeType, previousValue, newValue, effectiveDate, approvedBy, reason",
+        "width": 440,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -60]
+    }
+  ],
+  "connections": {
+    "Webhook - Salary/Role Change": {
+      "main": [
+        [
+          {
+            "node": "Validate Change Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Change Data": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "Notify Finance",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Employee Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Finance": {
+      "main": [
+        [
+          {
+            "node": "Audit Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Employee Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Audit Log to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

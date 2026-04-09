@@ -1,0 +1,198 @@
+{
+  "name": "Purchase Order Generator and Supplier Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "purchase-order",
+        "responseMode": "responseNode",
+        "options": {
+          "responseContentType": "application/json"
+        }
+      },
+      "name": "Webhook PO Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\n\nconst supplier = body.supplier;\nconst items = body.items;\nconst alamat_kirim = body.alamat_kirim;\nconst terms = body.terms || 'Net 30';\n\n// Generate nomor PO: PO/YYYYMMDD/XXX\nconst now = new Date();\nconst yyyy = now.getFullYear();\nconst mm = String(now.getMonth() + 1).padStart(2, '0');\nconst dd = String(now.getDate()).padStart(2, '0');\nconst seq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');\nconst nomor_po = `PO/${yyyy}${mm}${dd}/${seq}`;\n\n// Format Rupiah\nfunction formatRupiah(amount) {\n  return 'Rp ' + amount.toLocaleString('id-ID');\n}\n\n// Calculate subtotal\nlet subtotal = 0;\nconst itemDetails = items.map((item, idx) => {\n  const lineTotal = item.qty * item.harga_satuan;\n  subtotal += lineTotal;\n  return {\n    no: idx + 1,\n    kode_barang: item.kode_barang,\n    nama: item.nama,\n    qty: item.qty,\n    satuan: item.satuan,\n    harga_satuan: item.harga_satuan,\n    harga_satuan_formatted: formatRupiah(item.harga_satuan),\n    line_total: lineTotal,\n    line_total_formatted: formatRupiah(lineTotal)\n  };\n});\n\n// PPN 11%\nconst ppn = Math.round(subtotal * 0.11);\nconst total = subtotal + ppn;\n\n// Build item table for email\nconst itemTableRows = itemDetails.map(i =>\n  `<tr><td>${i.no}</td><td>${i.kode_barang}</td><td>${i.nama}</td><td>${i.qty} ${i.satuan}</td><td>${i.harga_satuan_formatted}</td><td>${i.line_total_formatted}</td></tr>`\n).join('\\n');\n\nconst emailBody = `\n<h2>PURCHASE ORDER</h2>\n<p><strong>Nomor PO:</strong> ${nomor_po}</p>\n<p><strong>Tanggal:</strong> ${dd}/${mm}/${yyyy}</p>\n<p><strong>Supplier:</strong> ${supplier.nama}</p>\n<p><strong>Kontak:</strong> ${supplier.kontak || '-'}</p>\n<p><strong>Email Supplier:</strong> ${supplier.email}</p>\n<hr/>\n<h3>Detail Pesanan</h3>\n<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%\">\n<thead><tr style=\"background:#f0f0f0\"><th>No</th><th>Kode Barang</th><th>Nama Barang</th><th>Qty</th><th>Harga Satuan</th><th>Jumlah</th></tr></thead>\n<tbody>\n${itemTableRows}\n</tbody>\n</table>\n<br/>\n<table cellpadding=\"4\">\n<tr><td><strong>Subtotal</strong></td><td>${formatRupiah(subtotal)}</td></tr>\n<tr><td><strong>PPN 11%</strong></td><td>${formatRupiah(ppn)}</td></tr>\n<tr><td><strong>Total</strong></td><td><strong>${formatRupiah(total)}</strong></td></tr>\n</table>\n<hr/>\n<p><strong>Alamat Kirim:</strong><br/>${alamat_kirim}</p>\n<p><strong>Terms Pembayaran:</strong> ${terms}</p>\n<br/>\n<p>Mohon konfirmasi penerimaan PO ini dan estimasi waktu pengiriman.</p>\n<p>Terima kasih atas kerjasamanya.</p>\n`;\n\nconst telegramMsg = `📋 *PO Baru Dibuat*\\n\\n` +\n  `*Nomor:* ${nomor_po}\\n` +\n  `*Supplier:* ${supplier.nama}\\n` +\n  `*Items:* ${items.length} jenis barang\\n` +\n  `*Subtotal:* ${formatRupiah(subtotal)}\\n` +\n  `*PPN 11%:* ${formatRupiah(ppn)}\\n` +\n  `*Total:* ${formatRupiah(total)}\\n` +\n  `*Terms:* ${terms}\\n` +\n  `*Alamat Kirim:* ${alamat_kirim}`;\n\nreturn {\n  nomor_po,\n  tanggal: `${dd}/${mm}/${yyyy}`,\n  supplier,\n  items: itemDetails,\n  alamat_kirim,\n  terms,\n  subtotal,\n  subtotal_formatted: formatRupiah(subtotal),\n  ppn,\n  ppn_formatted: formatRupiah(ppn),\n  total,\n  total_formatted: formatRupiah(total),\n  email_body: emailBody,\n  telegram_message: telegramMsg,\n  supplier_email: supplier.email,\n  email_subject: `Purchase Order ${nomor_po} - Mohon Konfirmasi`\n};"
+      },
+      "name": "Generate PO Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Nomor PO": "={{ $json.nomor_po }}",
+            "Tanggal": "={{ $json.tanggal }}",
+            "Supplier": "={{ $json.supplier.nama }}",
+            "Email Supplier": "={{ $json.supplier_email }}",
+            "Jumlah Item": "={{ $json.items.length }}",
+            "Subtotal": "={{ $json.subtotal }}",
+            "PPN 11%": "={{ $json.ppn }}",
+            "Total": "={{ $json.total }}",
+            "Terms": "={{ $json.terms }}",
+            "Alamat Kirim": "={{ $json.alamat_kirim }}",
+            "Status": "Dikirim ke Supplier"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {"id": "Nomor PO", "displayName": "Nomor PO", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "Tanggal", "displayName": "Tanggal", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "Supplier", "displayName": "Supplier", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "Email Supplier", "displayName": "Email Supplier", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "Jumlah Item", "displayName": "Jumlah Item", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": false},
+            {"id": "Subtotal", "displayName": "Subtotal", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": false},
+            {"id": "PPN 11%", "displayName": "PPN 11%", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": false},
+            {"id": "Total", "displayName": "Total", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": false},
+            {"id": "Terms", "displayName": "Terms", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false},
+            {"id": "Alamat Kirim", "displayName": "Alamat Kirim", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false},
+            {"id": "Status", "displayName": "Status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false}
+          ]
+        },
+        "options": {}
+      },
+      "name": "Log PO ke Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [760, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.supplier_email }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_body }}",
+        "options": {
+          "replyTo": ""
+        }
+      },
+      "name": "Kirim PO ke Supplier",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [760, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Notifikasi Purchasing Manager",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [760, 600],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"nomor_po\": \"{{ $('Generate PO Data').item.json.nomor_po }}\",\n  \"total\": \"{{ $('Generate PO Data').item.json.total_formatted }}\",\n  \"message\": \"PO berhasil dibuat dan dikirim ke supplier\"\n}"
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1020, 400]
+    },
+    {
+      "parameters": {
+        "content": "## 📋 Purchase Order Generator & Supplier Notification\n\n### Deskripsi\nWorkflow otomatis untuk membuat Purchase Order (PO) dan mengirimkannya ke supplier.\n\n### Fitur:\n- **Nomor PO otomatis**: Format PO/YYYYMMDD/XXX\n- **Kalkulasi otomatis**: Subtotal, PPN 11%, Total dalam Rupiah\n- **Email ke Supplier**: PO lengkap dalam format HTML (Bahasa Indonesia)\n- **Log Google Sheets**: Semua PO tercatat otomatis\n- **Notifikasi Telegram**: Purchasing manager mendapat notifikasi real-time\n\n### Contoh Request Body (POST):\n```json\n{\n  \"supplier\": {\n    \"nama\": \"PT Maju Bersama\",\n    \"email\": \"procurement@majubersama.co.id\",\n    \"kontak\": \"Bpk. Andi\"\n  },\n  \"items\": [\n    {\n      \"kode_barang\": \"BRG-001\",\n      \"nama\": \"Kertas HVS A4 70gsm\",\n      \"qty\": 100,\n      \"satuan\": \"rim\",\n      \"harga_satuan\": 45000\n    },\n    {\n      \"kode_barang\": \"BRG-002\",\n      \"nama\": \"Tinta Printer HP 680\",\n      \"qty\": 20,\n      \"satuan\": \"pcs\",\n      \"harga_satuan\": 125000\n    }\n  ],\n  \"alamat_kirim\": \"Jl. Sudirman No. 123, Jakarta Selatan 12190\",\n  \"terms\": \"Net 30\"\n}\n```\n\n### Terms Pembayaran yang Didukung:\n- **Net 30** — pembayaran 30 hari setelah invoice\n- **Net 60** — pembayaran 60 hari setelah invoice\n- **COD** — Cash on Delivery\n\n### Setup:\n1. Hubungkan kredensial Google Sheets OAuth2\n2. Hubungkan kredensial Gmail OAuth2\n3. Hubungkan kredensial Telegram Bot API\n4. Set Chat ID Telegram purchasing manager\n5. Buat Google Sheet dengan kolom sesuai mapping",
+        "width": 520,
+        "height": 680
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-160, 120]
+    }
+  ],
+  "connections": {
+    "Webhook PO Request": {
+      "main": [
+        [
+          {
+            "node": "Generate PO Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate PO Data": {
+      "main": [
+        [
+          {
+            "node": "Log PO ke Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Kirim PO ke Supplier",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notifikasi Purchasing Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kirim PO ke Supplier": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "category": "Indonesia Business",
+    "subcategory": "Procurement",
+    "description": "Otomatisasi pembuatan Purchase Order dengan kalkulasi PPN 11%, format Rupiah, pengiriman email ke supplier, logging ke Google Sheets, dan notifikasi Telegram ke purchasing manager.",
+    "tags": ["purchase-order", "procurement", "indonesia", "ppn", "supplier", "rupiah"]
+  }
+}

@@ -79,8 +79,13 @@
       <section id="ws-design-panel" class="ws-panel" aria-label="Workflow design">
         <h3 class="ws-panel-title">◈ Design Workflow</h3>
 
-        <!-- Prompt Input -->
+        <!-- Template + Prompt Input -->
         <div id="ws-prompt-area">
+          <div class="ws-design-top-row">
+            <button id="ws-templates-btn" class="ws-templates-btn" aria-label="Browse workflow templates" title="Browse Templates">
+              📋 Templates
+            </button>
+          </div>
           <label for="ws-prompt-input" class="sr-only">Describe your workflow</label>
           <textarea
             id="ws-prompt-input"
@@ -241,6 +246,42 @@
       <button id="ws-modify-cancel" class="ws-secondary-btn">Cancel</button>
       <button id="ws-modify-confirm" class="ws-primary-btn">Modify</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Template Browser Dialog ───────────────────────────────────── -->
+<div id="ws-template-overlay" class="ws-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ws-template-title">
+  <div class="ws-dialog ws-dialog-xl">
+    <div class="ws-template-header">
+      <h3 id="ws-template-title" class="ws-dialog-title">📋 Workflow Templates</h3>
+      <button id="ws-template-close" class="ws-template-close-btn" aria-label="Close template browser">✕</button>
+    </div>
+    <div class="ws-template-controls">
+      <div class="ws-template-search-wrap">
+        <input type="text" id="ws-template-search" class="ws-template-search" placeholder="Search templates…" autocomplete="off" />
+      </div>
+      <select id="ws-template-category" class="ws-template-category" aria-label="Filter by category">
+        <option value="">All Categories</option>
+      </select>
+    </div>
+    <div id="ws-template-list" class="ws-template-list" role="list" aria-live="polite">
+      <div class="ws-template-loading">Loading templates…</div>
+    </div>
+    <div class="ws-template-footer">
+      <span id="ws-template-count" class="ws-template-count"></span>
+    </div>
+    <!-- Inline confirmation for template load -->
+    <div id="ws-tpl-confirm" class="ws-tpl-confirm hidden">
+      <div class="ws-tpl-confirm-inner">
+        <span id="ws-tpl-confirm-text" class="ws-tpl-confirm-text"></span>
+        <div class="ws-tpl-confirm-actions">
+          <button id="ws-tpl-confirm-yes" class="ws-tpl-confirm-yes">Load</button>
+          <button id="ws-tpl-confirm-no" class="ws-tpl-confirm-no">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <!-- Inline status message -->
+    <div id="ws-tpl-status" class="ws-tpl-status hidden"></div>
   </div>
 </div>
 

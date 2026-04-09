@@ -1,0 +1,167 @@
+{
+  "name": "PDF Form Filler Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fill-pdf-form",
+        "options": {}
+      },
+      "id": "webhook-form",
+      "name": "Webhook Form Data",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "sheets-template",
+      "name": "Read Sheets Template",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst formData = $('Webhook Form Data').item.json.body;\nconst templateFields = items[0]?.json || {};\nconst filledFields = {};\nfor (const [key, defaultVal] of Object.entries(templateFields)) {\n  filledFields[key] = formData[key] || defaultVal || '';\n}\nfilledFields.filledAt = new Date().toISOString();\nfilledFields.filledBy = formData.submitterName || 'System';\nreturn [{ json: { fields: filledFields, templateId: formData.templateId || 'default' } }];"
+      },
+      "id": "fill-fields",
+      "name": "Code Fill Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.pdfgeneratorapi.com/v3/documents/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template: $json.templateId, data: $json.fields, output: 'pdf' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-pdf",
+      "name": "HTTP Generate Filled PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook Form Data').item.json.body.recipientEmail }}",
+        "subject": "=Filled Form: {{ $('Code Fill Fields').item.json.templateId }}",
+        "message": "=Your filled PDF form is attached.\n\nTemplate: {{ $('Code Fill Fields').item.json.templateId }}\nFilled by: {{ $('Code Fill Fields').item.json.fields.filledBy }}\nDate: {{ $('Code Fill Fields').item.json.fields.filledAt }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{}]
+          }
+        }
+      },
+      "id": "gmail-recipient",
+      "name": "Gmail to Recipient",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "sheets-log",
+      "name": "Sheets Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1340, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## PDF Form Filler Automation\n\nReceives form data via webhook → reads template fields from Sheets →\nCode fills in field values → generates filled PDF → emails to recipient → logs to Sheets.\n\n**Setup:**\n1. Create template fields sheet (field names as headers, defaults as first row)\n2. Configure PDF generation API\n3. Set Gmail credentials\n4. POST { templateId, recipientEmail, field1, field2, ... } to webhook"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Form Data": {
+      "main": [
+        [{ "node": "Read Sheets Template", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sheets Template": {
+      "main": [
+        [{ "node": "Code Fill Fields", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Fill Fields": {
+      "main": [
+        [{ "node": "HTTP Generate Filled PDF", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Generate Filled PDF": {
+      "main": [
+        [{ "node": "Gmail to Recipient", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gmail to Recipient": {
+      "main": [
+        [{ "node": "Sheets Log", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

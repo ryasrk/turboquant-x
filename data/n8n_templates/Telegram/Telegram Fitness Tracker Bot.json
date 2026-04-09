@@ -1,0 +1,268 @@
+{
+  "name": "Telegram Fitness Tracker Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = (item.json.message?.text || '').trim();\n  const chatId = item.json.message?.chat?.id;\n  const userId = item.json.message?.from?.id;\n  const username = item.json.message?.from?.username || 'user';\n  \n  if (text.startsWith('/log')) {\n    // Parse: /log lari 5km or /log pushup 30\n    const match = text.match(/^\\/log\\s+(.+?)\\s+([\\d.]+)\\s*(km|m|rep|min|cal)?$/i);\n    if (match) {\n      results.push({\n        json: {\n          command: 'log',\n          exercise: match[1].trim(),\n          value: parseFloat(match[2]),\n          unit: (match[3] || 'rep').toLowerCase(),\n          userId, username, chatId,\n          date: new Date().toISOString().split('T')[0],\n          weekNumber: getWeekNumber(new Date()),\n          timestamp: new Date().toISOString()\n        }\n      });\n    } else {\n      results.push({ json: { command: 'invalid', chatId } });\n    }\n  } else if (text === '/stats') {\n    results.push({ json: { command: 'stats', userId, username, chatId } });\n  } else if (text === '/weekly') {\n    results.push({ json: { command: 'weekly', userId, username, chatId } });\n  } else {\n    results.push({ json: { command: 'help', chatId } });\n  }\n}\n\nfunction getWeekNumber(d) {\n  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));\n  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));\n  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));\n  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);\n}\n\nreturn results;"
+      },
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "outputKey": "log", "value": "log" },
+            { "outputKey": "stats", "value": "stats" },
+            { "outputKey": "weekly", "value": "weekly" },
+            { "outputKey": "help", "value": "help" }
+          ]
+        },
+        "dataType": "string",
+        "value1": "={{$json.command}}"
+      },
+      "name": "Route Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Workouts" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Workout",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=💪 Workout logged!\n🏃 {{$json.exercise}}: {{$json.value}} {{$json.unit}}\n📅 {{$json.date}}\n\nKeep it up, @{{$json.username}}! 🔥",
+        "additionalFields": {}
+      },
+      "name": "Confirm Log",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Workouts" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get Stats Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\nconst todayWorkouts = items.filter(i => i.json.date === today);\nconst allExercises = {};\nitems.forEach(i => {\n  const ex = i.json.exercise;\n  if (!allExercises[ex]) allExercises[ex] = { total: 0, count: 0, unit: i.json.unit };\n  allExercises[ex].total += parseFloat(i.json.value || 0);\n  allExercises[ex].count++;\n});\n\nlet text = `📊 <b>Your Fitness Stats</b>\\n\\n`;\ntext += `📅 Today: ${todayWorkouts.length} workouts\\n`;\ntext += `📈 All time: ${items.length} workouts\\n\\n`;\ntext += `<b>Exercise Totals:</b>\\n`;\nObject.entries(allExercises).forEach(([ex, data]) => {\n  text += `  🏋️ ${ex}: ${data.total} ${data.unit} (${data.count}x)\\n`;\n});\n\nreturn [{ json: { text } }];"
+      },
+      "name": "Calculate Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Command'].json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Stats",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "triggerAtDay": 0, "triggerAtHour": 20, "triggerAtMinute": 0 }
+          ]
+        }
+      },
+      "name": "Weekly Sunday 8PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Workouts" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get Weekly Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\nconst weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\nconst weekData = items.filter(i => new Date(i.json.timestamp) >= weekAgo);\n\nlet text = `📊 <b>Weekly Fitness Summary</b>\\n`;\ntext += `📅 ${weekAgo.toISOString().split('T')[0]} → ${now.toISOString().split('T')[0]}\\n\\n`;\n\nconst byExercise = {};\nweekData.forEach(i => {\n  const ex = i.json.exercise;\n  if (!byExercise[ex]) byExercise[ex] = { total: 0, count: 0, unit: i.json.unit };\n  byExercise[ex].total += parseFloat(i.json.value || 0);\n  byExercise[ex].count++;\n});\n\nif (Object.keys(byExercise).length === 0) {\n  text += '⚠️ No workouts recorded this week. Time to get moving!';\n} else {\n  text += `🏋️ Total sessions: ${weekData.length}\\n\\n`;\n  Object.entries(byExercise).forEach(([ex, data]) => {\n    text += `💪 ${ex}: ${data.total} ${data.unit} (${data.count} sessions)\\n`;\n  });\n  text += '\\nGreat work! Keep pushing! 🔥';\n}\n\nreturn [{ json: { text } }];"
+      },
+      "name": "Build Weekly Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 600]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Weekly Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 600],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "🏃 <b>Fitness Tracker Bot</b>\n\n/log <exercise> <value><unit>\n  Units: km, m, rep, min, cal\n  Example: /log lari 5km\n\n/stats - view your stats\n/weekly - weekly summary",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Help",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Fitness Tracker Bot\n\n**Commands:** /log, /stats, /weekly\n**Auto:** Weekly summary every Sunday 8PM\n\n**Setup:**\n1. Set Telegram Bot credentials\n2. Create Google Sheet 'Workouts': exercise, value, unit, userId, username, chatId, date, weekNumber, timestamp\n3. Set group chat ID for weekly summary",
+        "width": 400,
+        "height": 200
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 800]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [{ "node": "Route Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [{ "node": "Log Workout", "type": "main", "index": 0 }],
+        [{ "node": "Get Stats Data", "type": "main", "index": 0 }],
+        [{ "node": "Get Stats Data", "type": "main", "index": 0 }],
+        [{ "node": "Send Help", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Workout": {
+      "main": [
+        [{ "node": "Confirm Log", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Stats Data": {
+      "main": [
+        [{ "node": "Calculate Stats", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate Stats": {
+      "main": [
+        [{ "node": "Send Stats", "type": "main", "index": 0 }]
+      ]
+    },
+    "Weekly Sunday 8PM": {
+      "main": [
+        [{ "node": "Get Weekly Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Weekly Data": {
+      "main": [
+        [{ "node": "Build Weekly Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Weekly Summary": {
+      "main": [
+        [{ "node": "Send Weekly Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

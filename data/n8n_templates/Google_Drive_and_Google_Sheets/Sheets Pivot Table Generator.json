@@ -1,0 +1,90 @@
+{
+  "name": "Sheets Pivot Table Generator",
+  "nodes": [
+    {
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [300, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pivot-generator",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "typeVersion": 2,
+      "webhookId": "pivot-gen"
+    },
+    {
+      "name": "Read Raw Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [520, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "RawData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Generate Pivot Table",
+      "type": "n8n-nodes-base.code",
+      "position": [740, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(i => i.json);\n\n// Dynamic pivot: group by first column, aggregate numeric columns\nif (rows.length === 0) return [{ json: { error: 'No data found' } }];\n\nconst keys = Object.keys(rows[0]);\nconst groupKey = keys[0];\nconst numericKeys = keys.filter(k => k !== groupKey && !isNaN(Number(rows[0][k])));\n\nconst groups = {};\nfor (const row of rows) {\n  const gVal = row[groupKey] || 'Unknown';\n  if (!groups[gVal]) groups[gVal] = { [groupKey]: gVal, _count: 0 };\n  groups[gVal]._count++;\n  for (const nk of numericKeys) {\n    const val = Number(row[nk]) || 0;\n    groups[gVal][`${nk}_sum`] = (groups[gVal][`${nk}_sum`] || 0) + val;\n    groups[gVal][`${nk}_values`] = groups[gVal][`${nk}_values`] || [];\n    groups[gVal][`${nk}_values`].push(val);\n  }\n}\n\nconst pivotRows = Object.values(groups).map(g => {\n  const result = { [groupKey]: g[groupKey], count: g._count };\n  for (const nk of numericKeys) {\n    result[`${nk}_sum`] = g[`${nk}_sum`];\n    result[`${nk}_avg`] = Math.round((g[`${nk}_sum`] / g._count) * 100) / 100;\n  }\n  return result;\n});\n\nreturn pivotRows.map(r => ({ json: r }));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Write Pivot Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [960, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "PivotTable" },
+        "columns": { "mappingMode": "autoMapInputData" },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Pivot Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1180, 300],
+      "parameters": {
+        "sendTo": "",
+        "subject": "Pivot Table Generated",
+        "message": "=Your pivot table has been generated and written to the PivotTable sheet.\n\nGroups found: {{ $input.all().length }}\nGenerated at: {{ new Date().toISOString() }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [240, 120],
+      "parameters": {
+        "width": 1100,
+        "height": 100,
+        "content": "### Sheets Pivot Table Generator\nTriggered via webhook. Reads raw data from a Google Sheet, generates a dynamic pivot table with group/sum/avg aggregations, writes results to a Pivot sheet, and emails a report."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Read Raw Data", "type": "main", "index": 0 }]] },
+    "Read Raw Data": { "main": [[{ "node": "Generate Pivot Table", "type": "main", "index": 0 }]] },
+    "Generate Pivot Table": { "main": [[{ "node": "Write Pivot Sheet", "type": "main", "index": 0 }]] },
+    "Write Pivot Sheet": { "main": [[{ "node": "Email Pivot Report", "type": "main", "index": 0 }]] }
+  }
+}

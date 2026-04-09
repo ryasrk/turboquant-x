@@ -1,0 +1,177 @@
+{
+  "name": "Legal Document Template System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "legal-template",
+        "options": {}
+      },
+      "id": "webhook-request",
+      "name": "Webhook Type and Variables",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {
+          "dataLocationOnSheet": {
+            "rangeDefinition": "specifyRange",
+            "range": "={{ $json.body.templateType || 'NDA' }}!A:Z"
+          }
+        }
+      },
+      "id": "sheets-template",
+      "name": "Read Sheets Template",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst variables = $('Webhook Type and Variables').item.json.body.variables || {};\nconst templateType = $('Webhook Type and Variables').item.json.body.templateType || 'NDA';\nlet templateContent = '';\nfor (const item of items) {\n  templateContent += (item.json.content || item.json.Content || Object.values(item.json).join(' ')) + '\\n';\n}\nfor (const [key, value] of Object.entries(variables)) {\n  const placeholder = new RegExp(`\\\\{\\\\{${key}\\\\}\\\\}`, 'g');\n  templateContent = templateContent.replace(placeholder, value);\n}\nconst html = `<!DOCTYPE html><html><head><style>\n  body { font-family: 'Times New Roman', serif; margin: 60px; line-height: 1.8; color: #333; }\n  h1 { text-align: center; color: #2c3e50; border-bottom: 2px solid #333; padding-bottom: 10px; }\n  .section { margin: 20px 0; }\n  .signature-block { margin-top: 60px; display: flex; justify-content: space-between; }\n  .sig-line { border-top: 1px solid #333; width: 200px; text-align: center; padding-top: 5px; }\n  .footer { text-align: center; color: #999; font-size: 10px; margin-top: 40px; }\n</style></head><body>\n  <h1>${templateType}</h1>\n  <div class=\"section\">${templateContent.replace(/\\n/g, '<br>')}</div>\n  <div class=\"signature-block\">\n    <div><div class=\"sig-line\">Party A: ${variables.partyA || '____________'}</div></div>\n    <div><div class=\"sig-line\">Party B: ${variables.partyB || '____________'}</div></div>\n  </div>\n  <div class=\"footer\">Generated: ${new Date().toISOString()} | Document ID: ${templateType}-${Date.now()}</div>\n</body></html>`;\nreturn [{ json: { html, templateType, variables, documentId: `${templateType}-${Date.now()}`, generatedAt: new Date().toISOString() } }];"
+      },
+      "id": "fill-placeholders",
+      "name": "Code Fill Placeholders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.html2pdf.app/v1/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ html: $json.html }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "generate-pdf",
+      "name": "HTTP Generate PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook Type and Variables').item.json.body.recipientEmail || 'legal@company.com' }}",
+        "subject": "=Legal Document Generated: {{ $('Code Fill Placeholders').item.json.templateType }}",
+        "message": "=Your legal document has been generated.\n\nType: {{ $('Code Fill Placeholders').item.json.templateType }}\nDocument ID: {{ $('Code Fill Placeholders').item.json.documentId }}\nGenerated: {{ $('Code Fill Placeholders').item.json.generatedAt }}\n\nThe PDF is attached to this email.",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{}]
+          }
+        }
+      },
+      "id": "gmail-send",
+      "name": "Gmail Send",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "drive-log",
+      "name": "Drive Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1340, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Legal Document Template System\n\nPOST template type + variables → reads template from Sheets (each type as a tab) →\nCode fills {{placeholders}} → generates professional PDF →\nEmails to recipient → logs generation.\n\n**Template Types:** NDA, Employment Contract, Service Agreement, etc.\n\n**Setup:**\n1. Create template sheets (one tab per document type)\n2. Use {{variableName}} for placeholders\n3. Configure PDF API\n4. Set Gmail and Sheets credentials\n5. POST { templateType: 'NDA', variables: { partyA, partyB, date }, recipientEmail }"
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 80]
+    }
+  ],
+  "connections": {
+    "Webhook Type and Variables": {
+      "main": [
+        [{ "node": "Read Sheets Template", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Sheets Template": {
+      "main": [
+        [{ "node": "Code Fill Placeholders", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code Fill Placeholders": {
+      "main": [
+        [{ "node": "HTTP Generate PDF", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Generate PDF": {
+      "main": [
+        [{ "node": "Gmail Send", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gmail Send": {
+      "main": [
+        [{ "node": "Drive Log", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

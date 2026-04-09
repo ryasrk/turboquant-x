@@ -1,0 +1,348 @@
+{
+  "name": "Customer Complaint Ticket Management System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "complaint-ticket",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Receive Complaint",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "complaint-ticket-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst body = item.body || item;\n\nconst nama = body.nama_pelanggan || '';\nconst noHp = body.no_hp || '';\nconst email = body.email || '';\nconst kategori = body.kategori_keluhan || 'Lainnya';\nconst deskripsi = body.deskripsi || '';\nconst nomorPesanan = body.nomor_pesanan || '-';\n\n// Generate ticket number: TKT/YYYYMMDD/XXX\nconst now = new Date();\nconst y = now.getFullYear();\nconst m = String(now.getMonth() + 1).padStart(2, '0');\nconst d = String(now.getDate()).padStart(2, '0');\nconst seq = String(Math.floor(Math.random() * 900) + 100);\nconst nomorTiket = `TKT/${y}${m}${d}/${seq}`;\n\n// Classify priority based on keywords\nconst lower = deskripsi.toLowerCase();\nlet prioritas = 'rendah';\nlet sla = '3 hari kerja';\n\nconst keywordTinggi = ['rusak', 'tidak berfungsi', 'penting', 'urgent', 'bahaya', 'error fatal', 'tidak bisa digunakan', 'cacat', 'berbahaya'];\nconst keywordSedang = ['lambat', 'kurang', 'terlambat', 'belum sampai', 'salah kirim', 'tidak sesuai', 'kurang lengkap'];\n\nif (keywordTinggi.some(kw => lower.includes(kw))) {\n  prioritas = 'tinggi';\n  sla = '4 jam';\n} else if (keywordSedang.some(kw => lower.includes(kw))) {\n  prioritas = 'sedang';\n  sla = '1 hari kerja';\n}\n\nconst timestamp = now.toLocaleString('id-ID', {\n  timeZone: 'Asia/Jakarta',\n  day: '2-digit', month: 'long', year: 'numeric',\n  hour: '2-digit', minute: '2-digit'\n});\n\nreturn [{\n  json: {\n    nomor_tiket: nomorTiket,\n    nama_pelanggan: nama,\n    no_hp: noHp,\n    email: email,\n    kategori_keluhan: kategori,\n    deskripsi: deskripsi,\n    nomor_pesanan: nomorPesanan,\n    prioritas: prioritas,\n    sla: sla,\n    status: 'Baru',\n    tanggal_masuk: timestamp,\n    tanggal_iso: now.toISOString()\n  }\n}];"
+      },
+      "name": "Generate Ticket & Classify Priority",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Complaint Tickets"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Nomor Tiket": "={{ $json.nomor_tiket }}",
+            "Tanggal Masuk": "={{ $json.tanggal_masuk }}",
+            "Nama Pelanggan": "={{ $json.nama_pelanggan }}",
+            "No HP": "={{ $json.no_hp }}",
+            "Email": "={{ $json.email }}",
+            "Kategori": "={{ $json.kategori_keluhan }}",
+            "Deskripsi": "={{ $json.deskripsi }}",
+            "Nomor Pesanan": "={{ $json.nomor_pesanan }}",
+            "Prioritas": "={{ $json.prioritas }}",
+            "SLA": "={{ $json.sla }}",
+            "Status": "={{ $json.status }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Ticket to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.fonnte.com/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $credentials.fonnte_api_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "={{ $json.no_hp }}"
+            },
+            {
+              "name": "message",
+              "value": "=Yth. {{ $json.nama_pelanggan }},\n\nTerima kasih atas laporan Anda. Tiket dengan nomor *{{ $json.nomor_tiket }}* telah kami terima dan sedang dalam proses penanganan.\n\n📋 *Detail Tiket:*\nNomor: {{ $json.nomor_tiket }}\nKategori: {{ $json.kategori_keluhan }}\nPrioritas: {{ $json.prioritas.toUpperCase() }}\nTarget Penyelesaian: {{ $json.sla }}\n\nTim kami akan segera menghubungi Anda. Mohon simpan nomor tiket ini untuk referensi.\n\nHormat kami,\nTim Customer Service"
+            },
+            {
+              "name": "typing",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Auto-reply WhatsApp Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.prioritas }}",
+                    "rightValue": "tinggi",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Tinggi"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.prioritas }}",
+                    "rightValue": "sedang",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Sedang"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.prioritas }}",
+                    "rightValue": "rendah",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Rendah"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Priority Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.fonnte.com/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $credentials.fonnte_api_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "=628xxxxxxxxxx"
+            },
+            {
+              "name": "message",
+              "value": "=🚨 *KELUHAN PRIORITAS TINGGI*\n\nNomor Tiket: {{ $json.nomor_tiket }}\nPelanggan: {{ $json.nama_pelanggan }}\nHP: {{ $json.no_hp }}\nKategori: {{ $json.kategori_keluhan }}\nPesanan: {{ $json.nomor_pesanan }}\n\n📝 Deskripsi:\n{{ $json.deskripsi }}\n\n⏰ SLA: {{ $json.sla }}\n⚠️ Memerlukan penanganan segera!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "WhatsApp Manager - Tinggi",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 80]
+    },
+    {
+      "parameters": {
+        "sendTo": "=manager@company.co.id",
+        "subject": "=🚨 [TINGGI] Keluhan {{ $json.nomor_tiket }} - {{ $json.kategori_keluhan }} - Perlu Tindakan Segera",
+        "message": "=Kepada Yth. Manager,\n\nTerdapat keluhan dengan prioritas TINGGI yang memerlukan penanganan segera.\n\n══════════════════════════\n📋 DETAIL TIKET\n══════════════════════════\nNomor Tiket   : {{ $json.nomor_tiket }}\nTanggal Masuk : {{ $json.tanggal_masuk }}\nPrioritas     : TINGGI\nSLA Target    : {{ $json.sla }}\n\n👤 DATA PELANGGAN\nNama          : {{ $json.nama_pelanggan }}\nNo. HP        : {{ $json.no_hp }}\nEmail         : {{ $json.email }}\n\n📦 DETAIL KELUHAN\nKategori      : {{ $json.kategori_keluhan }}\nNo. Pesanan   : {{ $json.nomor_pesanan }}\nDeskripsi     : {{ $json.deskripsi }}\n══════════════════════════\n\nMohon segera ditindaklanjuti dalam {{ $json.sla }}.\n\nTerima kasih.\n\n— Sistem Manajemen Tiket Otomatis"
+      },
+      "name": "Email Manager - Tinggi",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1520, 240],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "=cs-team@company.co.id",
+        "subject": "=[SEDANG] Keluhan {{ $json.nomor_tiket }} - {{ $json.kategori_keluhan }}",
+        "message": "=Tim CS yang terhormat,\n\nTerdapat keluhan baru yang perlu ditangani.\n\n══════════════════════════\n📋 DETAIL TIKET\n══════════════════════════\nNomor Tiket   : {{ $json.nomor_tiket }}\nTanggal Masuk : {{ $json.tanggal_masuk }}\nPrioritas     : SEDANG\nSLA Target    : {{ $json.sla }}\n\n👤 DATA PELANGGAN\nNama          : {{ $json.nama_pelanggan }}\nNo. HP        : {{ $json.no_hp }}\nEmail         : {{ $json.email }}\n\n📦 DETAIL KELUHAN\nKategori      : {{ $json.kategori_keluhan }}\nNo. Pesanan   : {{ $json.nomor_pesanan }}\nDeskripsi     : {{ $json.deskripsi }}\n══════════════════════════\n\nMohon ditangani dalam {{ $json.sla }}.\n\nTerima kasih.\n\n— Sistem Manajemen Tiket Otomatis"
+      },
+      "name": "Email CS Team - Sedang",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1520, 420],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "=cs-support@company.co.id",
+        "subject": "=[RENDAH] Keluhan {{ $json.nomor_tiket }} - {{ $json.kategori_keluhan }}",
+        "message": "=Tim Support,\n\nKeluhan baru telah masuk ke sistem.\n\n══════════════════════════\n📋 DETAIL TIKET\n══════════════════════════\nNomor Tiket   : {{ $json.nomor_tiket }}\nTanggal Masuk : {{ $json.tanggal_masuk }}\nPrioritas     : RENDAH\nSLA Target    : {{ $json.sla }}\n\n👤 DATA PELANGGAN\nNama          : {{ $json.nama_pelanggan }}\nNo. HP        : {{ $json.no_hp }}\nEmail         : {{ $json.email }}\n\n📦 DETAIL KELUHAN\nKategori      : {{ $json.kategori_keluhan }}\nNo. Pesanan   : {{ $json.nomor_pesanan }}\nDeskripsi     : {{ $json.deskripsi }}\n══════════════════════════\n\nMohon ditangani dalam {{ $json.sla }}.\n\nTerima kasih.\n\n— Sistem Manajemen Tiket Otomatis"
+      },
+      "name": "Email Support - Rendah",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1520, 580],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Sistem Manajemen Tiket Keluhan Pelanggan\n\n### Alur Kerja:\n1. 📩 **Webhook** menerima keluhan dari form website / API\n2. 🔢 **Code** generate nomor tiket (TKT/YYYYMMDD/XXX) & klasifikasi prioritas\n3. 📊 **Google Sheets** mencatat seluruh data tiket\n4. 💬 **Auto-reply WhatsApp** konfirmasi ke pelanggan (via Fonnte)\n5. 🔀 **Switch** routing berdasarkan prioritas\n\n### Klasifikasi Prioritas:\n- 🔴 **Tinggi** (SLA 4 jam): rusak, tidak berfungsi, penting, urgent, bahaya\n- 🟡 **Sedang** (SLA 1 hari): lambat, kurang, terlambat, belum sampai\n- 🟢 **Rendah** (SLA 3 hari): keluhan umum lainnya\n\n### Routing:\n- **Tinggi** → WhatsApp + Email ke Manager (penanganan segera)\n- **Sedang** → Email ke Tim CS\n- **Rendah** → Email ke Support\n\n### Field Input (POST JSON):\n```json\n{\n  \"nama_pelanggan\": \"Budi Santoso\",\n  \"no_hp\": \"6281234567890\",\n  \"email\": \"budi@email.com\",\n  \"kategori_keluhan\": \"Produk\",\n  \"deskripsi\": \"Barang rusak saat diterima\",\n  \"nomor_pesanan\": \"ORD-20240115-001\"\n}\n```\nKategori: Produk / Layanan / Pengiriman / Lainnya\n\n### Credential yang Dibutuhkan:\n- Google Sheets OAuth2\n- Gmail OAuth2\n- Fonnte API Token (fonnte.com)"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, -180]
+    }
+  ],
+  "connections": {
+    "Receive Complaint": {
+      "main": [
+        [
+          {
+            "node": "Generate Ticket & Classify Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Ticket & Classify Priority": {
+      "main": [
+        [
+          {
+            "node": "Log Ticket to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Ticket to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Auto-reply WhatsApp Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-reply WhatsApp Customer": {
+      "main": [
+        [
+          {
+            "node": "Priority Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Priority Router": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Manager - Tinggi",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Manager - Tinggi",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email CS Team - Sedang",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email Support - Rendah",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

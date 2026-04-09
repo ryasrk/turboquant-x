@@ -1,0 +1,574 @@
+{
+  "name": "Employee Leave Request and Approval System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leave-request",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "name": "Webhook Pengajuan Cuti",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 460],
+      "webhookId": "leave-request-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validasi Pengajuan Cuti Karyawan\n// Referensi: UU Cipta Kerja / PP 35/2021\n\nconst input = $input.first().json.body;\n\n// Field wajib\nconst requiredFields = ['employee_id', 'nama', 'jenis_cuti', 'tanggal_mulai', 'tanggal_selesai', 'alasan', 'pengganti'];\nconst missingFields = requiredFields.filter(f => !input[f]);\n\nif (missingFields.length > 0) {\n  return [{\n    json: {\n      valid: false,\n      error: `Field wajib belum diisi: ${missingFields.join(', ')}`,\n      status: 'DITOLAK'\n    }\n  }];\n}\n\n// Jenis cuti yang diperbolehkan sesuai UU Cipta Kerja / PP 35/2021\nconst jenisCutiValid = {\n  'cuti_tahunan': { nama: 'Cuti Tahunan', maxHari: 12, perluApproval: true },\n  'cuti_sakit': { nama: 'Cuti Sakit', maxHari: 365, perluApproval: false },\n  'cuti_melahirkan': { nama: 'Cuti Melahirkan', maxHari: 90, perluApproval: false },\n  'cuti_besar': { nama: 'Cuti Besar', maxHari: 60, perluApproval: true },\n  'izin': { nama: 'Izin', maxHari: 3, perluApproval: false }\n};\n\nconst jenisCuti = input.jenis_cuti.toLowerCase();\nif (!jenisCutiValid[jenisCuti]) {\n  return [{\n    json: {\n      valid: false,\n      error: `Jenis cuti tidak valid: ${input.jenis_cuti}. Pilihan: ${Object.keys(jenisCutiValid).join(', ')}`,\n      status: 'DITOLAK'\n    }\n  }];\n}\n\n// Parse tanggal\nconst tanggalMulai = new Date(input.tanggal_mulai);\nconst tanggalSelesai = new Date(input.tanggal_selesai);\n\nif (isNaN(tanggalMulai.getTime()) || isNaN(tanggalSelesai.getTime())) {\n  return [{\n    json: {\n      valid: false,\n      error: 'Format tanggal tidak valid. Gunakan format YYYY-MM-DD',\n      status: 'DITOLAK'\n    }\n  }];\n}\n\nif (tanggalSelesai < tanggalMulai) {\n  return [{\n    json: {\n      valid: false,\n      error: 'Tanggal selesai harus setelah tanggal mulai',\n      status: 'DITOLAK'\n    }\n  }];\n}\n\n// Hitung durasi cuti (exclude weekend: Sabtu & Minggu)\nlet totalHariKerja = 0;\nlet currentDate = new Date(tanggalMulai);\nwhile (currentDate <= tanggalSelesai) {\n  const dayOfWeek = currentDate.getDay();\n  if (dayOfWeek !== 0 && dayOfWeek !== 6) {\n    totalHariKerja++;\n  }\n  currentDate.setDate(currentDate.getDate() + 1);\n}\n\nconst infoCuti = jenisCutiValid[jenisCuti];\n\n// Cek auto-approval: cuti tahunan <= 3 hari\nconst bisaAutoApprove = (jenisCuti === 'cuti_tahunan' && totalHariKerja <= 3);\n\nreturn [{\n  json: {\n    valid: true,\n    employee_id: input.employee_id,\n    nama: input.nama,\n    jenis_cuti: jenisCuti,\n    jenis_cuti_label: infoCuti.nama,\n    tanggal_mulai: input.tanggal_mulai,\n    tanggal_selesai: input.tanggal_selesai,\n    total_hari_kerja: totalHariKerja,\n    alasan: input.alasan,\n    pengganti: input.pengganti,\n    max_hari: infoCuti.maxHari,\n    bisa_auto_approve: bisaAutoApprove,\n    perlu_approval_manager: infoCuti.perluApproval && !bisaAutoApprove,\n    tanggal_pengajuan: new Date().toISOString().split('T')[0],\n    status: 'MENUNGGU'\n  }\n}];"
+      },
+      "name": "Validasi Pengajuan Cuti",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 460]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Cek Validasi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 460]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, pesan: $json.error, status: $json.status }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Response Validasi Gagal",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 620]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "employee_id",
+              "lookupValue": "={{ $json.employee_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Baca Saldo Cuti Karyawan",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [920, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cek sisa cuti karyawan dari Google Sheets\nconst pengajuan = $('Validasi Pengajuan Cuti').first().json;\nconst dataCuti = $input.first().json;\n\nif (!dataCuti || !dataCuti.employee_id) {\n  return [{\n    json: {\n      ...pengajuan,\n      saldo_cukup: false,\n      error: `Data karyawan ${pengajuan.employee_id} tidak ditemukan di sheet saldo cuti`,\n      sisa_cuti: 0\n    }\n  }];\n}\n\n// Ambil sisa cuti sesuai jenis\nconst fieldMap = {\n  'cuti_tahunan': 'sisa_cuti_tahunan',\n  'cuti_sakit': 'sisa_cuti_sakit',\n  'cuti_melahirkan': 'sisa_cuti_melahirkan',\n  'cuti_besar': 'sisa_cuti_besar',\n  'izin': 'sisa_izin'\n};\n\nconst field = fieldMap[pengajuan.jenis_cuti];\nconst sisaCuti = parseInt(dataCuti[field] || '0', 10);\nconst saldoCukup = sisaCuti >= pengajuan.total_hari_kerja;\n\n// Tentukan apakah bisa auto-approve\nconst autoApprove = pengajuan.bisa_auto_approve && saldoCukup;\n\nreturn [{\n  json: {\n    ...pengajuan,\n    sisa_cuti: sisaCuti,\n    sisa_setelah: sisaCuti - pengajuan.total_hari_kerja,\n    saldo_cukup: saldoCukup,\n    auto_approve: autoApprove,\n    departemen: dataCuti.departemen || '',\n    email_karyawan: dataCuti.email || '',\n    email_manager: dataCuti.email_manager || '',\n    telegram_chat_id: dataCuti.telegram_chat_id || '',\n    manager_nama: dataCuti.manager_nama || ''\n  }\n}];"
+      },
+      "name": "Cek Saldo Cuti",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "saldo-check",
+              "leftValue": "={{ $json.saldo_cukup }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Cek Saldo Cukup",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, pesan: 'Saldo cuti tidak mencukupi. Sisa cuti ' + $json.jenis_cuti_label + ': ' + $json.sisa_cuti + ' hari, dibutuhkan: ' + $json.total_hari_kerja + ' hari kerja.', status: 'DITOLAK_SALDO' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Response Saldo Tidak Cukup",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1580, 460]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "auto-approve-check",
+              "leftValue": "={{ $json.auto_approve }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Auto-Approve atau Perlu Manager",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1580, 160]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employee_id": "={{ $json.employee_id }}",
+            "nama": "={{ $json.nama }}",
+            "jenis_cuti": "={{ $json.jenis_cuti_label }}",
+            "tanggal_mulai": "={{ $json.tanggal_mulai }}",
+            "tanggal_selesai": "={{ $json.tanggal_selesai }}",
+            "total_hari_kerja": "={{ $json.total_hari_kerja }}",
+            "alasan": "={{ $json.alasan }}",
+            "pengganti": "={{ $json.pengganti }}",
+            "status": "DISETUJUI_OTOMATIS",
+            "tanggal_pengajuan": "={{ $json.tanggal_pengajuan }}",
+            "sisa_cuti_setelah": "={{ $json.sisa_setelah }}",
+            "catatan": "Auto-approved: Cuti Tahunan <= 3 hari dengan saldo mencukupi"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Cuti Auto-Approved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1820, 40],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employee_id": "={{ $json.employee_id }}",
+            "nama": "={{ $json.nama }}",
+            "jenis_cuti": "={{ $json.jenis_cuti_label }}",
+            "tanggal_mulai": "={{ $json.tanggal_mulai }}",
+            "tanggal_selesai": "={{ $json.tanggal_selesai }}",
+            "total_hari_kerja": "={{ $json.total_hari_kerja }}",
+            "alasan": "={{ $json.alasan }}",
+            "pengganti": "={{ $json.pengganti }}",
+            "status": "MENUNGGU_APPROVAL_MANAGER",
+            "tanggal_pengajuan": "={{ $json.tanggal_pengajuan }}",
+            "sisa_cuti_setelah": "={{ $json.sisa_setelah }}",
+            "catatan": "Membutuhkan persetujuan manager"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Cuti Menunggu Approval",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1820, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Cek Saldo Cuti').first().json.email_karyawan }}",
+        "subject": "✅ Cuti Anda Disetujui Otomatis - {{ $json.jenis_cuti_label }}",
+        "emailType": "html",
+        "message": "<h2>Pengajuan Cuti Disetujui Otomatis</h2><p>Yth. <strong>{{ $('Cek Saldo Cuti').first().json.nama }}</strong>,</p><p>Pengajuan cuti Anda telah <strong>disetujui secara otomatis</strong>.</p><table border='1' cellpadding='8' cellspacing='0'><tr><td><strong>Jenis Cuti</strong></td><td>{{ $('Cek Saldo Cuti').first().json.jenis_cuti_label }}</td></tr><tr><td><strong>Tanggal</strong></td><td>{{ $('Cek Saldo Cuti').first().json.tanggal_mulai }} s/d {{ $('Cek Saldo Cuti').first().json.tanggal_selesai }}</td></tr><tr><td><strong>Durasi</strong></td><td>{{ $('Cek Saldo Cuti').first().json.total_hari_kerja }} hari kerja</td></tr><tr><td><strong>Pengganti</strong></td><td>{{ $('Cek Saldo Cuti').first().json.pengganti }}</td></tr><tr><td><strong>Sisa Cuti</strong></td><td>{{ $('Cek Saldo Cuti').first().json.sisa_setelah }} hari</td></tr></table><p><em>Ref: UU Cipta Kerja / PP 35/2021 tentang Hak Cuti Karyawan</em></p><p>Selamat beristirahat!</p>",
+        "options": {}
+      },
+      "name": "Email Karyawan Auto-Approved",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2060, 40],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Cek Saldo Cuti').first().json.email_manager }}",
+        "subject": "🔔 Persetujuan Cuti Diperlukan - {{ $('Cek Saldo Cuti').first().json.nama }}",
+        "emailType": "html",
+        "message": "<h2>Permintaan Persetujuan Cuti</h2><p>Yth. <strong>{{ $('Cek Saldo Cuti').first().json.manager_nama }}</strong>,</p><p>Karyawan berikut mengajukan cuti dan memerlukan persetujuan Anda:</p><table border='1' cellpadding='8' cellspacing='0'><tr><td><strong>Nama Karyawan</strong></td><td>{{ $('Cek Saldo Cuti').first().json.nama }}</td></tr><tr><td><strong>ID Karyawan</strong></td><td>{{ $('Cek Saldo Cuti').first().json.employee_id }}</td></tr><tr><td><strong>Departemen</strong></td><td>{{ $('Cek Saldo Cuti').first().json.departemen }}</td></tr><tr><td><strong>Jenis Cuti</strong></td><td>{{ $('Cek Saldo Cuti').first().json.jenis_cuti_label }}</td></tr><tr><td><strong>Tanggal</strong></td><td>{{ $('Cek Saldo Cuti').first().json.tanggal_mulai }} s/d {{ $('Cek Saldo Cuti').first().json.tanggal_selesai }}</td></tr><tr><td><strong>Durasi</strong></td><td>{{ $('Cek Saldo Cuti').first().json.total_hari_kerja }} hari kerja</td></tr><tr><td><strong>Alasan</strong></td><td>{{ $('Cek Saldo Cuti').first().json.alasan }}</td></tr><tr><td><strong>Pengganti</strong></td><td>{{ $('Cek Saldo Cuti').first().json.pengganti }}</td></tr><tr><td><strong>Sisa Cuti Saat Ini</strong></td><td>{{ $('Cek Saldo Cuti').first().json.sisa_cuti }} hari</td></tr><tr><td><strong>Sisa Setelah Cuti</strong></td><td>{{ $('Cek Saldo Cuti').first().json.sisa_setelah }} hari</td></tr></table><p><strong>Silakan setujui atau tolak pengajuan ini.</strong></p><p><em>Ref: UU Cipta Kerja / PP 35/2021</em></p>",
+        "options": {}
+      },
+      "name": "Email Manager Approval",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2060, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Cek Saldo Cuti').first().json.telegram_chat_id }}",
+        "text": "✅ *Cuti Disetujui Otomatis*\n\nNama: {{ $('Cek Saldo Cuti').first().json.nama }}\nJenis: {{ $('Cek Saldo Cuti').first().json.jenis_cuti_label }}\nTanggal: {{ $('Cek Saldo Cuti').first().json.tanggal_mulai }} s/d {{ $('Cek Saldo Cuti').first().json.tanggal_selesai }}\nDurasi: {{ $('Cek Saldo Cuti').first().json.total_hari_kerja }} hari kerja\nSisa Cuti: {{ $('Cek Saldo Cuti').first().json.sisa_setelah }} hari\n\nSelamat beristirahat! 🌴",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Notif Auto-Approved",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2300, 40],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Cek Saldo Cuti').first().json.telegram_chat_id }}",
+        "text": "🔔 *Pengajuan Cuti Menunggu Persetujuan*\n\nNama: {{ $('Cek Saldo Cuti').first().json.nama }}\nJenis: {{ $('Cek Saldo Cuti').first().json.jenis_cuti_label }}\nTanggal: {{ $('Cek Saldo Cuti').first().json.tanggal_mulai }} s/d {{ $('Cek Saldo Cuti').first().json.tanggal_selesai }}\nDurasi: {{ $('Cek Saldo Cuti').first().json.total_hari_kerja }} hari kerja\nManager: {{ $('Cek Saldo Cuti').first().json.manager_nama }}\n\nPengajuan Anda sedang menunggu persetujuan manager. Mohon tunggu konfirmasi. ⏳",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Notif Menunggu Approval",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2300, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, pesan: 'Cuti ' + $('Cek Saldo Cuti').first().json.jenis_cuti_label + ' disetujui otomatis. Sisa cuti: ' + $('Cek Saldo Cuti').first().json.sisa_setelah + ' hari.', status: 'DISETUJUI_OTOMATIS', data: { employee_id: $('Cek Saldo Cuti').first().json.employee_id, nama: $('Cek Saldo Cuti').first().json.nama, tanggal_mulai: $('Cek Saldo Cuti').first().json.tanggal_mulai, tanggal_selesai: $('Cek Saldo Cuti').first().json.tanggal_selesai, total_hari_kerja: $('Cek Saldo Cuti').first().json.total_hari_kerja } }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Response Auto-Approved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2540, 40]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, pesan: 'Pengajuan cuti ' + $('Cek Saldo Cuti').first().json.jenis_cuti_label + ' telah dikirim ke manager untuk persetujuan.', status: 'MENUNGGU_APPROVAL_MANAGER', data: { employee_id: $('Cek Saldo Cuti').first().json.employee_id, nama: $('Cek Saldo Cuti').first().json.nama, manager: $('Cek Saldo Cuti').first().json.manager_nama, tanggal_mulai: $('Cek Saldo Cuti').first().json.tanggal_mulai, tanggal_selesai: $('Cek Saldo Cuti').first().json.tanggal_selesai, total_hari_kerja: $('Cek Saldo Cuti').first().json.total_hari_kerja } }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Response Menunggu Approval",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2540, 300]
+    },
+    {
+      "parameters": {
+        "content": "## 📋 Sistem Pengajuan & Persetujuan Cuti Karyawan\n\n### Alur Kerja:\n1. **Webhook** menerima pengajuan cuti dari karyawan\n2. **Validasi** data pengajuan (field wajib, jenis cuti, format tanggal)\n3. **Baca saldo cuti** dari Google Sheets\n4. **Cek saldo** apakah mencukupi\n5. **Auto-approve** jika Cuti Tahunan ≤ 3 hari dengan saldo cukup\n6. **Kirim ke manager** jika butuh persetujuan manual\n7. **Log** semua pengajuan ke Google Sheets\n8. **Notifikasi** via Email (Gmail) dan Telegram\n\n### Jenis Cuti (UU Cipta Kerja / PP 35/2021):\n- **Cuti Tahunan**: 12 hari/tahun (setelah 12 bulan kerja)\n- **Cuti Sakit**: sesuai surat dokter\n- **Cuti Melahirkan**: 3 bulan (1.5 bulan sebelum & sesudah)\n- **Cuti Besar**: untuk masa kerja tertentu\n- **Izin**: keperluan mendadak (max 3 hari)\n\n### Setup Google Sheets:\n**Sheet 1 - Saldo Cuti:** employee_id, nama, departemen, email, email_manager, manager_nama, telegram_chat_id, sisa_cuti_tahunan, sisa_cuti_sakit, sisa_cuti_melahirkan, sisa_cuti_besar, sisa_izin\n**Sheet 2 - Log Cuti:** employee_id, nama, jenis_cuti, tanggal_mulai, tanggal_selesai, total_hari_kerja, alasan, pengganti, status, tanggal_pengajuan, sisa_cuti_setelah, catatan\n\n### Contoh Request Body:\n```json\n{\n  \"employee_id\": \"EMP001\",\n  \"nama\": \"Budi Santoso\",\n  \"jenis_cuti\": \"cuti_tahunan\",\n  \"tanggal_mulai\": \"2026-04-13\",\n  \"tanggal_selesai\": \"2026-04-15\",\n  \"alasan\": \"Urusan keluarga\",\n  \"pengganti\": \"Siti Rahayu\"\n}\n```\n\n### Credentials yang Dibutuhkan:\n- Google Sheets OAuth2\n- Gmail OAuth2\n- Telegram Bot API",
+        "height": 860,
+        "width": 520,
+        "color": 4
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-160, 0]
+    }
+  ],
+  "connections": {
+    "Webhook Pengajuan Cuti": {
+      "main": [
+        [
+          {
+            "node": "Validasi Pengajuan Cuti",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validasi Pengajuan Cuti": {
+      "main": [
+        [
+          {
+            "node": "Cek Validasi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cek Validasi": {
+      "main": [
+        [
+          {
+            "node": "Baca Saldo Cuti Karyawan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Response Validasi Gagal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baca Saldo Cuti Karyawan": {
+      "main": [
+        [
+          {
+            "node": "Cek Saldo Cuti",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cek Saldo Cuti": {
+      "main": [
+        [
+          {
+            "node": "Cek Saldo Cukup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cek Saldo Cukup": {
+      "main": [
+        [
+          {
+            "node": "Auto-Approve atau Perlu Manager",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Response Saldo Tidak Cukup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Approve atau Perlu Manager": {
+      "main": [
+        [
+          {
+            "node": "Log Cuti Auto-Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Cuti Menunggu Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Cuti Auto-Approved": {
+      "main": [
+        [
+          {
+            "node": "Email Karyawan Auto-Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Cuti Menunggu Approval": {
+      "main": [
+        [
+          {
+            "node": "Email Manager Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Karyawan Auto-Approved": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notif Auto-Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Manager Approval": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notif Menunggu Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Notif Auto-Approved": {
+      "main": [
+        [
+          {
+            "node": "Response Auto-Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Notif Menunggu Approval": {
+      "main": [
+        [
+          {
+            "node": "Response Menunggu Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Indonesia Business"
+    },
+    {
+      "name": "HR"
+    },
+    {
+      "name": "Leave Management"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-04-09T00:00:00.000Z",
+  "versionId": "1"
+}

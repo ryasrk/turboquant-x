@@ -1,0 +1,160 @@
+{
+  "name": "Telegram Birthday Reminder Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "triggerAtHour": 7, "triggerAtMinute": 0 }
+          ]
+        }
+      },
+      "name": "Daily 7AM Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Birthdays" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get Birthday List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date();\nconst todayStr = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;\n\nconst birthdayPeople = items.filter(i => {\n  const bday = i.json.birthday || '';\n  // Support MM-DD or YYYY-MM-DD formats\n  const parts = bday.split('-');\n  let monthDay;\n  if (parts.length === 3) {\n    monthDay = `${parts[1]}-${parts[2]}`;\n  } else if (parts.length === 2) {\n    monthDay = bday;\n  }\n  return monthDay === todayStr;\n});\n\nif (birthdayPeople.length === 0) {\n  return [{ json: { hasBirthday: false } }];\n}\n\nreturn birthdayPeople.map(p => ({\n  json: {\n    hasBirthday: true,\n    name: p.json.name,\n    username: p.json.username || '',\n    chatId: p.json.chatId || '',\n    groupChatId: p.json.groupChatId || '',\n    birthday: p.json.birthday,\n    today: todayStr\n  }\n}));"
+      },
+      "name": "Check Today Birthdays",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.hasBirthday}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Has Birthday?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.groupChatId}}",
+        "text": "=🎂🎉 <b>Happy Birthday!</b> 🎉🎂\n\n🥳 Today is @{{$json.username}}'s birthday!\n\n🌟 {{$json.name}}, wishing you an amazing year ahead!\n\nLet's celebrate! 🎊🎈🎁",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Group Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=🎂 <b>Happy Birthday, {{$json.name}}!</b> 🎉\n\nWishing you health, happiness, and success!\nHave an incredible day! 🥳🎁",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Personal DM",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "BirthdayLog" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Birthday Reminder Bot\n\nDaily 7AM → check Sheets birthday list → if birthday today → group message + personal DM → log.\n\n**Setup:**\n1. Create 'Birthdays' sheet: name, username, birthday (MM-DD or YYYY-MM-DD), chatId (personal), groupChatId\n2. Create 'BirthdayLog' sheet for tracking\n3. Set Telegram Bot credentials\n4. Add team members to Birthdays sheet",
+        "width": 420,
+        "height": 220
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Daily 7AM Check": {
+      "main": [
+        [{ "node": "Get Birthday List", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Birthday List": {
+      "main": [
+        [{ "node": "Check Today Birthdays", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Today Birthdays": {
+      "main": [
+        [{ "node": "Has Birthday?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Birthday?": {
+      "main": [
+        [
+          { "node": "Send Group Message", "type": "main", "index": 0 },
+          { "node": "Send Personal DM", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Send Group Message": {
+      "main": [
+        [{ "node": "Log Sent", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

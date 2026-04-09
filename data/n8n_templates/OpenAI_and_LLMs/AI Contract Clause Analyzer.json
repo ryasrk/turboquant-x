@@ -1,0 +1,138 @@
+{
+  "name": "AI Contract Clause Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze-contract",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Contract Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a legal contract analyst AI. Analyze the following contract text and extract:\n\n1. **Key Clauses** — List each important clause with a brief description\n2. **Risk Assessment** — Identify potential risks for each party\n3. **Obligations** — List obligations for each party with deadlines if mentioned\n4. **Unusual Terms** — Flag any non-standard or potentially unfavorable terms\n5. **Missing Clauses** — Common clauses that are absent but recommended\n\nReturn JSON:\n{\n  \"contract_type\": \"...\",\n  \"parties\": [\"Party A\", \"Party B\"],\n  \"clauses\": [{\"name\": \"...\", \"description\": \"...\", \"risk_level\": \"high/medium/low\"}],\n  \"risks\": [{\"description\": \"...\", \"severity\": \"high/medium/low\", \"affected_party\": \"...\"}],\n  \"obligations\": [{\"party\": \"...\", \"obligation\": \"...\", \"deadline\": \"...\"}],\n  \"unusual_terms\": [\"...\"],\n  \"missing_clauses\": [\"...\"],\n  \"overall_risk\": \"high/medium/low\",\n  \"summary\": \"2-3 sentence executive summary\"\n}\n\nContract Text:\n{{ $json.body.contract_text }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 3000
+        }
+      },
+      "name": "OpenAI - Analyze Contract",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { summary: aiResponse, overall_risk: 'unknown', clauses: [], risks: [], obligations: [] };\n}\nconst clausesSummary = (parsed.clauses || []).map(c => `${c.name} [${c.risk_level}]: ${c.description}`).join('\\n');\nconst risksSummary = (parsed.risks || []).map(r => `[${r.severity}] ${r.description} (${r.affected_party})`).join('\\n');\nconst obligationsSummary = (parsed.obligations || []).map(o => `${o.party}: ${o.obligation} (by ${o.deadline || 'N/A'})`).join('\\n');\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    contractType: parsed.contract_type || 'Unknown',\n    parties: Array.isArray(parsed.parties) ? parsed.parties.join(' / ') : '',\n    overallRisk: parsed.overall_risk || 'unknown',\n    summary: parsed.summary || '',\n    clauses: clausesSummary,\n    risks: risksSummary,\n    obligations: obligationsSummary,\n    unusualTerms: Array.isArray(parsed.unusual_terms) ? parsed.unusual_terms.join('; ') : '',\n    missingClauses: Array.isArray(parsed.missing_clauses) ? parsed.missing_clauses.join('; ') : ''\n  }\n}];"
+      },
+      "name": "Code - Parse Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Contract Type": "={{ $json.contractType }}",
+            "Parties": "={{ $json.parties }}",
+            "Overall Risk": "={{ $json.overallRisk }}",
+            "Summary": "={{ $json.summary }}",
+            "Key Clauses": "={{ $json.clauses }}",
+            "Risks": "={{ $json.risks }}",
+            "Missing Clauses": "={{ $json.missingClauses }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Contract Type", "type": "string", "display": true },
+            { "id": "Parties", "type": "string", "display": true },
+            { "id": "Overall Risk", "type": "string", "display": true },
+            { "id": "Summary", "type": "string", "display": true },
+            { "id": "Key Clauses", "type": "string", "display": true },
+            { "id": "Risks", "type": "string", "display": true },
+            { "id": "Missing Clauses", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Contract Summary",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.legal_email || 'legal@example.com' }}",
+        "subject": "=Contract Analysis: {{ $json.contractType }} [Risk: {{ $json.overallRisk }}]",
+        "message": "=<h2>Contract Analysis Report</h2>\n<p><strong>Type:</strong> {{ $json.contractType }}</p>\n<p><strong>Parties:</strong> {{ $json.parties }}</p>\n<p><strong>Overall Risk:</strong> {{ $json.overallRisk }}</p>\n<p><strong>Summary:</strong> {{ $json.summary }}</p>\n\n<h3>Key Clauses</h3>\n<pre>{{ $json.clauses }}</pre>\n\n<h3>Risks Identified</h3>\n<pre>{{ $json.risks }}</pre>\n\n<h3>Obligations</h3>\n<pre>{{ $json.obligations }}</pre>\n\n<h3>Unusual Terms</h3>\n<p>{{ $json.unusualTerms }}</p>\n\n<h3>Missing (Recommended) Clauses</h3>\n<p>{{ $json.missingClauses }}</p>",
+        "options": {}
+      },
+      "name": "Gmail - Send to Legal",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 800,
+        "height": 200,
+        "content": "## AI Contract Clause Analyzer\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set spreadsheet ID for contract summary log\n3. POST to webhook: `{\"contract_text\": \"full contract text...\", \"legal_email\": \"legal@yourcompany.com\"}`\n\nAnalyzes contracts for key clauses, risks, obligations, unusual terms, and missing clauses. Logs to Sheets and emails the legal team."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Contract Input": {
+      "main": [[{ "node": "OpenAI - Analyze Contract", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Analyze Contract": {
+      "main": [[{ "node": "Code - Parse Analysis", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Analysis": {
+      "main": [[
+        { "node": "Google Sheets - Contract Summary", "type": "main", "index": 0 },
+        { "node": "Gmail - Send to Legal", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

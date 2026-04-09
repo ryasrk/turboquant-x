@@ -1,0 +1,138 @@
+{
+  "name": "AI Chatbot Training Data Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-training-data",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - Topic Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a conversational AI training data expert. Generate high-quality chatbot training data for the specified topic and domain.\n\nTopic: {{ $json.body.topic }}\nDomain: {{ $json.body.domain || 'General' }}\nTone: {{ $json.body.tone || 'Professional and friendly' }}\nLanguage: {{ $json.body.language || 'English' }}\nCount: {{ $json.body.count || 20 }} Q&A pairs\n\nGenerate:\n1. **Q&A Pairs** — Diverse question-answer pairs covering the topic comprehensively\n2. **Intents** — Named intents with example utterances\n3. **Entities** — Named entities that should be extracted\n\nReturn JSON:\n{\n  \"qa_pairs\": [\n    {\"id\": 1, \"question\": \"...\", \"answer\": \"...\", \"intent\": \"...\", \"variations\": [\"alt question 1\", \"alt question 2\"]}\n  ],\n  \"intents\": [\n    {\"name\": \"intent_name\", \"description\": \"...\", \"examples\": [\"utterance1\", \"utterance2\", \"utterance3\"]}\n  ],\n  \"entities\": [\n    {\"name\": \"entity_name\", \"type\": \"...\", \"examples\": [\"value1\", \"value2\"]}\n  ],\n  \"fallback_responses\": [\"I'm not sure I understand...\", \"Could you rephrase?\"],\n  \"greeting_responses\": [\"Hello! How can I help?\"],\n  \"topic_coverage\": \"percentage estimate of topic coverage\",\n  \"total_qa\": 20\n}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 4000
+        }
+      },
+      "name": "OpenAI - Generate Training Data",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { qa_pairs: [{ id: 1, question: 'Parse error', answer: aiResponse, intent: 'error' }], intents: [], entities: [] };\n}\n\nconst qaPairs = parsed.qa_pairs || [];\nreturn qaPairs.map(qa => ({\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    topic: items[0].json.body?.topic || '',\n    domain: items[0].json.body?.domain || 'General',\n    id: qa.id || 0,\n    question: qa.question || '',\n    answer: qa.answer || '',\n    intent: qa.intent || '',\n    variations: Array.isArray(qa.variations) ? qa.variations.join(' | ') : '',\n    totalQA: parsed.total_qa || qaPairs.length,\n    intentsCount: (parsed.intents || []).length,\n    entitiesCount: (parsed.entities || []).length,\n    topicCoverage: parsed.topic_coverage || ''\n  }\n}));"
+      },
+      "name": "Code - Parse Training Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Topic": "={{ $json.topic }}",
+            "Domain": "={{ $json.domain }}",
+            "ID": "={{ $json.id }}",
+            "Question": "={{ $json.question }}",
+            "Answer": "={{ $json.answer }}",
+            "Intent": "={{ $json.intent }}",
+            "Variations": "={{ $json.variations }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Topic", "type": "string", "display": true },
+            { "id": "Domain", "type": "string", "display": true },
+            { "id": "ID", "type": "string", "display": true },
+            { "id": "Question", "type": "string", "display": true },
+            { "id": "Answer", "type": "string", "display": true },
+            { "id": "Intent", "type": "string", "display": true },
+            { "id": "Variations", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Training Dataset",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.body.notify_email || 'ai-team@example.com' }}",
+        "subject": "=Chatbot Training Data Ready: {{ $json.topic }} ({{ $json.totalQA }} Q&A pairs)",
+        "message": "=<h2>Chatbot Training Data Generated</h2>\n<p><strong>Topic:</strong> {{ $json.topic }}</p>\n<p><strong>Domain:</strong> {{ $json.domain }}</p>\n<p><strong>Q&A Pairs:</strong> {{ $json.totalQA }}</p>\n<p><strong>Intents:</strong> {{ $json.intentsCount }}</p>\n<p><strong>Entities:</strong> {{ $json.entitiesCount }}</p>\n<p><strong>Coverage:</strong> {{ $json.topicCoverage }}</p>\n\n<p>All training data has been saved to the Google Sheets training dataset. Review and import into your chatbot platform.</p>",
+        "options": {}
+      },
+      "name": "Gmail - Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 850,
+        "height": 220,
+        "content": "## AI Chatbot Training Data Generator\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Set spreadsheet ID for training dataset storage\n3. POST to webhook: `{\"topic\": \"Product Returns\", \"domain\": \"E-commerce\", \"tone\": \"Friendly\", \"language\": \"English\", \"count\": 20, \"notify_email\": \"ai@company.com\"}`\n\nGenerates Q&A pairs with intent labels, entity extraction, and question variations. Saves each pair as a row in Sheets for easy import into chatbot platforms (Dialogflow, Rasa, etc.)."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Topic Input": {
+      "main": [[{ "node": "OpenAI - Generate Training Data", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Generate Training Data": {
+      "main": [[{ "node": "Code - Parse Training Data", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Training Data": {
+      "main": [[{ "node": "Google Sheets - Training Dataset", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Training Dataset": {
+      "main": [[{ "node": "Gmail - Notification", "type": "main", "index": 0 }]]
+    }
+  }
+}

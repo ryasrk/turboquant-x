@@ -1,0 +1,296 @@
+{
+  "name": "Multi-Step Form Workflow with Approval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "form-submission",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Form Submission Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json.body;\nconst errors = [];\n\nif (!data.employee_name || data.employee_name.trim().length < 2) {\n  errors.push('Employee name is required (min 2 characters)');\n}\nif (!data.department) {\n  errors.push('Department is required');\n}\nif (!data.request_type) {\n  errors.push('Request type is required');\n}\nif (!data.amount || isNaN(parseFloat(data.amount)) || parseFloat(data.amount) <= 0) {\n  errors.push('Valid amount is required');\n}\nif (!data.justification || data.justification.trim().length < 10) {\n  errors.push('Justification must be at least 10 characters');\n}\n\nconst submissionId = `SUB-${Date.now().toString(36).toUpperCase()}`;\n\nreturn [{\n  json: {\n    submission_id: submissionId,\n    is_valid: errors.length === 0,\n    validation_errors: errors,\n    employee_name: data.employee_name || '',\n    employee_email: data.employee_email || '',\n    department: data.department || '',\n    request_type: data.request_type || '',\n    amount: parseFloat(data.amount) || 0,\n    justification: data.justification || '',\n    submitted_at: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Validate Form Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_valid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Validation Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', errors: $json.validation_errors }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Return Validation Errors",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.amount }}",
+              "operation": "largerEqual",
+              "value2": 5000000
+            }
+          ]
+        }
+      },
+      "name": "Requires Manager Approval?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "workflow@company.com",
+        "toEmail": "manager@company.com",
+        "subject": "🔔 Approval Required: {{ $json.request_type }} - {{ $json.submission_id }}",
+        "text": "Approval Required\n\n📋 Submission ID: {{ $json.submission_id }}\n👤 Employee: {{ $json.employee_name }}\n🏢 Department: {{ $json.department }}\n📦 Type: {{ $json.request_type }}\n💰 Amount: Rp {{ $json.amount.toLocaleString() }}\n\nJustification:\n{{ $json.justification }}\n\nClick to approve: {{ $env.BASE_URL }}/webhook/approve/{{ $json.submission_id }}\nClick to reject: {{ $env.BASE_URL }}/webhook/reject/{{ $json.submission_id }}",
+        "options": {}
+      },
+      "name": "Send Manager Approval Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1250, 100],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "approve/{{ $json.submission_id }}",
+        "options": {}
+      },
+      "name": "Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [1500, 50]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "reject/{{ $json.submission_id }}",
+        "options": {}
+      },
+      "name": "Rejection Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [1500, 200]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Approved_Requests"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "submission_id": "={{ $json.submission_id }}",
+            "employee_name": "={{ $json.employee_name }}",
+            "department": "={{ $json.department }}",
+            "request_type": "={{ $json.request_type }}",
+            "amount": "={{ $json.amount }}",
+            "status": "APPROVED",
+            "approved_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Process Approved Request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1750, 50],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "workflow@company.com",
+        "toEmail": "={{ $json.employee_email }}",
+        "subject": "❌ Request Rejected: {{ $json.submission_id }}",
+        "text": "Your request has been rejected.\n\n📋 Submission ID: {{ $json.submission_id }}\n📦 Type: {{ $json.request_type }}\n💰 Amount: Rp {{ $json.amount.toLocaleString() }}\n\nPlease contact your manager for details.",
+        "options": {}
+      },
+      "name": "Notify Submitter Rejected",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1750, 200],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "AUTO_APPROVED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Auto-Approve Low Amount",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1250, 350]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Approved_Requests"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "submission_id": "={{ $json.submission_id }}",
+            "employee_name": "={{ $json.employee_name }}",
+            "department": "={{ $json.department }}",
+            "request_type": "={{ $json.request_type }}",
+            "amount": "={{ $json.amount }}",
+            "status": "AUTO_APPROVED",
+            "approved_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Save Auto-Approved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1500, 350],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', submission_id: $json.submission_id, approval_status: $json.amount >= 5000000 ? 'pending_manager' : 'auto_approved' }) }}",
+        "options": {}
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1750, 400]
+    },
+    {
+      "parameters": {
+        "content": "## Multi-Step Form Workflow with Approval\n\nForm submission → validation → conditional approval routing.\n\n**Flow:**\n1. Receive form submission via webhook\n2. Validate all required fields\n3. If invalid → return errors (400)\n4. If amount ≥ Rp 5,000,000 → send to manager for approval\n5. If amount < Rp 5,000,000 → auto-approve\n6. Manager clicks approve/reject link in email\n7. Approved → process and save\n8. Rejected → notify submitter\n\n**Required Fields:**\n- employee_name, employee_email, department\n- request_type, amount, justification\n\n**Approval Threshold:** Rp 5,000,000",
+        "width": 440,
+        "height": 360
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Form Submission Webhook": {
+      "main": [
+        [{ "node": "Validate Form Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Form Data": {
+      "main": [
+        [{ "node": "Validation Passed?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validation Passed?": {
+      "main": [
+        [{ "node": "Requires Manager Approval?", "type": "main", "index": 0 }],
+        [{ "node": "Return Validation Errors", "type": "main", "index": 0 }]
+      ]
+    },
+    "Requires Manager Approval?": {
+      "main": [
+        [{ "node": "Send Manager Approval Email", "type": "main", "index": 0 }],
+        [{ "node": "Auto-Approve Low Amount", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Manager Approval Email": {
+      "main": [
+        [{ "node": "Respond Success", "type": "main", "index": 0 }]
+      ]
+    },
+    "Approval Webhook": {
+      "main": [
+        [{ "node": "Process Approved Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Rejection Webhook": {
+      "main": [
+        [{ "node": "Notify Submitter Rejected", "type": "main", "index": 0 }]
+      ]
+    },
+    "Auto-Approve Low Amount": {
+      "main": [
+        [{ "node": "Save Auto-Approved", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Auto-Approved": {
+      "main": [
+        [{ "node": "Respond Success", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

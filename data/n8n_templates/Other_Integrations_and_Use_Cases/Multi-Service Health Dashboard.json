@@ -1,0 +1,187 @@
+{
+  "name": "Multi-Service Health Dashboard",
+  "nodes": [
+    {
+      "name": "Schedule 5 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Ping Service 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 100],
+      "parameters": {
+        "url": "https://your-service-1.example.com/health",
+        "method": "GET",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": { "responseFormat": "text" }
+          }
+        }
+      },
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Ping Service 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "https://your-service-2.example.com/health",
+        "method": "GET",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": { "responseFormat": "text" }
+          }
+        }
+      },
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Ping Service 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 500],
+      "parameters": {
+        "url": "https://your-service-3.example.com/health",
+        "method": "GET",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": { "responseFormat": "text" }
+          }
+        }
+      },
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Check Responses",
+      "type": "n8n-nodes-base.code",
+      "position": [710, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date().toISOString();\nconst services = [\n  { name: 'Service 1', url: 'https://your-service-1.example.com/health' },\n  { name: 'Service 2', url: 'https://your-service-2.example.com/health' },\n  { name: 'Service 3', url: 'https://your-service-3.example.com/health' }\n];\n\nconst results = items.map((item, idx) => {\n  const service = services[idx] || { name: `Service ${idx + 1}`, url: 'unknown' };\n  const statusCode = item.json?.statusCode || item.json?.$response?.statusCode || 0;\n  const hasError = !!item.json?.error || statusCode >= 400 || statusCode === 0;\n  return {\n    name: service.name,\n    url: service.url,\n    statusCode: statusCode,\n    isUp: !hasError && statusCode >= 200 && statusCode < 300,\n    responseTime: item.json?.$response?.responseTime || 0,\n    error: item.json?.error || ''\n  };\n});\n\nconst downServices = results.filter(r => !r.isUp);\nconst allUp = downServices.length === 0;\n\nreturn [{\n  json: {\n    timestamp: now,\n    totalServices: results.length,\n    upCount: results.filter(r => r.isUp).length,\n    downCount: downServices.length,\n    allHealthy: allUp,\n    hasDownService: !allUp,\n    services: JSON.stringify(results),\n    downServiceNames: downServices.map(s => s.name).join(', ') || 'None',\n    summary: allUp ? 'All services healthy ✅' : `${downServices.length} service(s) down: ${downServices.map(s => s.name).join(', ')}`\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Uptime Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Check Any Down",
+      "type": "n8n-nodes-base.if",
+      "position": [1170, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasDownService }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Slack Down Alert",
+      "type": "n8n-nodes-base.slack",
+      "position": [1400, 200],
+      "parameters": {
+        "channel": "",
+        "text": "=🔴 *SERVICE DOWN ALERT*\n\n{{ $json.summary }}\n\nDown Services: {{ $json.downServiceNames }}\nHealthy: {{ $json.upCount }}/{{ $json.totalServices }}\n\nTimestamp: {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Email Down Alert",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1400, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=🔴 Service Down: {{ $json.downServiceNames }}",
+        "message": "=SERVICE HEALTH ALERT\n\n{{ $json.summary }}\n\nDown Services: {{ $json.downServiceNames }}\nHealthy: {{ $json.upCount }}/{{ $json.totalServices }}\n\nFull Details:\n{{ $json.services }}\n\nTimestamp: {{ $json.timestamp }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Multi-Service Health Dashboard\nPings multiple service health endpoints every 5 minutes in parallel, checks responses, logs uptime to Sheets, and alerts Slack + Email if any service is down.\n\n**Setup:**\n1. Replace service URLs in the HTTP Request nodes\n2. Add/remove HTTP Request nodes for more/fewer services\n3. Update the services array in the Code node to match\n4. Connect Google Sheets for uptime logging\n5. Set Slack channel and Gmail recipient for alerts"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule 5 Min": {
+      "main": [
+        [
+          { "node": "Ping Service 1", "type": "main", "index": 0 },
+          { "node": "Ping Service 2", "type": "main", "index": 0 },
+          { "node": "Ping Service 3", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Ping Service 1": {
+      "main": [[{ "node": "Check Responses", "type": "main", "index": 0 }]]
+    },
+    "Ping Service 2": {
+      "main": [[{ "node": "Check Responses", "type": "main", "index": 0 }]]
+    },
+    "Ping Service 3": {
+      "main": [[{ "node": "Check Responses", "type": "main", "index": 0 }]]
+    },
+    "Check Responses": {
+      "main": [[{ "node": "Sheets Uptime Log", "type": "main", "index": 0 }]]
+    },
+    "Sheets Uptime Log": {
+      "main": [[{ "node": "Check Any Down", "type": "main", "index": 0 }]]
+    },
+    "Check Any Down": {
+      "main": [
+        [
+          { "node": "Slack Down Alert", "type": "main", "index": 0 },
+          { "node": "Email Down Alert", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    }
+  }
+}

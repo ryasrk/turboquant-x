@@ -1,0 +1,152 @@
+{
+  "name": "Slack Sales Win Celebration",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "deal-closed",
+        "options": {}
+      },
+      "name": "Deal Closed Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst deal = items[0].json;\n\nconst customer = deal.customer || deal.company || 'New Customer';\nconst amount = parseFloat(deal.amount || deal.value || 0);\nconst rep = deal.salesRep || deal.rep || '';\nconst product = deal.product || deal.plan || 'Enterprise';\nconst dealType = deal.type || 'New Business';\n\nconst celebrations = [\n  ':tada: :champagne: :confetti_ball:',\n  ':rocket: :star2: :trophy:',\n  ':moneybag: :fire: :dart:',\n  ':medal: :sparkles: :chart_with_upwards_trend:'\n];\nconst celebration = celebrations[Math.floor(Math.random() * celebrations.length)];\n\nlet tierEmoji = ':star:';\nif (amount >= 100000) tierEmoji = ':gem:';\nelse if (amount >= 50000) tierEmoji = ':trophy:';\nelse if (amount >= 10000) tierEmoji = ':medal:';\n\nconst slackMsg = `${celebration}\\n\\n` +\n  `${tierEmoji} *DEAL CLOSED!* ${tierEmoji}\\n\\n` +\n  `*Customer:* ${customer}\\n` +\n  `*Amount:* $${amount.toLocaleString()}\\n` +\n  `*Product:* ${product}\\n` +\n  `*Type:* ${dealType}\\n` +\n  `*Closed by:* <@${rep}>\\n\\n` +\n  `Congrats to the team! :clap:`;\n\nreturn [{json: {\n  customer,\n  amount,\n  rep,\n  product,\n  dealType,\n  slackMsg,\n  closedAt: new Date().toISOString(),\n  quarter: `Q${Math.ceil((new Date().getMonth() + 1) / 3)} ${new Date().getFullYear()}`\n}}];"
+      },
+      "name": "Format Celebration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#sales",
+          "mode": "name"
+        },
+        "text": "={{ $json.slackMsg }}",
+        "otherOptions": {}
+      },
+      "name": "Post to Sales",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Revenue Tracking",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Revenue Tracking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [920, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "sales-team@company.com",
+        "subject": "=:trophy: Deal Closed: {{ $json.customer }} - ${{ $json.amount.toLocaleString() }}",
+        "message": "=Great news!\n\n{{ $json.customer }} has signed a ${{ $json.amount.toLocaleString() }} deal!\n\nProduct: {{ $json.product }}\nType: {{ $json.dealType }}\nClosed by: {{ $json.rep }}\n\nCongratulations to the team!",
+        "options": {}
+      },
+      "name": "Gmail Team Update",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1140, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack Sales Win Celebration\n\nCelebrate closed deals with team notifications.\n\n**Flow:**\n1. CRM webhook on deal closed\n2. Format celebration message (tier-based)\n3. Post to #sales channel\n4. Track in Google Sheets revenue log\n5. Email team update via Gmail\n\n**Tiers:**\n- $100k+ = :gem: Gem tier\n- $50k+ = :trophy: Trophy tier\n- $10k+ = :medal: Medal tier\n- Under $10k = :star: Star tier\n\n**Webhook payload:**\n```json\n{\n  \"customer\": \"Acme Corp\",\n  \"amount\": 75000,\n  \"salesRep\": \"U12345\",\n  \"product\": \"Enterprise\",\n  \"type\": \"New Business\"\n}\n```",
+        "width": 340,
+        "height": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 220]
+    }
+  ],
+  "connections": {
+    "Deal Closed Webhook": {
+      "main": [
+        [
+          {
+            "node": "Format Celebration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Celebration": {
+      "main": [
+        [
+          {
+            "node": "Post to Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Sales": {
+      "main": [
+        [
+          {
+            "node": "Revenue Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revenue Tracking": {
+      "main": [
+        [
+          {
+            "node": "Gmail Team Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

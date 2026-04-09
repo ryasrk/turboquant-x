@@ -1,0 +1,184 @@
+{
+  "name": "AI News Digest Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] }
+      },
+      "name": "Schedule - Daily Morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/top-headlines?category=technology&pageSize=10&apiKey=YOUR_API_KEY",
+        "options": {}
+      },
+      "name": "HTTP - Fetch Tech News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/top-headlines?category=business&pageSize=10&apiKey=YOUR_API_KEY",
+        "options": {}
+      },
+      "name": "HTTP - Fetch Business News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 450]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "name": "Merge - All News",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet articles = [];\nitems.forEach(item => {\n  const data = item.json;\n  if (data.articles && Array.isArray(data.articles)) {\n    articles = articles.concat(data.articles);\n  }\n});\nconst summaries = articles.slice(0, 15).map((a, i) => {\n  return `[${i+1}] Title: ${a.title || ''}\\nSource: ${a.source?.name || ''}\\nDescription: ${a.description || ''}\\nURL: ${a.url || ''}`;\n}).join('\\n\\n');\nreturn [{ json: { articleSummaries: summaries, articleCount: articles.length, date: new Date().toISOString().split('T')[0] } }];"
+      },
+      "name": "Code - Prepare Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a professional news editor. Create a daily news digest newsletter from these articles.\n\nFor each article:\n- Write a 2-3 sentence summary\n- Assign a category: Tech, Business, AI, Finance, Startup, Policy\n- Rate importance: High, Medium, Low\n\nAlso provide:\n- A catchy newsletter subject line\n- A \"Top Story\" highlight (most important story)\n- A \"Trend Watch\" section (emerging patterns across stories)\n\nReturn JSON:\n{\n  \"subject_line\": \"...\",\n  \"top_story\": {\"title\": \"...\", \"summary\": \"...\", \"why_it_matters\": \"...\"},\n  \"articles\": [{\"title\": \"...\", \"summary\": \"...\", \"category\": \"...\", \"importance\": \"...\", \"url\": \"...\"}],\n  \"trend_watch\": \"paragraph about emerging patterns\",\n  \"quote_of_day\": \"relevant inspirational/thought-provoking quote\"\n}\n\nArticles:\n{{ $json.articleSummaries }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.6,
+          "maxTokens": 3000
+        }
+      },
+      "name": "OpenAI - Create Digest",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aiResponse = items[0].json.message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(aiResponse);\n} catch(e) {\n  parsed = { subject_line: 'Daily News Digest', articles: [], top_story: {}, trend_watch: aiResponse, quote_of_day: '' };\n}\n\nconst articlesHtml = (parsed.articles || []).map(a => {\n  const badge = a.importance === 'High' ? '🔴' : a.importance === 'Medium' ? '🟡' : '🟢';\n  return `<div style=\"margin-bottom:15px;\"><strong>${badge} [${a.category}] ${a.title}</strong><br>${a.summary}<br><a href=\"${a.url}\">Read more →</a></div>`;\n}).join('');\n\nconst topStory = parsed.top_story || {};\n\nreturn [{\n  json: {\n    date: items[0].json.date || new Date().toISOString().split('T')[0],\n    subjectLine: parsed.subject_line || 'Daily News Digest',\n    topStoryTitle: topStory.title || '',\n    topStorySummary: topStory.summary || '',\n    topStoryWhy: topStory.why_it_matters || '',\n    articlesHtml,\n    articleCount: (parsed.articles || []).length,\n    trendWatch: parsed.trend_watch || '',\n    quoteOfDay: parsed.quote_of_day || ''\n  }\n}];"
+      },
+      "name": "Code - Format Newsletter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "newsletter-subscribers@example.com",
+        "subject": "={{ $json.subjectLine }} — {{ $json.date }}",
+        "message": "=<div style=\"max-width:600px;margin:0 auto;font-family:Arial,sans-serif;\">\n<h1>📰 Daily News Digest</h1>\n<p style=\"color:gray;\">{{ $json.date }} • {{ $json.articleCount }} stories</p>\n\n<div style=\"background:#f0f8ff;padding:15px;border-radius:8px;margin-bottom:20px;\">\n<h2>⭐ Top Story</h2>\n<h3>{{ $json.topStoryTitle }}</h3>\n<p>{{ $json.topStorySummary }}</p>\n<p><strong>Why it matters:</strong> {{ $json.topStoryWhy }}</p>\n</div>\n\n<h2>📋 Today's Stories</h2>\n{{ $json.articlesHtml }}\n\n<div style=\"background:#f5f5dc;padding:15px;border-radius:8px;margin-top:20px;\">\n<h2>📡 Trend Watch</h2>\n<p>{{ $json.trendWatch }}</p>\n</div>\n\n<p style=\"text-align:center;margin-top:20px;font-style:italic;\">\"{{ $json.quoteOfDay }}\"</p>\n</div>",
+        "options": {}
+      },
+      "name": "Gmail - Send Newsletter",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1750, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "columns": {
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Subject": "={{ $json.subjectLine }}",
+            "Top Story": "={{ $json.topStoryTitle }}",
+            "Article Count": "={{ $json.articleCount }}",
+            "Trend Watch": "={{ $json.trendWatch }}"
+          },
+          "schema": [
+            { "id": "Date", "type": "string", "display": true },
+            { "id": "Subject", "type": "string", "display": true },
+            { "id": "Top Story", "type": "string", "display": true },
+            { "id": "Article Count", "type": "string", "display": true },
+            { "id": "Trend Watch", "type": "string", "display": true }
+          ],
+          "mappingMode": "defineBelow"
+        },
+        "options": {}
+      },
+      "name": "Google Sheets - Archive",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1750, 450],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 900,
+        "height": 200,
+        "content": "## AI News Digest Generator\n\n**Setup:**\n1. Connect OpenAI API, Gmail OAuth2, Google Sheets OAuth2\n2. Replace `YOUR_API_KEY` in both HTTP nodes with your NewsAPI key (https://newsapi.org)\n3. Update Gmail recipient for newsletter subscribers\n4. Set Google Sheets document ID for archive\n\nRuns daily: fetches news from multiple sources, GPT creates a curated digest with summaries and trend analysis, emails as a newsletter, archives to Sheets."
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 550]
+    }
+  ],
+  "connections": {
+    "Schedule - Daily Morning": {
+      "main": [[
+        { "node": "HTTP - Fetch Tech News", "type": "main", "index": 0 },
+        { "node": "HTTP - Fetch Business News", "type": "main", "index": 0 }
+      ]]
+    },
+    "HTTP - Fetch Tech News": {
+      "main": [[{ "node": "Merge - All News", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Fetch Business News": {
+      "main": [[{ "node": "Merge - All News", "type": "main", "index": 1 }]]
+    },
+    "Merge - All News": {
+      "main": [[{ "node": "Code - Prepare Articles", "type": "main", "index": 0 }]]
+    },
+    "Code - Prepare Articles": {
+      "main": [[{ "node": "OpenAI - Create Digest", "type": "main", "index": 0 }]]
+    },
+    "OpenAI - Create Digest": {
+      "main": [[{ "node": "Code - Format Newsletter", "type": "main", "index": 0 }]]
+    },
+    "Code - Format Newsletter": {
+      "main": [[
+        { "node": "Gmail - Send Newsletter", "type": "main", "index": 0 },
+        { "node": "Google Sheets - Archive", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

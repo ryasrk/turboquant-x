@@ -1,0 +1,258 @@
+{
+  "name": "Supabase Row Level Security Auditor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weekday": 1,
+              "hour": 9,
+              "minute": 0
+            }
+          ]
+        }
+      },
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_PROJECT_REF.supabase.co/rest/v1/rpc/get_rls_policies",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "YOUR_SUPABASE_SERVICE_KEY"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_SUPABASE_SERVICE_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "bodyParameters": {
+          "parameters": []
+        },
+        "options": {}
+      },
+      "name": "Query RLS Policies via API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Expected RLS Config"
+        },
+        "options": {}
+      },
+      "name": "Read Expected Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [460, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const currentPolicies = $('Query RLS Policies via API').all().map(i => i.json);\nconst expectedConfig = $('Read Expected Config').all().map(i => i.json);\n\nconst mismatches = [];\nconst missing = [];\nconst extra = [];\n\n// Build lookup maps\nconst currentMap = {};\ncurrentPolicies.forEach(p => {\n  const key = `${p.table_name}:${p.policy_name}`;\n  currentMap[key] = p;\n});\n\nconst expectedMap = {};\nexpectedConfig.forEach(e => {\n  const key = `${e.table_name}:${e.policy_name}`;\n  expectedMap[key] = e;\n});\n\n// Check expected vs current\nfor (const [key, expected] of Object.entries(expectedMap)) {\n  if (!currentMap[key]) {\n    missing.push({ key, expected });\n  } else {\n    const current = currentMap[key];\n    if (current.command !== expected.command || \n        current.permissive !== expected.permissive) {\n      mismatches.push({ key, expected, current });\n    }\n  }\n}\n\n// Check for unexpected policies\nfor (const key of Object.keys(currentMap)) {\n  if (!expectedMap[key]) {\n    extra.push({ key, policy: currentMap[key] });\n  }\n}\n\nconst hasIssues = mismatches.length > 0 || missing.length > 0 || extra.length > 0;\n\nreturn [{\n  json: {\n    status: hasIssues ? 'MISMATCH_DETECTED' : 'ALL_CLEAR',\n    total_current_policies: currentPolicies.length,\n    total_expected_policies: expectedConfig.length,\n    mismatches: mismatches,\n    missing_policies: missing,\n    extra_policies: extra,\n    mismatch_count: mismatches.length,\n    missing_count: missing.length,\n    extra_count: extra.length,\n    has_issues: hasIssues,\n    audit_timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Compare Policies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-issues",
+              "leftValue": "={{ $json.has_issues }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has Mismatches?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 400]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_SECURITY_CHAT_ID",
+        "text": "=🔐 *Supabase RLS Audit Alert*\n\nStatus: {{ $json.status }}\nCurrent Policies: {{ $json.total_current_policies }}\nExpected Policies: {{ $json.total_expected_policies }}\n\n⚠️ Mismatches: {{ $json.mismatch_count }}\n❌ Missing: {{ $json.missing_count }}\n➕ Unexpected: {{ $json.extra_count }}\n\n_Review immediately — RLS mismatches may expose data._\n\nAudit: {{ $json.audit_timestamp }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Alert on Mismatches",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "RLS Audit Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Log Audit Results",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1200, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Supabase Row Level Security Auditor\n\n**Schedule:** Weekly on Monday 9:00 AM\n\n**Flow:**\n1. Query current RLS policies via Supabase API\n2. Read expected configuration from Google Sheets\n3. Compare: find mismatches, missing, and extra policies\n4. Alert via Telegram if issues found\n5. Log all audit results to Sheets\n\n**Expected Config Sheet columns:**\ntable_name, policy_name, command, permissive, roles, definition\n\n**Setup:**\n- Supabase project URL and service key\n- Create `get_rls_policies` RPC function in Supabase\n- Google Sheets with expected RLS configuration\n- Telegram bot for security alerts",
+        "height": 360,
+        "width": 400
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -100]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Query RLS Policies via API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Expected Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query RLS Policies via API": {
+      "main": [
+        [
+          {
+            "node": "Compare Policies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Expected Config": {
+      "main": [
+        [
+          {
+            "node": "Compare Policies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Policies": {
+      "main": [
+        [
+          {
+            "node": "Has Mismatches?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Mismatches?": {
+      "main": [
+        [
+          {
+            "node": "Alert on Mismatches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Audit Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert on Mismatches": {
+      "main": [
+        [
+          {
+            "node": "Log Audit Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

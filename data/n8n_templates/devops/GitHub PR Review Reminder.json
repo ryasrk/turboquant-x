@@ -1,0 +1,234 @@
+{
+  "name": "GitHub PR Review Reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 4 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "owner",
+              "value": "your-org"
+            },
+            {
+              "name": "repo",
+              "value": "your-repo"
+            }
+          ],
+          "number": [
+            {
+              "name": "staleHours",
+              "value": 24
+            }
+          ]
+        }
+      },
+      "name": "Set Repo Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.owner }}/{{ $json.repo }}/pulls",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "state",
+              "value": "open"
+            },
+            {
+              "name": "sort",
+              "value": "created"
+            },
+            {
+              "name": "direction",
+              "value": "asc"
+            }
+          ]
+        }
+      },
+      "name": "GitHub List Open PRs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prs = $input.first().json;\nconst staleHours = $('Set Repo Config').first().json.staleHours || 24;\nconst now = new Date();\nconst stalePRs = [];\n\nfor (const pr of (Array.isArray(prs) ? prs : [])) {\n  const created = new Date(pr.created_at);\n  const hoursSinceCreation = (now - created) / (1000 * 60 * 60);\n  \n  if (hoursSinceCreation > staleHours) {\n    const reviewers = (pr.requested_reviewers || []).map(r => r.login).join(', ');\n    stalePRs.push({\n      title: pr.title,\n      number: pr.number,\n      author: pr.user?.login || 'unknown',\n      url: pr.html_url,\n      created_at: pr.created_at,\n      hoursSinceCreation: Math.round(hoursSinceCreation),\n      reviewers: reviewers || 'No reviewers assigned',\n      labels: (pr.labels || []).map(l => l.name).join(', ')\n    });\n  }\n}\n\nif (stalePRs.length === 0) {\n  return [{ json: { noStale: true } }];\n}\n\nreturn stalePRs.map(pr => ({ json: pr }));"
+      },
+      "name": "Filter Stale PRs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-has-stale",
+              "leftValue": "={{ $json.noStale }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Has Stale PRs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "channel": "",
+        "text": "=:eyes: *PR Review Reminder*\n\nPR #{{ $json.number }}: *{{ $json.title }}*\nAuthor: {{ $json.author }}\nWaiting: {{ $json.hoursSinceCreation }}h\nReviewers: {{ $json.reviewers }}\nLabels: {{ $json.labels || 'none' }}\n\n:point_right: {{ $json.url }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Reminder",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1360, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "👀 *PR Review Reminder*\n\nPR #{{ $json.number }}: *{{ $json.title }}*\nAuthor: {{ $json.author }}\nWaiting: {{ $json.hoursSinceCreation }}h\nReviewers: {{ $json.reviewers }}\n\n🔗 {{ $json.url }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1360, 380],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## GitHub PR Review Reminder\n\n**Schedule:** Every 4 hours\n**Function:** Lists open PRs via GitHub API, filters those with no review activity for >24 hours.\n\n**Notifications:** Slack channel + Telegram reminder to reviewers.\n\n### Setup\n1. Set GitHub org/repo in 'Set Repo Config'\n2. Configure GitHub token in HTTP Header Auth (Authorization: Bearer <token>)\n3. Set Slack channel and Telegram chat ID\n4. Adjust staleHours threshold as needed",
+        "width": 400,
+        "height": 260
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -40]
+    }
+  ],
+  "connections": {
+    "Schedule Every 4 Hours": {
+      "main": [
+        [
+          {
+            "node": "Set Repo Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Repo Config": {
+      "main": [
+        [
+          {
+            "node": "GitHub List Open PRs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub List Open PRs": {
+      "main": [
+        [
+          {
+            "node": "Filter Stale PRs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Stale PRs": {
+      "main": [
+        [
+          {
+            "node": "Has Stale PRs?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Stale PRs?": {
+      "main": [
+        [
+          {
+            "node": "Slack Reminder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  }
+}

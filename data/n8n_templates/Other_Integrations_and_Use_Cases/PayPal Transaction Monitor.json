@@ -1,0 +1,131 @@
+{
+  "name": "PayPal Transaction Monitor",
+  "nodes": [
+    {
+      "name": "Schedule Hourly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Fetch PayPal Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "url": "https://api-m.paypal.com/v1/reporting/transactions",
+        "method": "GET",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "start_date", "value": "={{ $now.minus({ hours: 1 }).toISO() }}" },
+            { "name": "end_date", "value": "={{ $now.toISO() }}" },
+            { "name": "fields", "value": "all" },
+            { "name": "page_size", "value": "100" }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Parse Transactions",
+      "type": "n8n-nodes-base.code",
+      "position": [710, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0]?.json || {};\nconst transactions = data.transaction_details || [];\nconst largeAmountThreshold = 500;\n\nreturn transactions.map(txn => {\n  const info = txn.transaction_info || {};\n  const payer = txn.payer_info || {};\n  const amount = parseFloat(info.transaction_amount?.value || 0);\n  const isLarge = Math.abs(amount) >= largeAmountThreshold;\n  \n  return {\n    json: {\n      transactionId: info.transaction_id || '',\n      amount: amount,\n      currency: info.transaction_amount?.currency_code || 'USD',\n      status: info.transaction_status || '',\n      type: info.transaction_event_code || '',\n      payerName: payer.payer_name?.alternate_full_name || '',\n      payerEmail: payer.email_address || '',\n      date: info.transaction_initiation_date || '',\n      subject: info.transaction_subject || '',\n      isLargeAmount: isLarge,\n      processedAt: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets Ledger",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [940, 300],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Check Large Amount",
+      "type": "n8n-nodes-base.if",
+      "position": [1170, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isLargeAmount }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Telegram Large Amount Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1400, 200],
+      "parameters": {
+        "chatId": "",
+        "text": "=💸 *Large PayPal Transaction!*\n\nAmount: {{ $json.amount }} {{ $json.currency }}\nPayer: {{ $json.payerName }}\nEmail: {{ $json.payerEmail }}\nStatus: {{ $json.status }}\nTransaction ID: {{ $json.transactionId }}\nDate: {{ $json.date }}",
+        "additionalFields": {}
+      },
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## PayPal Transaction Monitor\nHourly poll of PayPal transactions, parses and logs to Sheets ledger, alerts via Telegram for large amounts.\n\n**Setup:**\n1. Set PayPal OAuth2 bearer token in HTTP Header Auth\n2. Connect Google Sheets for transaction ledger\n3. Configure Telegram for large amount alerts\n4. Adjust threshold in Code node (default: $500)"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Schedule Hourly": {
+      "main": [[{ "node": "Fetch PayPal Transactions", "type": "main", "index": 0 }]]
+    },
+    "Fetch PayPal Transactions": {
+      "main": [[{ "node": "Parse Transactions", "type": "main", "index": 0 }]]
+    },
+    "Parse Transactions": {
+      "main": [[{ "node": "Sheets Ledger", "type": "main", "index": 0 }]]
+    },
+    "Sheets Ledger": {
+      "main": [[{ "node": "Check Large Amount", "type": "main", "index": 0 }]]
+    },
+    "Check Large Amount": {
+      "main": [
+        [{ "node": "Telegram Large Amount Alert", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

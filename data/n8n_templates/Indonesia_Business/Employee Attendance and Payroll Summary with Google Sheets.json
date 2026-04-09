@@ -1,0 +1,102 @@
+{
+  "name": "Employee Attendance and Payroll Summary with Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "months", "monthsInterval": 1}]
+        }
+      },
+      "name": "Monthly Payroll Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Attendance"},
+        "options": {"range": "A:H"}
+      },
+      "name": "Read Attendance Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Employees"},
+        "options": {"range": "A:G"}
+      },
+      "name": "Read Employee Master",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [470, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const attendance = $('Read Attendance Data').all();\nconst employees = $('Read Employee Master').all();\n\nconst currentMonth = new Date().getMonth();\nconst currentYear = new Date().getFullYear();\n\n// Group attendance by employee\nconst empMap = {};\nfor (const emp of employees) {\n  const id = emp.json.employee_id;\n  empMap[id] = {\n    ...emp.json,\n    days_present: 0,\n    days_absent: 0,\n    days_late: 0,\n    overtime_hours: 0\n  };\n}\n\nfor (const att of attendance) {\n  const d = new Date(att.json.date);\n  if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) continue;\n  const id = att.json.employee_id;\n  if (!empMap[id]) continue;\n  if (att.json.status === 'present' || att.json.status === 'hadir') empMap[id].days_present++;\n  else if (att.json.status === 'absent' || att.json.status === 'absen') empMap[id].days_absent++;\n  if (att.json.late === 'yes' || att.json.late === 'ya') empMap[id].days_late++;\n  empMap[id].overtime_hours += Number(att.json.overtime_hours || 0);\n}\n\nconst results = Object.values(empMap).map(emp => {\n  const gajiPokok = Number(emp.gaji_pokok || 0);\n  const tunjangan = Number(emp.tunjangan || 0);\n  const potAbsen = emp.days_absent * (gajiPokok / 22);\n  const lembur = emp.overtime_hours * (gajiPokok / 173);\n  const gajiKotor = gajiPokok + tunjangan - potAbsen + lembur;\n  // BPJS Kesehatan: 1% employee\n  const bpjsKes = Math.round(gajiKotor * 0.01);\n  // BPJS Ketenagakerjaan JHT: 2% employee\n  const bpjsTK = Math.round(gajiKotor * 0.02);\n  // PPh 21 simplified (assumes progressive)\n  let pph21 = 0;\n  const gajiTahunan = gajiKotor * 12;\n  const ptkp = 54000000; // PTKP TK/0\n  const pkp = Math.max(0, gajiTahunan - ptkp);\n  if (pkp <= 60000000) pph21 = pkp * 0.05;\n  else if (pkp <= 250000000) pph21 = 3000000 + (pkp - 60000000) * 0.15;\n  else if (pkp <= 500000000) pph21 = 31500000 + (pkp - 250000000) * 0.25;\n  else pph21 = 93750000 + (pkp - 500000000) * 0.30;\n  pph21 = Math.round(pph21 / 12);\n  const gajiNetto = Math.round(gajiKotor - bpjsKes - bpjsTK - pph21);\n  return {\n    employee_id: emp.employee_id,\n    nama: emp.nama,\n    jabatan: emp.jabatan || '-',\n    gaji_pokok: gajiPokok,\n    tunjangan: tunjangan,\n    hari_hadir: emp.days_present,\n    hari_absen: emp.days_absent,\n    hari_terlambat: emp.days_late,\n    jam_lembur: emp.overtime_hours,\n    potongan_absen: Math.round(potAbsen),\n    lembur: Math.round(lembur),\n    gaji_kotor: Math.round(gajiKotor),\n    bpjs_kesehatan: bpjsKes,\n    bpjs_ketenagakerjaan: bpjsTK,\n    pph21: pph21,\n    gaji_netto: gajiNetto,\n    bank_account: emp.no_rekening || '-',\n    bank_name: emp.bank || 'BCA'\n  };\n});\n\nreturn results.map(r => ({json: r}));"
+      },
+      "name": "Calculate Payroll",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Payroll"},
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "name": "Save Payroll Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "=hr@company.co.id",
+        "subject": "=📊 Rekap Payroll Bulan Ini",
+        "message": "=Rekap payroll telah dibuat:\n\n👤 {{ $json.nama }}\n💼 {{ $json.jabatan }}\n📅 Hadir: {{ $json.hari_hadir }} hari | Absen: {{ $json.hari_absen }} hari\n⏰ Lembur: {{ $json.jam_lembur }} jam\n\n💰 Gaji Pokok: Rp {{ $json.gaji_pokok.toLocaleString('id-ID') }}\n➕ Tunjangan: Rp {{ $json.tunjangan.toLocaleString('id-ID') }}\n➕ Lembur: Rp {{ $json.lembur.toLocaleString('id-ID') }}\n➖ Pot. Absen: Rp {{ $json.potongan_absen.toLocaleString('id-ID') }}\n➖ BPJS Kes: Rp {{ $json.bpjs_kesehatan.toLocaleString('id-ID') }}\n➖ BPJS TK: Rp {{ $json.bpjs_ketenagakerjaan.toLocaleString('id-ID') }}\n➖ PPh 21: Rp {{ $json.pph21.toLocaleString('id-ID') }}\n\n✅ Gaji Netto: Rp {{ $json.gaji_netto.toLocaleString('id-ID') }}\n🏦 Transfer ke: {{ $json.bank_name }} - {{ $json.bank_account }}"
+      },
+      "name": "Email Payroll Summary",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 400],
+      "credentials": {
+        "gmailOAuth2": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Employee Payroll Calculator (Indonesia)\n\n### Calculates:\n- Gaji pokok + tunjangan\n- Potongan absensi (pro-rated)\n- Uang lembur (per jam)\n- BPJS Kesehatan (1% employee)\n- BPJS Ketenagakerjaan JHT (2% employee)\n- PPh 21 (progressive rate: 5/15/25/30%)\n- PTKP TK/0: Rp 54.000.000/tahun\n\n### Required Sheets:\n**Attendance**: employee_id, date, status (hadir/absen), late (ya/tidak), overtime_hours\n**Employees**: employee_id, nama, jabatan, gaji_pokok, tunjangan, no_rekening, bank"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Monthly Payroll Schedule": {"main": [[{"node": "Read Attendance Data", "type": "main", "index": 0}, {"node": "Read Employee Master", "type": "main", "index": 0}]]},
+    "Read Attendance Data": {"main": [[{"node": "Calculate Payroll", "type": "main", "index": 0}]]},
+    "Read Employee Master": {"main": [[{"node": "Calculate Payroll", "type": "main", "index": 0}]]},
+    "Calculate Payroll": {"main": [[{"node": "Save Payroll Data", "type": "main", "index": 0}]]},
+    "Save Payroll Data": {"main": [[{"node": "Email Payroll Summary", "type": "main", "index": 0}]]}
+  }
+}

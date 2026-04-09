@@ -1,0 +1,208 @@
+{
+  "name": "Customer Feedback Email Collector",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "triggerAtDayOfMonth": 1,
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "name": "Monthly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Read Customer List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "We'd love your feedback! 📝",
+        "message": "Hi {{ $json.name }},\n\nWe hope you're enjoying our service! We'd love to hear your thoughts.\n\nPlease take a moment to share your feedback by clicking the link below:\n\n🔗 {{ $json.feedbackUrl || 'https://your-n8n.com/webhook/feedback-response' }}?customerId={{ $json.customerId }}\n\nYour input helps us improve and serve you better.\n\nThank you!",
+        "options": {}
+      },
+      "name": "Gmail Send Feedback Request",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "feedback-response",
+        "options": {},
+        "responseMode": "responseNode"
+      },
+      "name": "Webhook - Feedback Response",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              { "column": "customerId", "value": "={{ $json.body.customerId || $json.query.customerId }}" },
+              { "column": "rating", "value": "={{ $json.body.rating }}" },
+              { "column": "feedback", "value": "={{ $json.body.feedback }}" },
+              { "column": "category", "value": "={{ $json.body.category || 'general' }}" },
+              { "column": "submittedAt", "value": "={{ $now.toISO() }}" }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "name": "Sheets Compile Feedback",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Thank you for your feedback! We appreciate your input.",
+        "options": {}
+      },
+      "name": "Respond Thank You",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [750, 600]
+    },
+    {
+      "parameters": {
+        "sendTo": "team@yourcompany.com",
+        "subject": "New Customer Feedback Received",
+        "message": "A customer submitted feedback:\n\n- **Customer ID:** {{ $('Sheets Compile Feedback').item.json.customerId }}\n- **Rating:** {{ $('Sheets Compile Feedback').item.json.rating }}\n- **Category:** {{ $('Sheets Compile Feedback').item.json.category }}\n- **Feedback:** {{ $('Sheets Compile Feedback').item.json.feedback }}",
+        "options": {}
+      },
+      "name": "Gmail Summary to Team",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 600],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Customer Feedback Email Collector\n\nMonthly feedback campaign with response collection.\n\n**Send Flow (top):**\n1. Monthly schedule (1st of month, 10 AM)\n2. Read customer list from Sheets\n3. Gmail sends feedback request to each customer\n\n**Collection Flow (bottom):**\n4. Webhook receives feedback submissions\n5. Compile to Sheets\n6. Respond with thank you\n7. Gmail summary to team\n\n**Customer Sheets columns:** email, name, customerId, feedbackUrl\n**Feedback Sheets columns:** customerId, rating, feedback, category, submittedAt",
+        "width": 420,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -90]
+    }
+  ],
+  "connections": {
+    "Monthly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Customer List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Customer List": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Feedback Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Feedback Response": {
+      "main": [
+        [
+          {
+            "node": "Sheets Compile Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Compile Feedback": {
+      "main": [
+        [
+          {
+            "node": "Respond Thank You",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail Summary to Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

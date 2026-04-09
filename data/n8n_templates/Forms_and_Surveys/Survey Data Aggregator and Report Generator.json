@@ -1,0 +1,155 @@
+{
+  "name": "Survey Data Aggregator and Report Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * 1" }]
+        }
+      },
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Survey_Responses"
+        },
+        "options": {
+          "range": "A:Z"
+        }
+      },
+      "name": "Read Survey Responses",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const responses = $input.all().map(item => item.json);\n\n// Filter to last 7 days\nconst oneWeekAgo = new Date();\noneWeekAgo.setDate(oneWeekAgo.getDate() - 7);\nconst recentResponses = responses.filter(r => {\n  const date = new Date(r.submitted_at || r.timestamp);\n  return date >= oneWeekAgo;\n});\n\nconst total = recentResponses.length;\nif (total === 0) {\n  return [{ json: { total: 0, error: 'No responses this week' } }];\n}\n\n// NPS Calculation (0-10 scale)\nconst npsScores = recentResponses\n  .map(r => parseInt(r.nps_score || r.recommendation_score || 0))\n  .filter(s => !isNaN(s));\n\nconst promoters = npsScores.filter(s => s >= 9).length;\nconst detractors = npsScores.filter(s => s <= 6).length;\nconst nps = npsScores.length > 0 \n  ? Math.round(((promoters - detractors) / npsScores.length) * 100) \n  : null;\n\n// CSAT Calculation (1-5 scale)\nconst csatScores = recentResponses\n  .map(r => parseInt(r.satisfaction_score || r.csat || 0))\n  .filter(s => !isNaN(s) && s > 0);\n\nconst csatAvg = csatScores.length > 0\n  ? (csatScores.reduce((a, b) => a + b, 0) / csatScores.length).toFixed(2)\n  : null;\n\nconst satisfied = csatScores.filter(s => s >= 4).length;\nconst csatPercent = csatScores.length > 0\n  ? Math.round((satisfied / csatScores.length) * 100)\n  : null;\n\n// Category breakdown\nconst categories = {};\nrecentResponses.forEach(r => {\n  const cat = r.category || 'Uncategorized';\n  categories[cat] = (categories[cat] || 0) + 1;\n});\n\n// Score distribution for charts\nconst npsDistribution = { '0-6': 0, '7-8': 0, '9-10': 0 };\nnpsScores.forEach(s => {\n  if (s <= 6) npsDistribution['0-6']++;\n  else if (s <= 8) npsDistribution['7-8']++;\n  else npsDistribution['9-10']++;\n});\n\nreturn [{\n  json: {\n    report_date: new Date().toISOString().split('T')[0],\n    period: `${oneWeekAgo.toISOString().split('T')[0]} to ${new Date().toISOString().split('T')[0]}`,\n    total_responses: total,\n    nps_score: nps,\n    nps_promoters: promoters,\n    nps_passives: npsScores.length - promoters - detractors,\n    nps_detractors: detractors,\n    nps_distribution: npsDistribution,\n    csat_average: csatAvg,\n    csat_percentage: csatPercent,\n    csat_total_rated: csatScores.length,\n    category_breakdown: categories,\n    chart_data: {\n      nps: npsDistribution,\n      categories: categories\n    }\n  }\n}];"
+      },
+      "name": "Calculate NPS and CSAT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\n\nconst npsEmoji = data.nps_score >= 50 ? '🟢' : data.nps_score >= 0 ? '🟡' : '🔴';\nconst csatEmoji = data.csat_percentage >= 80 ? '🟢' : data.csat_percentage >= 60 ? '🟡' : '🔴';\n\nlet categoryTable = 'Category | Count\\n---|---\\n';\nfor (const [cat, count] of Object.entries(data.category_breakdown || {})) {\n  categoryTable += `${cat} | ${count}\\n`;\n}\n\nconst report = `\n📊 WEEKLY SURVEY REPORT\n========================\nPeriod: ${data.period}\nTotal Responses: ${data.total_responses}\n\n--- NPS SCORE ---\n${npsEmoji} NPS: ${data.nps_score}\n  Promoters (9-10): ${data.nps_promoters}\n  Passives  (7-8):  ${data.nps_passives}\n  Detractors (0-6): ${data.nps_detractors}\n\n--- CSAT SCORE ---\n${csatEmoji} Average: ${data.csat_average}/5.0\n  Satisfaction Rate: ${data.csat_percentage}%\n  Total Rated: ${data.csat_total_rated}\n\n--- CATEGORY BREAKDOWN ---\n${categoryTable}\n\n--- CHART DATA (JSON) ---\n${JSON.stringify(data.chart_data, null, 2)}\n`;\n\nreturn [{ json: { ...data, formatted_report: report } }];"
+      },
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [950, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Weekly_Reports"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "report_date": "={{ $json.report_date }}",
+            "period": "={{ $json.period }}",
+            "total_responses": "={{ $json.total_responses }}",
+            "nps_score": "={{ $json.nps_score }}",
+            "csat_average": "={{ $json.csat_average }}",
+            "csat_percentage": "={{ $json.csat_percentage }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "name": "Save Report to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1200, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "reports@company.com",
+        "toEmail": "management@company.com",
+        "subject": "📊 Weekly Survey Report - {{ $json.report_date }} | NPS: {{ $json.nps_score }} | CSAT: {{ $json.csat_percentage }}%",
+        "text": "={{ $json.formatted_report }}",
+        "options": {}
+      },
+      "name": "Email Weekly Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1450, 300],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Survey Data Aggregator and Report Generator\n\nWeekly automated survey analysis with NPS/CSAT scoring and email reporting.\n\n**Schedule:** Every Monday at 8:00 AM\n\n**Metrics Calculated:**\n- NPS (Net Promoter Score): -100 to +100\n  - Promoters (9-10), Passives (7-8), Detractors (0-6)\n- CSAT (Customer Satisfaction): 1-5 scale\n  - Average score and satisfaction percentage\n- Category breakdown\n- Chart-ready data (JSON)\n\n**Setup:**\n1. Sheets columns: submitted_at, nps_score, satisfaction_score, category\n2. Configure SMTP for email delivery\n3. Adjust cron schedule as needed",
+        "width": 440,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [50, 50]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [{ "node": "Read Survey Responses", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Survey Responses": {
+      "main": [
+        [{ "node": "Calculate NPS and CSAT", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate NPS and CSAT": {
+      "main": [
+        [{ "node": "Generate Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Report": {
+      "main": [
+        [{ "node": "Save Report to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Report to Sheets": {
+      "main": [
+        [{ "node": "Email Weekly Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

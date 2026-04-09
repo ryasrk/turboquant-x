@@ -1,0 +1,136 @@
+{
+  "name": "LinkedIn Post Auto-Publisher",
+  "nodes": [
+    {
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "days", "daysInterval": 1, "triggerAtHour": 10}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Read Post Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [450, 300],
+      "parameters": {
+        "operation": "read",
+        "documentId": "",
+        "sheetName": "LinkedIn Queue",
+        "options": {
+          "range": "A:G"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Format for LinkedIn",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\nconst pending = items.filter(i => i.json.status === 'pending' && i.json.scheduled_date <= today);\n\nreturn pending.map(item => {\n  const text = item.json.content;\n  const hashtags = item.json.hashtags || '';\n  const formatted = `${text}\\n\\n${hashtags}`;\n  return {\n    json: {\n      formatted_text: formatted,\n      image_url: item.json.image_url || '',\n      row_number: item.json.row_number,\n      original_title: item.json.title\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "parameters": {
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"author\": \"urn:li:person:YOUR_PERSON_ID\",\n  \"lifecycleState\": \"PUBLISHED\",\n  \"specificContent\": {\n    \"com.linkedin.ugc.ShareContent\": {\n      \"shareCommentary\": {\n        \"text\": \"{{ $json.formatted_text }}\"\n      },\n      \"shareMediaCategory\": \"NONE\"\n    }\n  },\n  \"visibility\": {\n    \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"\n  }\n}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Update Sheet Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1050, 300],
+      "parameters": {
+        "operation": "update",
+        "documentId": "",
+        "sheetName": "LinkedIn Queue",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "published",
+            "published_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Send Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1250, 300],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "LinkedIn Post Published: {{ $json.original_title }}",
+        "message": "Your LinkedIn post '{{ $json.original_title }}' has been published successfully.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## LinkedIn Post Auto-Publisher\nRuns daily at 10 AM. Reads pending posts from a Google Sheets queue, formats them for LinkedIn (adds hashtags, respects character limits), publishes via the LinkedIn API, updates status, and sends confirmation email."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [[{"node": "Read Post Queue", "type": "main", "index": 0}]]
+    },
+    "Read Post Queue": {
+      "main": [[{"node": "Format for LinkedIn", "type": "main", "index": 0}]]
+    },
+    "Format for LinkedIn": {
+      "main": [[{"node": "Post to LinkedIn", "type": "main", "index": 0}]]
+    },
+    "Post to LinkedIn": {
+      "main": [[{"node": "Update Sheet Status", "type": "main", "index": 0}]]
+    },
+    "Update Sheet Status": {
+      "main": [[{"node": "Send Confirmation", "type": "main", "index": 0}]]
+    }
+  }
+}

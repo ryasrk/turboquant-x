@@ -1,0 +1,216 @@
+{
+  "name": "MongoDB Collection Backup to S3",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Schedule 3AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "mongodump --uri=\"mongodb://user:pass@your-mongo-host:27017/your_database\" --out=/tmp/mongo_backup_$(date +%Y%m%d) 2>&1",
+        "options": {}
+      },
+      "name": "Run Mongodump via SSH",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "cd /tmp && tar -czf mongo_backup_$(date +%Y%m%d).tar.gz mongo_backup_$(date +%Y%m%d)/ && echo \"COMPRESSED: $(ls -lh mongo_backup_$(date +%Y%m%d).tar.gz | awk '{print $5}')\"",
+        "options": {}
+      },
+      "name": "Compress Backup",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://your-bucket.s3.amazonaws.com/mongo-backups/mongo_backup_{{ $now.format('yyyyMMdd') }}.tar.gz",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/gzip"
+            },
+            {
+              "name": "x-amz-date",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "raw",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "name": "Upload to S3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "=https://your-bucket.s3.amazonaws.com/mongo-backups/mongo_backup_{{ $now.format('yyyyMMdd') }}.tar.gz",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "AWS YOUR_ACCESS_KEY:YOUR_SIGNATURE"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Verify Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "backups@yourcompany.com",
+        "toEmail": "dba-team@yourcompany.com",
+        "subject": "=✅ MongoDB Backup Complete - {{ $now.format('yyyy-MM-dd') }}",
+        "emailType": "text",
+        "message": "=MongoDB daily backup completed successfully.\n\nBackup File: mongo_backup_{{ $now.format('yyyyMMdd') }}.tar.gz\nS3 Location: s3://your-bucket/mongo-backups/\nTimestamp: {{ $now.toISO() }}\n\nVerification: Upload confirmed via HEAD request.",
+        "options": {}
+      },
+      "name": "Email Confirmation",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1340, 300],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "find /tmp -name 'mongo_backup_*' -mtime +7 -exec rm -rf {} + 2>&1 && echo 'Old backups cleaned up'",
+        "options": {}
+      },
+      "name": "Retention Cleanup",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1560, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## MongoDB Collection Backup to S3\n\n**Schedule:** Daily at 3:00 AM\n\n**Flow:**\n1. SSH to server, run mongodump\n2. Compress backup with tar/gzip\n3. Upload to S3 via HTTP PUT\n4. Verify upload with HEAD request\n5. Email confirmation to DBA team\n6. Clean up local backups older than 7 days\n\n**Setup:**\n- SSH credentials to MongoDB server\n- MongoDB connection URI\n- S3 bucket and AWS credentials\n- SMTP for email notifications\n- Adjust retention days as needed",
+        "height": 340,
+        "width": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -80]
+    }
+  ],
+  "connections": {
+    "Daily Schedule 3AM": {
+      "main": [
+        [
+          {
+            "node": "Run Mongodump via SSH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Mongodump via SSH": {
+      "main": [
+        [
+          {
+            "node": "Compress Backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compress Backup": {
+      "main": [
+        [
+          {
+            "node": "Upload to S3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to S3": {
+      "main": [
+        [
+          {
+            "node": "Verify Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Upload": {
+      "main": [
+        [
+          {
+            "node": "Email Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Retention Cleanup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

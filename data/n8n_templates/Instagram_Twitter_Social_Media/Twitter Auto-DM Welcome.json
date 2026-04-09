@@ -1,0 +1,150 @@
+{
+  "name": "Twitter Auto-DM Welcome",
+  "nodes": [
+    {
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 15}]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Get New Followers",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.twitter.com/2/users/{{ $json.user_id }}/followers",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "user.fields", "value": "created_at,name,username"},
+            {"name": "max_results", "value": "50"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Filter New Followers",
+      "type": "n8n-nodes-base.if",
+      "position": [650, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ ($json.meta?.result_count) || 0 }}",
+              "value2": 0,
+              "operation": "larger"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Prepare DM Messages",
+      "type": "n8n-nodes-base.code",
+      "position": [850, 250],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst followers = items[0].json.data || [];\n\n// Rate limit: max 5 DMs per batch\nconst batch = followers.slice(0, 5);\n\nreturn batch.map(follower => ({\n  json: {\n    recipient_id: follower.id,\n    username: follower.username,\n    name: follower.name,\n    dm_text: `Hey ${follower.name || follower.username}! 👋 Thanks for following! We share tips on [your topic] here. Feel free to reply if you have any questions!`,\n    timestamp: new Date().toISOString()\n  }\n}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Send Welcome DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 250],
+      "parameters": {
+        "url": "https://api.twitter.com/2/dm_conversations/with/{{ $json.recipient_id }}/messages",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "text", "value": "={{ $json.dm_text }}"}
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 5000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Log DM to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1250, 250],
+      "parameters": {
+        "operation": "append",
+        "documentId": "",
+        "sheetName": "DM Log",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 120],
+      "parameters": {
+        "content": "## Twitter Auto-DM Welcome\nRuns every 15 minutes. Checks for new followers via the Twitter API, sends a personalized welcome DM (rate-limited to 5 per batch with 5s intervals), and logs all DMs to Google Sheets for tracking."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [[{"node": "Get New Followers", "type": "main", "index": 0}]]
+    },
+    "Get New Followers": {
+      "main": [[{"node": "Filter New Followers", "type": "main", "index": 0}]]
+    },
+    "Filter New Followers": {
+      "main": [
+        [{"node": "Prepare DM Messages", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Prepare DM Messages": {
+      "main": [[{"node": "Send Welcome DM", "type": "main", "index": 0}]]
+    },
+    "Send Welcome DM": {
+      "main": [[{"node": "Log DM to Sheets", "type": "main", "index": 0}]]
+    }
+  }
+}

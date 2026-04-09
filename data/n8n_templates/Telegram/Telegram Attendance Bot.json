@@ -1,0 +1,293 @@
+{
+  "name": "Telegram Attendance Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const text = (item.json.message?.text || '').trim().toLowerCase();\n  const chatId = item.json.message?.chat?.id;\n  const userId = item.json.message?.from?.id;\n  const username = item.json.message?.from?.username || item.json.message?.from?.first_name || 'unknown';\n  const now = new Date();\n  \n  let command = 'unknown';\n  let reason = '';\n  \n  if (text === '/hadir' || text === '/present') {\n    command = 'hadir';\n  } else if (text.startsWith('/izin') || text.startsWith('/leave')) {\n    command = 'izin';\n    reason = text.replace(/^\\/(izin|leave)\\s*/, '').trim() || 'No reason given';\n  } else if (text === '/status') {\n    command = 'status';\n  }\n  \n  results.push({\n    json: {\n      command,\n      userId,\n      username,\n      chatId,\n      reason,\n      date: now.toISOString().split('T')[0],\n      time: now.toTimeString().split(' ')[0],\n      timestamp: now.toISOString()\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "outputKey": "hadir", "value": "hadir" },
+            { "outputKey": "izin", "value": "izin" },
+            { "outputKey": "status", "value": "status" }
+          ]
+        },
+        "dataType": "string",
+        "value1": "={{$json.command}}"
+      },
+      "name": "Route Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Attendance" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Hadir",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 150],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=✅ @{{$json.username}} hadir!\n📅 {{$json.date}} ⏰ {{$json.time}}",
+        "additionalFields": {}
+      },
+      "name": "Confirm Hadir",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 150],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Attendance" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log Izin",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chatId}}",
+        "text": "=📋 @{{$json.username}} izin.\n📅 {{$json.date}} ⏰ {{$json.time}}\n📝 Reason: {{$json.reason}}",
+        "additionalFields": {}
+      },
+      "name": "Confirm Izin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Attendance" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get Today Records",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\nconst todayRecords = items.filter(i => i.json.date === today);\nconst present = todayRecords.filter(i => i.json.command === 'hadir');\nconst absent = todayRecords.filter(i => i.json.command === 'izin');\n\nlet text = `📊 <b>Attendance Status - ${today}</b>\\n\\n`;\ntext += `✅ Present (${present.length}):\\n`;\npresent.forEach(p => { text += `  • @${p.json.username} (${p.json.time})\\n`; });\ntext += `\\n📋 Leave (${absent.length}):\\n`;\nabsent.forEach(a => { text += `  • @${a.json.username}: ${a.json.reason}\\n`; });\ntext += `\\n👥 Total: ${todayRecords.length}`;\n\nreturn [{ json: { text } }];"
+      },
+      "name": "Format Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 500]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$node['Parse Command'].json.chatId}}",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Status",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "triggerAtHour": 17, "triggerAtMinute": 0 }
+          ]
+        }
+      },
+      "name": "Daily Summary 5PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": { "value": "" },
+        "sheetName": { "value": "Attendance" },
+        "filters": {},
+        "options": {}
+      },
+      "name": "Get All Records",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().split('T')[0];\nconst todayRecords = items.filter(i => i.json.date === today);\nconst present = todayRecords.filter(i => i.json.command === 'hadir').length;\nconst leave = todayRecords.filter(i => i.json.command === 'izin').length;\n\nlet text = `📊 <b>Daily Attendance Summary - ${today}</b>\\n\\n`;\ntext += `✅ Present: ${present}\\n`;\ntext += `📋 On Leave: ${leave}\\n`;\ntext += `👥 Total recorded: ${todayRecords.length}`;\n\nreturn [{ json: { text } }];"
+      },
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 700]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{$json.text}}",
+        "additionalFields": { "parse_mode": "HTML" }
+      },
+      "name": "Send Admin Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1000, 700],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Telegram Attendance Bot\n\n**Commands:** /hadir, /izin <reason>, /status\n**Daily:** 5PM summary sent to admin\n\n**Setup:**\n1. Set Telegram Bot credentials\n2. Set admin chat ID in Send Admin Summary\n3. Create Google Sheet 'Attendance': command, userId, username, chatId, reason, date, time, timestamp",
+        "width": 400,
+        "height": 200
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 900]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [{ "node": "Route Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [{ "node": "Log Hadir", "type": "main", "index": 0 }],
+        [{ "node": "Log Izin", "type": "main", "index": 0 }],
+        [{ "node": "Get Today Records", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Hadir": {
+      "main": [
+        [{ "node": "Confirm Hadir", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Izin": {
+      "main": [
+        [{ "node": "Confirm Izin", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Today Records": {
+      "main": [
+        [{ "node": "Format Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Status": {
+      "main": [
+        [{ "node": "Send Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Daily Summary 5PM": {
+      "main": [
+        [{ "node": "Get All Records", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get All Records": {
+      "main": [
+        [{ "node": "Build Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [{ "node": "Send Admin Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "name": "Automated Market Report Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "weeks", "weeksInterval": 1 }] }
+      },
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=true&price_change_percentage=7d",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Fetch Market Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/global",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "name": "Fetch Global Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Merge market data and global stats\nconst marketData = $('Fetch Market Data').all().map(i => i.json);\nconst globalStats = $('Fetch Global Stats').first().json;\n\nconst topGainers = [...marketData].sort((a, b) => (b.price_change_percentage_7d_in_currency || 0) - (a.price_change_percentage_7d_in_currency || 0)).slice(0, 5);\nconst topLosers = [...marketData].sort((a, b) => (a.price_change_percentage_7d_in_currency || 0) - (b.price_change_percentage_7d_in_currency || 0)).slice(0, 5);\n\nconst totalMarketCap = globalStats.data ? globalStats.data.total_market_cap.usd : 0;\nconst totalVolume = globalStats.data ? globalStats.data.total_volume.usd : 0;\n\nreturn [{\n  json: {\n    reportDate: new Date().toISOString(),\n    totalMarketCap: totalMarketCap.toLocaleString(),\n    totalVolume24h: totalVolume.toLocaleString(),\n    assetsTracked: marketData.length,\n    topGainers: topGainers.map(a => ({ name: a.name, symbol: a.symbol, price: a.current_price, change7d: (a.price_change_percentage_7d_in_currency || 0).toFixed(2) + '%' })),\n    topLosers: topLosers.map(a => ({ name: a.name, symbol: a.symbol, price: a.current_price, change7d: (a.price_change_percentage_7d_in_currency || 0).toFixed(2) + '%' })),\n    marketOverview: marketData.map(a => ({ name: a.name, symbol: a.symbol, price: a.current_price, marketCap: a.market_cap, volume: a.total_volume, change7d: a.price_change_percentage_7d_in_currency }))\n  }\n}];"
+      },
+      "name": "Aggregate Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "=Generate a professional weekly market report based on this data:\n\n{{ JSON.stringify($json, null, 2) }}\n\nStructure:\n1. **Executive Summary** — 2-3 sentences on overall market\n2. **Market Overview** — key metrics and trends\n3. **Top Gainers** — analysis of best performers\n4. **Top Losers** — what's declining and why (speculate)\n5. **Outlook** — next week expectations\n\nFormat in clean markdown."
+            }
+          ]
+        },
+        "options": { "temperature": 0.4, "maxTokens": 2500 }
+      },
+      "name": "OpenAI Generate Report",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [910, 300],
+      "credentials": {
+        "openAiApi": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Weekly Market Report — {{ $('Aggregate Data').item.json.reportDate.split('T')[0] }}",
+        "message": "={{ $json.message.content }}",
+        "options": { "appendAttribution": false }
+      },
+      "name": "Gmail Send Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1130, 300],
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Market Report Generator\n\nWeekly workflow that fetches financial market data from multiple APIs, aggregates metrics, uses OpenAI to generate a professional report, and sends it via Gmail.\n\n**Setup:**\n1. Add OpenAI and Gmail credentials\n2. Set email recipient in Gmail node\n3. Optionally swap data APIs for your market of interest\n4. Uses free CoinGecko API by default"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 80]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          { "node": "Fetch Market Data", "type": "main", "index": 0 },
+          { "node": "Fetch Global Stats", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Market Data": {
+      "main": [
+        [{ "node": "Aggregate Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Global Stats": {
+      "main": [
+        [{ "node": "Aggregate Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Data": {
+      "main": [
+        [{ "node": "OpenAI Generate Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Generate Report": {
+      "main": [
+        [{ "node": "Gmail Send Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

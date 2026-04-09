@@ -1,0 +1,246 @@
+{
+  "name": "Timesheet Submission Reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtDay": 5,
+              "triggerAtHour": 16
+            }
+          ]
+        }
+      },
+      "name": "Friday 4PM Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Timesheets"
+        },
+        "options": {}
+      },
+      "name": "Read Timesheet Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const records = $input.all().map(i => i.json);\nconst currentWeek = new Date().toISOString().slice(0, 10);\nconst notSubmitted = records.filter(r => {\n  return r.weekEnding === currentWeek && (!r.submitted || r.submitted === 'no');\n});\nreturn notSubmitted.map(r => ({ json: r }));"
+      },
+      "name": "Filter Not Submitted",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "Reminder: Please Submit Your Timesheet",
+        "emailType": "text",
+        "message": "=Dear {{$json.name}},\n\nThis is a friendly reminder that your timesheet for this week has not been submitted yet.\n\nPlease complete and submit your timesheet before end of day today (Friday).\n\nIf you have any questions about timesheet submission, please contact HR.\n\nThank you,\nHR Automation",
+        "options": {}
+      },
+      "name": "Email Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.telegramChatId}}",
+        "text": "=⏰ Timesheet Reminder\n\nHi {{$json.name}}, please submit your timesheet for this week before end of day.\n\nThank you!",
+        "additionalFields": {}
+      },
+      "name": "Telegram Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [910, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtDay": 1,
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "name": "Monday 10AM Escalation",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Timesheets"
+        },
+        "options": {}
+      },
+      "name": "Read Monday Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const records = $input.all().map(i => i.json);\nconst lastWeek = new Date();\nlastWeek.setDate(lastWeek.getDate() - 3);\nconst weekEnding = lastWeek.toISOString().slice(0, 10);\nconst stillMissing = records.filter(r => {\n  return r.weekEnding === weekEnding && (!r.submitted || r.submitted === 'no');\n});\nreturn stillMissing.map(r => ({ json: r }));"
+      },
+      "name": "Filter Still Missing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [690, 600]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.managerEmail}}",
+        "subject": "=ESCALATION: Missing Timesheet - {{$json.name}}",
+        "emailType": "text",
+        "message": "=Dear {{$json.managerName}},\n\nThis is an escalation notice. The following employee has not submitted their timesheet for last week:\n\nEmployee: {{$json.name}}\nDepartment: {{$json.department}}\nWeek Ending: {{$json.weekEnding}}\n\nA reminder was sent on Friday. Please follow up with the employee.\n\nThank you,\nHR Automation",
+        "options": {}
+      },
+      "name": "Escalate to Manager",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 600],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Timesheet Submission Reminder\n\n**Flow 1 - Friday Reminder:**\n- Trigger: Every Friday at 4 PM\n- Check who hasn't submitted timesheet\n- Send email + Telegram reminder\n\n**Flow 2 - Monday Escalation:**\n- Trigger: Every Monday at 10 AM\n- Check if timesheets from last week are still missing\n- Escalate to manager via email\n\n**Setup:**\n- 'Timesheets' sheet: name, email, telegramChatId, managerEmail, managerName, department, weekEnding, submitted\n- Gmail + Telegram bot credentials",
+        "width": 420,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, -60]
+    }
+  ],
+  "connections": {
+    "Friday 4PM Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Timesheet Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Timesheet Status": {
+      "main": [
+        [
+          {
+            "node": "Filter Not Submitted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Not Submitted": {
+      "main": [
+        [
+          {
+            "node": "Email Reminder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monday 10AM Escalation": {
+      "main": [
+        [
+          {
+            "node": "Read Monday Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Monday Status": {
+      "main": [
+        [
+          {
+            "node": "Filter Still Missing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Still Missing": {
+      "main": [
+        [
+          {
+            "node": "Escalate to Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

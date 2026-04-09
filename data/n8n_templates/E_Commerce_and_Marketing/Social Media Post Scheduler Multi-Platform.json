@@ -1,0 +1,350 @@
+{
+  "name": "Social Media Post Scheduler Multi-Platform",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Content Calendar" },
+        "options": {
+          "range": "A:H"
+        }
+      },
+      "name": "Read Content Calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const today = new Date().toISOString().split('T')[0];\nconst items = $input.all();\nconst todayPosts = items.filter(item => {\n  const postDate = (item.json['Scheduled Date'] || '').split('T')[0];\n  return postDate === today && item.json.Status !== 'Posted';\n});\n\nreturn todayPosts.map(p => ({ json: p.json }));"
+      },
+      "name": "Filter Today's Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.Platform }}",
+              "operation": "contains",
+              "value2": "Twitter"
+            }
+          ]
+        }
+      },
+      "name": "Is Twitter?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twitter.com/2/tweets",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "text", "value": "={{ $json.Content }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Post to Twitter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1130, 100],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.Platform }}",
+              "operation": "contains",
+              "value2": "Instagram"
+            }
+          ]
+        }
+      },
+      "name": "Is Instagram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 380]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/{{ $json.InstagramAccountId }}/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "caption", "value": "={{ $json.Content }}" },
+            { "name": "image_url", "value": "={{ $json.ImageURL }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Post to Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1130, 300],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.Platform }}",
+              "operation": "contains",
+              "value2": "Facebook"
+            }
+          ]
+        }
+      },
+      "name": "Is Facebook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [910, 580]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/{{ $json.FacebookPageId }}/feed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "message", "value": "={{ $json.Content }}" },
+            { "name": "link", "value": "={{ $json.Link }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Post to Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1130, 500],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Post Log" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $now.toISO() }}",
+            "Platform": "={{ $json.Platform }}",
+            "Content Preview": "={{ $json.Content?.substring(0, 100) }}",
+            "Post URL": "={{ $json.data?.id || 'N/A' }}",
+            "Status": "Posted"
+          }
+        },
+        "options": {}
+      },
+      "name": "Log Post URLs to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1350, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "name": "Weekly Recap Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 700]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "" },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Post Log" },
+        "options": {}
+      },
+      "name": "Read Post Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [470, 700],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = $input.all();\nconst lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);\nconst weeklyPosts = posts.filter(p => new Date(p.json.Date) >= lastWeek);\n\nconst byPlatform = {};\nfor (const p of weeklyPosts) {\n  const plat = p.json.Platform || 'Unknown';\n  byPlatform[plat] = (byPlatform[plat] || 0) + 1;\n}\n\nconst recap = Object.entries(byPlatform)\n  .map(([platform, count]) => `${platform}: ${count} posts`)\n  .join('\\n');\n\nreturn [{ json: {\n  totalPosts: weeklyPosts.length,\n  recap,\n  period: `${lastWeek.toISOString().split('T')[0]} to ${new Date().toISOString().split('T')[0]}`\n}}];"
+      },
+      "name": "Generate Weekly Recap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 700]
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "📊 Weekly Social Media Recap - {{ $json.totalPosts }} Posts",
+        "emailType": "html",
+        "message": "<h2>Weekly Social Media Recap</h2><p><strong>Period:</strong> {{ $json.period }}</p><p><strong>Total Posts:</strong> {{ $json.totalPosts }}</p><h3>Breakdown by Platform</h3><pre>{{ $json.recap }}</pre>",
+        "options": {
+          "senderName": "Social Media Bot"
+        }
+      },
+      "name": "Email Weekly Recap",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [910, 700],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Social Media Post Scheduler Multi-Platform\n\n**How to use:**\n1. Create Google Sheets with 'Content Calendar' tab:\n   - Columns: Scheduled Date, Platform, Content, ImageURL, Link, FacebookPageId, InstagramAccountId, Status\n2. Create 'Post Log' tab for tracking\n3. Configure OAuth2 credentials for each platform\n4. Set your email for weekly recap notifications\n\n**Schedule:** Daily at 8am checks for today's posts. Weekly recap every Monday at 9am.\n\n**Platforms supported:** Twitter, Instagram, Facebook\n\n**Content Calendar tips:**\n- Platform column: 'Twitter', 'Instagram', or 'Facebook'\n- Set Status to 'Posted' after publishing to avoid duplicates\n- Include ImageURL for Instagram posts\n- Include Link for Facebook posts",
+        "width": 420,
+        "height": 340
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -80]
+    }
+  ],
+  "connections": {
+    "Daily Schedule Trigger": {
+      "main": [
+        [{ "node": "Read Content Calendar", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Content Calendar": {
+      "main": [
+        [{ "node": "Filter Today's Posts", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter Today's Posts": {
+      "main": [
+        [
+          { "node": "Is Twitter?", "type": "main", "index": 0 },
+          { "node": "Is Instagram?", "type": "main", "index": 0 },
+          { "node": "Is Facebook?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Is Twitter?": {
+      "main": [
+        [{ "node": "Post to Twitter", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Is Instagram?": {
+      "main": [
+        [{ "node": "Post to Instagram", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Is Facebook?": {
+      "main": [
+        [{ "node": "Post to Facebook", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Post to Twitter": {
+      "main": [
+        [{ "node": "Log Post URLs to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Post to Instagram": {
+      "main": [
+        [{ "node": "Log Post URLs to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Post to Facebook": {
+      "main": [
+        [{ "node": "Log Post URLs to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Weekly Recap Trigger": {
+      "main": [
+        [{ "node": "Read Post Log", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Post Log": {
+      "main": [
+        [{ "node": "Generate Weekly Recap", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Weekly Recap": {
+      "main": [
+        [{ "node": "Email Weekly Recap", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

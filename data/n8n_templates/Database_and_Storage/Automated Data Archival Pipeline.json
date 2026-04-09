@@ -1,0 +1,204 @@
+{
+  "name": "Automated Data Archival Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 1 1 * *"
+            }
+          ]
+        }
+      },
+      "name": "Monthly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  'orders' AS table_name,\n  COUNT(*) AS old_record_count,\n  MIN(created_at) AS oldest_record,\n  MAX(created_at) AS newest_old_record,\n  pg_size_pretty(pg_total_relation_size('orders')) AS table_size\nFROM orders\nWHERE created_at < NOW() - INTERVAL '1 year'\nUNION ALL\nSELECT\n  'audit_logs' AS table_name,\n  COUNT(*) AS old_record_count,\n  MIN(created_at) AS oldest_record,\n  MAX(created_at) AS newest_old_record,\n  pg_size_pretty(pg_total_relation_size('audit_logs')) AS table_size\nFROM audit_logs\nWHERE created_at < NOW() - INTERVAL '1 year'\nUNION ALL\nSELECT\n  'notifications' AS table_name,\n  COUNT(*) AS old_record_count,\n  MIN(created_at) AS oldest_record,\n  MAX(created_at) AS newest_old_record,\n  pg_size_pretty(pg_total_relation_size('notifications')) AS table_size\nFROM notifications\nWHERE created_at < NOW() - INTERVAL '1 year';",
+        "options": {}
+      },
+      "name": "Identify Old Records",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Move old orders to archive\nINSERT INTO orders_archive\nSELECT * FROM orders\nWHERE created_at < NOW() - INTERVAL '1 year';\n\n-- Move old audit logs to archive\nINSERT INTO audit_logs_archive\nSELECT * FROM audit_logs\nWHERE created_at < NOW() - INTERVAL '1 year';\n\n-- Move old notifications to archive\nINSERT INTO notifications_archive\nSELECT * FROM notifications\nWHERE created_at < NOW() - INTERVAL '1 year';",
+        "options": {}
+      },
+      "name": "Move to Archive Tables",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Delete archived records from main tables\nDELETE FROM orders WHERE created_at < NOW() - INTERVAL '1 year';\nDELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL '1 year';\nDELETE FROM notifications WHERE created_at < NOW() - INTERVAL '1 year';\n\n-- VACUUM to reclaim space\nVACUUM ANALYZE orders;\nVACUUM ANALYZE audit_logs;\nVACUUM ANALYZE notifications;",
+        "options": {}
+      },
+      "name": "Delete from Main Tables",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "pg_dump -h your-db-host -U your-user -d your_database -t orders_archive -t audit_logs_archive -t notifications_archive | gzip > /tmp/archive_backup_$(date +%Y%m).sql.gz && echo \"BACKUP_SIZE=$(ls -lh /tmp/archive_backup_$(date +%Y%m).sql.gz | awk '{print $5}')\"",
+        "options": {}
+      },
+      "name": "Compress and Backup",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  'orders' AS table_name,\n  (SELECT COUNT(*) FROM orders) AS current_count,\n  (SELECT COUNT(*) FROM orders_archive) AS archive_count,\n  pg_size_pretty(pg_total_relation_size('orders')) AS current_size,\n  pg_size_pretty(pg_total_relation_size('orders_archive')) AS archive_size\nUNION ALL\nSELECT\n  'audit_logs',\n  (SELECT COUNT(*) FROM audit_logs),\n  (SELECT COUNT(*) FROM audit_logs_archive),\n  pg_size_pretty(pg_total_relation_size('audit_logs')),\n  pg_size_pretty(pg_total_relation_size('audit_logs_archive'))\nUNION ALL\nSELECT\n  'notifications',\n  (SELECT COUNT(*) FROM notifications),\n  (SELECT COUNT(*) FROM notifications_archive),\n  pg_size_pretty(pg_total_relation_size('notifications')),\n  pg_size_pretty(pg_total_relation_size('notifications_archive'));",
+        "options": {}
+      },
+      "name": "Update Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1340, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "archival@yourcompany.com",
+        "toEmail": "dba-team@yourcompany.com",
+        "subject": "=📦 Monthly Data Archival Summary - {{ $now.format('yyyy-MM') }}",
+        "emailType": "text",
+        "message": "=Monthly Data Archival Pipeline Complete\n==========================================\n\nArchival Period: Records older than 1 year\nExecution Time: {{ $now.toISO() }}\n\nTable Statistics:\n{{ $input.all().map(r => `${r.json.table_name}: ${r.json.current_count} active / ${r.json.archive_count} archived (${r.json.current_size} / ${r.json.archive_size})`).join('\\n') }}\n\nBackup created and compressed.\n\nThis is an automated report.",
+        "options": {}
+      },
+      "name": "Email Summary",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1560, 300],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Automated Data Archival Pipeline\n\n**Schedule:** Monthly on the 1st at 1:00 AM\n\n**Flow:**\n1. Identify records older than 1 year\n2. Copy to archive tables (INSERT INTO...SELECT)\n3. Delete from main tables + VACUUM\n4. Compress and backup archive tables\n5. Update statistics\n6. Email summary to DBA team\n\n**Tables archived:**\n- orders → orders_archive\n- audit_logs → audit_logs_archive\n- notifications → notifications_archive\n\n**Setup:**\n- Create matching _archive tables\n- PostgreSQL credentials\n- SSH for backup compression\n- SMTP for email reports\n- Adjust retention period (default: 1 year)",
+        "height": 400,
+        "width": 380
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -140]
+    }
+  ],
+  "connections": {
+    "Monthly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Identify Old Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify Old Records": {
+      "main": [
+        [
+          {
+            "node": "Move to Archive Tables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Archive Tables": {
+      "main": [
+        [
+          {
+            "node": "Delete from Main Tables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete from Main Tables": {
+      "main": [
+        [
+          {
+            "node": "Compress and Backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compress and Backup": {
+      "main": [
+        [
+          {
+            "node": "Update Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Stats": {
+      "main": [
+        [
+          {
+            "node": "Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

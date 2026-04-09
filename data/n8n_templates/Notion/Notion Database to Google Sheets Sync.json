@@ -1,0 +1,136 @@
+{
+  "name": "Notion Database to Google Sheets Sync",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Database to Google Sheets Sync\nScheduled sync of a Notion database to Google Sheets with email confirmation.\n\n**Setup:**\n1. Set Notion database ID in the Notion node\n2. Set Google Sheet ID and sheet name\n3. Set email recipient in Gmail node\n4. Adjust schedule as needed"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Query Database",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.databaseId || '' }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(item => {\n  const props = item.json.properties || {};\n  const row = {};\n  for (const [key, value] of Object.entries(props)) {\n    if (value.type === 'title') {\n      row[key] = value.title?.map(t => t.plain_text).join('') || '';\n    } else if (value.type === 'rich_text') {\n      row[key] = value.rich_text?.map(t => t.plain_text).join('') || '';\n    } else if (value.type === 'number') {\n      row[key] = value.number || 0;\n    } else if (value.type === 'select') {\n      row[key] = value.select?.name || '';\n    } else if (value.type === 'multi_select') {\n      row[key] = value.multi_select?.map(s => s.name).join(', ') || '';\n    } else if (value.type === 'date') {\n      row[key] = value.date?.start || '';\n    } else if (value.type === 'checkbox') {\n      row[key] = value.checkbox ? 'Yes' : 'No';\n    } else if (value.type === 'url') {\n      row[key] = value.url || '';\n    } else if (value.type === 'email') {\n      row[key] = value.email || '';\n    } else {\n      row[key] = JSON.stringify(value[value.type] || '');\n    }\n  }\n  row['Notion ID'] = item.json.id;\n  row['Last Edited'] = item.json.last_edited_time;\n  return { json: row };\n});\nreturn rows;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Google Sheets Write",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [900, 400],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "name": "Email Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1120, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Notion → Sheets Sync Complete ({{ $now.format('yyyy-MM-dd HH:mm') }})",
+        "message": "=Notion database sync completed successfully.\n\nRows synced: {{ $input.all().length }}\nTimestamp: {{ $now.toISO() }}\n\nCheck your Google Sheet for the updated data.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{ "node": "Notion Query Database", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Query Database": {
+      "main": [
+        [{ "node": "Transform Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [{ "node": "Google Sheets Write", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Sheets Write": {
+      "main": [
+        [{ "node": "Email Confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

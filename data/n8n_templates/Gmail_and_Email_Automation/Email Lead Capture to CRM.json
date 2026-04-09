@@ -1,0 +1,132 @@
+{
+  "name": "Email Lead Capture to CRM",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "q": "from:(*@targetcompany.com OR *@prospect.com)"
+        },
+        "options": {}
+      },
+      "name": "Gmail Trigger - Specific Senders",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const from = item.json.from || '';\n  const subject = (item.json.subject || '').toLowerCase();\n  const body = (item.json.snippet || item.json.textPlain || '').toLowerCase();\n  \n  // Parse name from email\n  const nameMatch = from.match(/^([^<]+)/);\n  const name = nameMatch ? nameMatch[1].trim() : from.split('@')[0];\n  \n  // Parse company from domain\n  const domainMatch = from.match(/@([^>]+)/);\n  const domain = domainMatch ? domainMatch[1].trim() : '';\n  const company = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);\n  \n  // Detect interest from keywords\n  const interests = [];\n  const keywordMap = {\n    'pricing': 'Pricing Inquiry',\n    'demo': 'Demo Request',\n    'trial': 'Trial Interest',\n    'integration': 'Integration Question',\n    'partnership': 'Partnership',\n    'quote': 'Quote Request',\n    'proposal': 'Proposal Request'\n  };\n  \n  for (const [keyword, interest] of Object.entries(keywordMap)) {\n    if (subject.includes(keyword) || body.includes(keyword)) {\n      interests.push(interest);\n    }\n  }\n  \n  const leadScore = interests.length >= 2 ? 'hot' : interests.length === 1 ? 'warm' : 'cold';\n  \n  results.push({\n    json: {\n      name: name,\n      email: from,\n      company: company,\n      domain: domain,\n      interest: interests.join(', ') || 'General Inquiry',\n      leadScore: leadScore,\n      emailSubject: item.json.subject,\n      capturedAt: new Date().toISOString(),\n      status: 'new'\n    }\n  });\n}\nreturn results;"
+      },
+      "name": "Parse Lead Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [750, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "sales-team@yourcompany.com",
+        "subject": "New Lead: {{ $json.name }} ({{ $json.company }}) - {{ $json.leadScore }} 🔥",
+        "message": "New lead captured from email:\n\n- **Name:** {{ $json.name }}\n- **Email:** {{ $json.email }}\n- **Company:** {{ $json.company }}\n- **Interest:** {{ $json.interest }}\n- **Lead Score:** {{ $json.leadScore }}\n- **Original Subject:** {{ $json.emailSubject }}\n\nPlease follow up within 24 hours.",
+        "options": {}
+      },
+      "name": "Notify Sales Team",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email Lead Capture to CRM\n\nCaptures leads from specific sender domains and logs to CRM.\n\n**Flow:**\n1. Gmail trigger on emails from target senders\n2. Code parses name, company, domain, and interest keywords\n3. Auto-scores lead (hot/warm/cold)\n4. Adds to Sheets CRM\n5. Notifies sales team via email\n\n**Setup:**\n- Connect Gmail OAuth2 credentials\n- Connect Google Sheets credentials\n- Update Gmail filter `q` with your target sender domains\n- Set sales team notification email address",
+        "width": 400,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - Specific Senders": {
+      "main": [
+        [
+          {
+            "node": "Parse Lead Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Lead Info": {
+      "main": [
+        [
+          {
+            "node": "Sheets CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets CRM": {
+      "main": [
+        [
+          {
+            "node": "Notify Sales Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

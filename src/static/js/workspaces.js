@@ -1098,6 +1098,216 @@ function formatDate(iso) {
   }
 }
 
+// ── Template Browser ───────────────────────────────────────────────────
+
+let templateCache = [];
+let templateCategories = [];
+let templateSearchTimer = null;
+
+async function openTemplateBrowser() {
+  const overlay = $('#ws-template-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('hidden');
+
+  const listEl = $('#ws-template-list');
+  const countEl = $('#ws-template-count');
+  const catSelect = $('#ws-template-category');
+  const searchInput = $('#ws-template-search');
+
+  if (listEl) listEl.innerHTML = '<div class="ws-template-loading"><span class="ws-spinner"></span> Loading templates…</div>';
+  if (searchInput) searchInput.value = '';
+
+  try {
+    // Load categories + templates in parallel
+    const [catData, tplData] = await Promise.all([
+      apiFetch('/v1/workspaces/templates/categories'),
+      apiFetch('/v1/workspaces/templates?limit=300'),
+    ]);
+
+    templateCategories = catData?.categories ?? [];
+    templateCache = tplData?.templates ?? [];
+
+    // Populate category selector
+    if (catSelect) {
+      while (catSelect.options.length > 1) catSelect.remove(1);
+      for (const cat of templateCategories) {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        catSelect.appendChild(opt);
+      }
+    }
+
+    renderTemplateList(templateCache);
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="ws-template-empty">Failed to load templates: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function closeTemplateBrowser() {
+  $('#ws-template-overlay')?.classList.add('hidden');
+}
+
+async function searchTemplates() {
+  const q = $('#ws-template-search')?.value?.trim() || '';
+  const cat = $('#ws-template-category')?.value || '';
+  const listEl = $('#ws-template-list');
+
+  // Client-side filter on cached data for speed
+  let results = templateCache;
+
+  if (cat) {
+    results = results.filter((t) => t.category === cat);
+  }
+
+  if (q) {
+    const terms = q.toLowerCase().split(/\s+/);
+    results = results.filter((t) => {
+      const searchable = `${t.name} ${t.category} ${(t.node_types || []).join(' ')} ${(t.node_names || []).join(' ')}`.toLowerCase();
+      return terms.every((term) => searchable.includes(term));
+    });
+  }
+
+  renderTemplateList(results);
+}
+
+function renderTemplateList(templates) {
+  const listEl = $('#ws-template-list');
+  const countEl = $('#ws-template-count');
+  if (!listEl) return;
+
+  if (countEl) countEl.textContent = `${templates.length} template${templates.length !== 1 ? 's' : ''}`;
+
+  if (!templates.length) {
+    listEl.innerHTML = '<div class="ws-template-empty">No templates match your search</div>';
+    return;
+  }
+
+  listEl.innerHTML = templates.map((t) => {
+    const nodeTypes = (t.node_types || []).slice(0, 5);
+    const tagsHtml = nodeTypes
+      .map((nt) => {
+        const short = nt.split('.').pop() || nt;
+        return `<span class="ws-tpl-tag">${escapeHtml(short)}</span>`;
+      })
+      .join('');
+    const moreCount = (t.node_types || []).length - 5;
+    const moreHtml = moreCount > 0 ? `<span class="ws-tpl-tag ws-tpl-tag-more">+${moreCount}</span>` : '';
+
+    return `
+      <div class="ws-tpl-card" role="listitem" data-tpl-id="${t.id}">
+        <div class="ws-tpl-card-top">
+          <span class="ws-tpl-name">${escapeHtml(t.name)}</span>
+          <span class="ws-tpl-category">${escapeHtml(t.category)}</span>
+        </div>
+        <div class="ws-tpl-tags">${tagsHtml}${moreHtml}</div>
+        <div class="ws-tpl-card-bottom">
+          <span class="ws-tpl-nodes">${t.node_count || 0} nodes</span>
+          <button class="ws-tpl-use-btn" data-tpl-id="${t.id}" data-tpl-name="${escapeHtml(t.name)}">Use Template</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Wire up "Use Template" buttons
+  listEl.querySelectorAll('.ws-tpl-use-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tplId = parseInt(btn.dataset.tplId, 10);
+      const tplName = btn.dataset.tplName;
+      loadTemplateIntoWorkspace(tplId, tplName);
+    });
+  });
+}
+
+async function loadTemplateIntoWorkspace(templateId, templateName) {
+  if (!activeWsId) {
+    showTplStatus('Please select or create a workspace first.', 'error');
+    return;
+  }
+
+  const ws = workspaces.find((w) => w.id === activeWsId);
+  if (ws && !['draft', 'designed', 'rejected', 'approved', 'failed'].includes(ws.status)) {
+    showTplStatus(`Cannot load template: workspace is in "${ws.status}" state.`, 'error');
+    return;
+  }
+
+  // Show inline confirmation
+  showTplConfirm(
+    `Load "${templateName}" into this workspace? This will replace the current design.`,
+    async () => {
+      hideTplConfirm();
+      // Find and disable the button
+      const btn = $(`.ws-tpl-use-btn[data-tpl-id="${templateId}"]`);
+      if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+
+      showTplStatus('Loading template…', 'loading');
+
+      try {
+        const result = await apiFetch(`/v1/workspaces/${encodeURIComponent(activeWsId)}/load-template`, {
+          method: 'POST',
+          body: JSON.stringify({ template_id: templateId }),
+        });
+
+        let msg = `✓ "${result.template_name}" loaded (${result.node_count} nodes)`;
+        if (result.missing_credentials?.length > 0) {
+          const types = [...new Set(result.missing_credentials.map((m) => m.cred_type))];
+          msg += ` — ⚠ Missing credentials: ${types.join(', ')}`;
+        }
+        showTplStatus(msg, 'success');
+
+        // Auto-close browser after short delay and navigate to workspace editor
+        setTimeout(async () => {
+          closeTemplateBrowser();
+          await refreshActiveWorkspace(activeWsId);
+        }, 1200);
+      } catch (err) {
+        showTplStatus(`Failed to load template: ${err.message}`, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Use Template'; }
+      }
+    },
+  );
+}
+
+function showTplConfirm(text, onConfirm) {
+  const el = $('#ws-tpl-confirm');
+  const textEl = $('#ws-tpl-confirm-text');
+  if (!el || !textEl) return;
+  textEl.textContent = text;
+  el.classList.remove('hidden');
+
+  const yesBtn = $('#ws-tpl-confirm-yes');
+  const noBtn = $('#ws-tpl-confirm-no');
+
+  // Replace buttons to clear old listeners
+  const newYes = yesBtn.cloneNode(true);
+  const newNo = noBtn.cloneNode(true);
+  yesBtn.replaceWith(newYes);
+  noBtn.replaceWith(newNo);
+
+  newYes.addEventListener('click', onConfirm);
+  newNo.addEventListener('click', hideTplConfirm);
+}
+
+function hideTplConfirm() {
+  $('#ws-tpl-confirm')?.classList.add('hidden');
+}
+
+function showTplStatus(msg, type) {
+  const el = $('#ws-tpl-status');
+  if (!el) return;
+  el.className = `ws-tpl-status ws-tpl-status-${type}`;
+  el.textContent = type === 'loading' ? `⏳ ${msg}` : msg;
+  el.classList.remove('hidden');
+  if (type === 'success' || type === 'error') {
+    setTimeout(() => el.classList.add('hidden'), 8000);
+  }
+}
+
+function hideTplStatus() {
+  $('#ws-tpl-status')?.classList.add('hidden');
+}
+
 // ── Init ───────────────────────────────────────────────────────────────
 
 export function initWorkspaces() {
@@ -1129,6 +1339,18 @@ export function initWorkspaces() {
 
   // Populate model selector
   populateModelSelector();
+
+  // ── Template browser bindings ─────────────────────────────────────
+  $('#ws-templates-btn')?.addEventListener('click', () => openTemplateBrowser());
+  $('#ws-template-close')?.addEventListener('click', () => closeTemplateBrowser());
+  $('#ws-template-overlay')?.addEventListener('click', (e) => {
+    if (e.target.id === 'ws-template-overlay') closeTemplateBrowser();
+  });
+  $('#ws-template-search')?.addEventListener('input', () => {
+    clearTimeout(templateSearchTimer);
+    templateSearchTimer = setTimeout(searchTemplates, 200);
+  });
+  $('#ws-template-category')?.addEventListener('change', () => searchTemplates());
 
   // ── Event bindings ──────────────────────────────────────────────────
 
@@ -1235,7 +1457,7 @@ export function initWorkspaces() {
   });
 
   // Close overlays on backdrop click
-  ['ws-rename-overlay', 'ws-delete-overlay', 'ws-modify-overlay'].forEach((id) => {
+  ['ws-rename-overlay', 'ws-delete-overlay', 'ws-modify-overlay', 'ws-template-overlay'].forEach((id) => {
     $(`#${id}`)?.addEventListener('click', (e) => {
       if (e.target.id === id) {
         $(`#${id}`)?.classList.add('hidden');
@@ -1267,6 +1489,7 @@ export function initWorkspaces() {
       closeRenameDialog();
       closeDeleteDialog();
       closeModifyDialog();
+      closeTemplateBrowser();
     }
   });
 

@@ -1,0 +1,179 @@
+{
+  "name": "Notion Competitor Database Builder",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Competitor Database Builder\nScheduled competitor data scraping, Notion updates, change comparison, and email diff reports.\n\n**Setup:**\n1. Set competitor URLs in the HTTP node\n2. Set Notion competitor database ID\n3. Set email recipient for diff reports\n4. Adjust schedule frequency"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 400],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 1"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "name": "Notion Get Competitors",
+      "type": "n8n-nodes-base.notion",
+      "position": [460, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "returnAll": true,
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "HTTP Scrape Competitor",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [680, 400],
+      "parameters": {
+        "url": "={{ $json.properties?.['Website']?.url || $json.properties?.['URL']?.url || '' }}",
+        "method": "GET",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Extract and Compare",
+      "type": "n8n-nodes-base.code",
+      "position": [900, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst competitors = $('Notion Get Competitors').all();\nconst changes = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const html = items[i].json.data || items[i].json.body || '';\n  const comp = competitors[i];\n  if (!comp) continue;\n\n  const props = comp.json.properties || {};\n  const name = props['Name']?.title?.map(t => t.plain_text).join('') || 'Unknown';\n  const prevDescription = props['Description']?.rich_text?.map(t => t.plain_text).join('') || '';\n  const prevPricing = props['Pricing']?.rich_text?.map(t => t.plain_text).join('') || '';\n\n  // Extract title\n  const titleMatch = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\n  const currentTitle = titleMatch ? titleMatch[1].trim() : '';\n\n  // Extract meta description\n  const descMatch = html.match(/<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"']+)[\"']/i);\n  const currentDescription = descMatch ? descMatch[1].trim() : '';\n\n  // Detect pricing keywords\n  const pricingMatch = html.match(/\\$[\\d,]+(\\.\\d{2})?\\/?\\s*(mo|month|year|yr)/gi);\n  const currentPricing = pricingMatch ? pricingMatch.slice(0, 5).join(', ') : '';\n\n  const changed = [];\n  if (currentDescription && currentDescription !== prevDescription) changed.push('description');\n  if (currentPricing && currentPricing !== prevPricing) changed.push('pricing');\n\n  changes.push({\n    json: {\n      pageId: comp.json.id,\n      name,\n      currentTitle,\n      currentDescription: currentDescription.substring(0, 500),\n      currentPricing,\n      prevDescription,\n      prevPricing,\n      hasChanges: changed.length > 0,\n      changedFields: changed.join(', '),\n      scrapedAt: new Date().toISOString()\n    }\n  });\n}\n\nreturn changes;"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Update Entries",
+      "type": "n8n-nodes-base.notion",
+      "position": [1120, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": "={{ $json.pageId }}",
+        "properties": {
+          "assignments": [
+            {
+              "name": "Description",
+              "type": "rich_text",
+              "richText": "={{ $json.currentDescription }}"
+            },
+            {
+              "name": "Pricing",
+              "type": "rich_text",
+              "richText": "={{ $json.currentPricing }}"
+            },
+            {
+              "name": "Last Scraped",
+              "type": "date",
+              "date": "={{ $json.scrapedAt }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Build Diff Report",
+      "type": "n8n-nodes-base.code",
+      "position": [1340, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst allItems = $('Extract and Compare').all();\nconst changedItems = allItems.filter(i => i.json.hasChanges);\n\nif (changedItems.length === 0) {\n  return [{ json: { hasChanges: false, report: 'No changes detected this week.' } }];\n}\n\nconst report = changedItems.map(item => {\n  const d = item.json;\n  let diff = `## ${d.name}\\nChanged: ${d.changedFields}\\n`;\n  if (d.changedFields.includes('description')) {\n    diff += `\\nDescription:\\n  Before: ${d.prevDescription.substring(0, 200)}\\n  After: ${d.currentDescription.substring(0, 200)}\\n`;\n  }\n  if (d.changedFields.includes('pricing')) {\n    diff += `\\nPricing:\\n  Before: ${d.prevPricing}\\n  After: ${d.currentPricing}\\n`;\n  }\n  return diff;\n}).join('\\n---\\n');\n\nreturn [{\n  json: {\n    hasChanges: true,\n    changedCount: changedItems.length,\n    totalScraped: allItems.length,\n    report\n  }\n}];"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Email Diff Report",
+      "type": "n8n-nodes-base.gmail",
+      "position": [1560, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=🔍 Competitor Changes Report — {{ $json.changedCount || 0 }} change(s) detected",
+        "message": "=Weekly Competitor Monitoring Report\n\nScraped: {{ $json.totalScraped || 0 }} competitors\nChanges detected: {{ $json.changedCount || 0 }}\n\n{{ $json.report }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [{ "node": "Notion Get Competitors", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Get Competitors": {
+      "main": [
+        [{ "node": "HTTP Scrape Competitor", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP Scrape Competitor": {
+      "main": [
+        [{ "node": "Extract and Compare", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract and Compare": {
+      "main": [
+        [{ "node": "Notion Update Entries", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Update Entries": {
+      "main": [
+        [{ "node": "Build Diff Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Diff Report": {
+      "main": [
+        [{ "node": "Email Diff Report", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

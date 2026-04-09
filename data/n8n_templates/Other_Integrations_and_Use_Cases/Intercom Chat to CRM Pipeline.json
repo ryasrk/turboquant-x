@@ -1,0 +1,123 @@
+{
+  "name": "Intercom Chat to CRM Pipeline",
+  "nodes": [
+    {
+      "name": "Webhook Intercom",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "path": "intercom-chat",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Extract Lead Info",
+      "type": "n8n-nodes-base.code",
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const payload = item.json.body || item.json;\n  const data = payload.data?.item || payload;\n  const user = data.user || data.contacts?.[0] || {};\n  const conversation = data.conversation_parts?.conversation_parts?.[0] || {};\n  \n  const name = user.name || '';\n  const email = user.email || '';\n  const company = user.companies?.companies?.[0]?.name || '';\n  const plan = user.custom_attributes?.plan || '';\n  const revenue = parseFloat(user.custom_attributes?.monthly_spend || 0);\n  const isHighValue = revenue > 500 || plan === 'enterprise';\n  \n  return {\n    json: {\n      conversationId: data.id || '',\n      userId: user.id || user.user_id || '',\n      name: name,\n      email: email,\n      company: company,\n      plan: plan,\n      monthlyRevenue: revenue,\n      isHighValue: isHighValue,\n      message: (conversation.body || data.body || '').substring(0, 500),\n      source: data.source?.type || 'conversation',\n      assignee: data.assignee?.name || 'Unassigned',\n      tags: (data.tags?.tags || []).map(t => t.name).join(', '),\n      createdAt: data.created_at ? new Date(data.created_at * 1000).toISOString() : new Date().toISOString()\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Sheets CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [710, 200],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "", "mode": "list" },
+        "sheetName": { "__rl": true, "value": "", "mode": "list" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Gmail to Sales",
+      "type": "n8n-nodes-base.gmail",
+      "position": [710, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=New Lead from Intercom: {{ $json.name }} ({{ $json.company }})",
+        "message": "=New conversation from Intercom.\n\nName: {{ $json.name }}\nEmail: {{ $json.email }}\nCompany: {{ $json.company }}\nPlan: {{ $json.plan }}\nMonthly Revenue: ${{ $json.monthlyRevenue }}\nTags: {{ $json.tags }}\n\nMessage:\n{{ $json.message }}",
+        "options": {}
+      },
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Check High Value",
+      "type": "n8n-nodes-base.if",
+      "position": [940, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isHighValue }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Slack High Value Alert",
+      "type": "n8n-nodes-base.slack",
+      "position": [1170, 300],
+      "parameters": {
+        "channel": "",
+        "text": "=💎 *High-Value Lead from Intercom!*\n\nName: {{ $json.name }}\nCompany: {{ $json.company }}\nMonthly Revenue: ${{ $json.monthlyRevenue }}\nPlan: {{ $json.plan }}\n\nConversation ID: {{ $json.conversationId }}",
+        "otherOptions": {}
+      },
+      "typeVersion": 2.2,
+      "credentials": {
+        "slackOAuth2Api": { "id": "", "name": "" }
+      }
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [200, 100],
+      "parameters": {
+        "content": "## Intercom Chat to CRM Pipeline\nReceives Intercom conversation webhooks, extracts lead info, logs to CRM (Sheets), emails sales team, and alerts Slack for high-value leads.\n\n**Setup:**\n1. Configure Intercom webhook to this URL\n2. Connect Google Sheets for CRM pipeline tracking\n3. Set Gmail recipient for sales notifications\n4. Configure Slack channel for high-value lead alerts\n5. Adjust high-value threshold in Code node (default: $500/mo or enterprise plan)"
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Intercom": {
+      "main": [[{ "node": "Extract Lead Info", "type": "main", "index": 0 }]]
+    },
+    "Extract Lead Info": {
+      "main": [
+        [
+          { "node": "Sheets CRM", "type": "main", "index": 0 },
+          { "node": "Gmail to Sales", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Gmail to Sales": {
+      "main": [[{ "node": "Check High Value", "type": "main", "index": 0 }]]
+    },
+    "Check High Value": {
+      "main": [
+        [{ "node": "Slack High Value Alert", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

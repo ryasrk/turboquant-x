@@ -1,0 +1,90 @@
+{
+  "name": "Surat Jalan and Delivery Order Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "surat-jalan",
+        "options": {}
+      },
+      "name": "New Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const order = $input.first().json;\n\n// Generate nomor surat jalan: SJ/YYYYMMDD/XXX\nconst now = new Date();\nconst dateStr = now.getFullYear().toString() +\n  String(now.getMonth() + 1).padStart(2, '0') +\n  String(now.getDate()).padStart(2, '0');\nconst seq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');\nconst nomorSJ = `SJ/${dateStr}/${seq}`;\n\n// Format items table\nconst items = (order.items || []).map((item, i) => ({\n  no: i + 1,\n  kode_barang: item.sku || item.kode || '-',\n  nama_barang: item.nama || item.name || '-',\n  satuan: item.satuan || item.unit || 'pcs',\n  jumlah: item.qty || item.jumlah || 0,\n  keterangan: item.keterangan || item.notes || ''\n}));\n\nconst totalBarang = items.reduce((sum, i) => sum + Number(i.jumlah), 0);\n\nreturn [{\n  json: {\n    nomor_surat_jalan: nomorSJ,\n    tanggal: now.toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'}),\n    nomor_po: order.po_number || order.nomor_po || '-',\n    \n    pengirim_nama: order.pengirim?.nama || order.sender_name || 'PT. Nama Perusahaan',\n    pengirim_alamat: order.pengirim?.alamat || order.sender_address || 'Jl. Sudirman No.1, Jakarta',\n    pengirim_telepon: order.pengirim?.telepon || order.sender_phone || '-',\n    \n    penerima_nama: order.penerima?.nama || order.recipient_name || '-',\n    penerima_alamat: order.penerima?.alamat || order.recipient_address || '-',\n    penerima_telepon: order.penerima?.telepon || order.recipient_phone || '-',\n    penerima_kota: order.penerima?.kota || order.recipient_city || '-',\n    \n    ekspedisi: order.ekspedisi || order.courier || '-',\n    no_resi: order.no_resi || order.tracking_number || 'Akan diisi',\n    \n    items: items,\n    total_barang: totalBarang,\n    catatan: order.catatan || order.notes || ''\n  }\n}];"
+      },
+      "name": "Format Surat Jalan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sj = $input.first().json;\n\nconst itemsRows = sj.items.map(i => \n  `<tr><td>${i.no}</td><td>${i.kode_barang}</td><td>${i.nama_barang}</td><td>${i.satuan}</td><td style=\"text-align:center\">${i.jumlah}</td><td>${i.keterangan}</td></tr>`\n).join('');\n\nconst html = `<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>\n  body{font-family:Arial,sans-serif;margin:20px;font-size:12px}\n  h2{margin:0;text-align:center}\n  .header{text-align:center;margin-bottom:20px;border-bottom:2px solid #333;padding-bottom:10px}\n  .company{font-size:18px;font-weight:bold}\n  .info-grid{display:flex;justify-content:space-between;margin-bottom:15px}\n  .info-box{width:48%}\n  .info-box h4{margin:0 0 5px;background:#f0f0f0;padding:4px 8px}\n  .info-box p{margin:2px 0;padding-left:8px}\n  table{width:100%;border-collapse:collapse;margin:15px 0}\n  th,td{border:1px solid #333;padding:6px 8px}\n  th{background:#e0e0e0;text-align:left}\n  .signatures{display:flex;justify-content:space-between;margin-top:40px}\n  .sig-box{text-align:center;width:30%}\n  .sig-line{border-bottom:1px solid #333;height:60px}\n  .notes{margin-top:15px;padding:8px;background:#fffde7;border:1px solid #ffd54f}\n</style>\n</head>\n<body>\n  <div class=\"header\">\n    <div class=\"company\">${sj.pengirim_nama}</div>\n    <div>${sj.pengirim_alamat} | Tel: ${sj.pengirim_telepon}</div>\n  </div>\n  \n  <h2>SURAT JALAN</h2>\n  <p style=\"text-align:center\">No: <strong>${sj.nomor_surat_jalan}</strong> | Tanggal: ${sj.tanggal} | Ref PO: ${sj.nomor_po}</p>\n  \n  <div class=\"info-grid\">\n    <div class=\"info-box\">\n      <h4>Pengirim</h4>\n      <p><strong>${sj.pengirim_nama}</strong></p>\n      <p>${sj.pengirim_alamat}</p>\n      <p>Tel: ${sj.pengirim_telepon}</p>\n    </div>\n    <div class=\"info-box\">\n      <h4>Penerima</h4>\n      <p><strong>${sj.penerima_nama}</strong></p>\n      <p>${sj.penerima_alamat}</p>\n      <p>${sj.penerima_kota}</p>\n      <p>Tel: ${sj.penerima_telepon}</p>\n    </div>\n  </div>\n  \n  <p><strong>Ekspedisi:</strong> ${sj.ekspedisi} | <strong>No. Resi:</strong> ${sj.no_resi}</p>\n  \n  <table>\n    <thead>\n      <tr><th>No</th><th>Kode</th><th>Nama Barang</th><th>Satuan</th><th>Jumlah</th><th>Keterangan</th></tr>\n    </thead>\n    <tbody>${itemsRows}</tbody>\n    <tfoot>\n      <tr><td colspan=\"4\" style=\"text-align:right\"><strong>Total Barang:</strong></td><td style=\"text-align:center\"><strong>${sj.total_barang}</strong></td><td></td></tr>\n    </tfoot>\n  </table>\n  \n  ${sj.catatan ? `<div class=\"notes\"><strong>Catatan:</strong> ${sj.catatan}</div>` : ''}\n  \n  <div class=\"signatures\">\n    <div class=\"sig-box\">\n      <p><strong>Pengirim</strong></p>\n      <div class=\"sig-line\"></div>\n      <p>(_______________)</p>\n    </div>\n    <div class=\"sig-box\">\n      <p><strong>Kurir/Ekspedisi</strong></p>\n      <div class=\"sig-line\"></div>\n      <p>(_______________)</p>\n    </div>\n    <div class=\"sig-box\">\n      <p><strong>Penerima</strong></p>\n      <div class=\"sig-line\"></div>\n      <p>(_______________)</p>\n    </div>\n  </div>\n</body>\n</html>`;\n\nreturn [{json: {html: html, ...sj}}];"
+      },
+      "name": "Generate HTML Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "list", "value": ""},
+        "sheetName": {"__rl": true, "mode": "list", "value": "Surat Jalan"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "values": {
+            "values": [
+              {"column": "nomor_sj", "value": "={{ $json.nomor_surat_jalan }}"},
+              {"column": "tanggal", "value": "={{ $json.tanggal }}"},
+              {"column": "penerima", "value": "={{ $json.penerima_nama }}"},
+              {"column": "kota", "value": "={{ $json.penerima_kota }}"},
+              {"column": "ekspedisi", "value": "={{ $json.ekspedisi }}"},
+              {"column": "total_barang", "value": "={{ $json.total_barang }}"},
+              {"column": "status", "value": "Terkirim"}
+            ]
+          }
+        }
+      },
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [950, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.penerima_nama }} <{{ $('New Order Webhook').first().json.recipient_email || 'customer@example.com' }}>",
+        "subject": "=Surat Jalan {{ $json.nomor_surat_jalan }} - {{ $json.pengirim_nama }}",
+        "message": "=Yth. {{ $json.penerima_nama }},\n\nBerikut surat jalan untuk pengiriman ke alamat Anda:\n\nNo. Surat Jalan: {{ $json.nomor_surat_jalan }}\nTanggal: {{ $json.tanggal }}\nEkspedisi: {{ $json.ekspedisi }}\nNo. Resi: {{ $json.no_resi }}\nTotal Barang: {{ $json.total_barang }} item\n\nMohon diperiksa kesesuaian barang saat diterima.\n\nTerima kasih,\n{{ $json.pengirim_nama }}"
+      },
+      "name": "Email to Customer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [950, 420],
+      "credentials": {
+        "gmailOAuth2": {"id": "", "name": ""}
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Surat Jalan / Delivery Order Generator\n\n### Generates:\n- Professional Surat Jalan HTML document\n- Auto-numbered: SJ/YYYYMMDD/XXX\n- Pengirim & Penerima details\n- Item table with kode barang, satuan, jumlah\n- Signature boxes (Pengirim, Kurir, Penerima)\n- Logs to Google Sheets tracking\n- Emails notification to customer\n\n### Webhook Payload:\n```json\n{\n  \"po_number\": \"PO/2024/001\",\n  \"pengirim\": {\"nama\": \"PT. ABC\", \"alamat\": \"...\", \"telepon\": \"...\"},\n  \"penerima\": {\"nama\": \"Toko XYZ\", \"alamat\": \"...\", \"kota\": \"Surabaya\", \"telepon\": \"...\"},\n  \"ekspedisi\": \"JNE REG\",\n  \"items\": [{\"sku\": \"SKU001\", \"nama\": \"Produk A\", \"satuan\": \"pcs\", \"qty\": 10}]\n}\n```"
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [230, 60]
+    }
+  ],
+  "connections": {
+    "New Order Webhook": {"main": [[{"node": "Format Surat Jalan", "type": "main", "index": 0}]]},
+    "Format Surat Jalan": {"main": [[{"node": "Generate HTML Document", "type": "main", "index": 0}]]},
+    "Generate HTML Document": {"main": [[{"node": "Log to Google Sheets", "type": "main", "index": 0}, {"node": "Email to Customer", "type": "main", "index": 0}]]}
+  }
+}

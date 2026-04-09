@@ -1,0 +1,188 @@
+{
+  "name": "Slack PTO Approval Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pto-request",
+        "options": {}
+      },
+      "name": "PTO Slash Command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst body = items[0].json.body || items[0].json;\nconst text = body.text || '';\nconst parts = text.split(' ');\nconst startDate = parts[0] || '';\nconst endDate = parts[1] || startDate;\nconst reason = parts.slice(2).join(' ') || 'Personal';\nconst userId = body.user_id || '';\nconst userName = body.user_name || '';\n\nreturn [{json: {\n  userId,\n  userName,\n  startDate,\n  endDate,\n  reason,\n  requestId: `pto-${Date.now()}`,\n  requestedAt: new Date().toISOString()\n}}];"
+      },
+      "name": "Parse PTO Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "#managers",
+          "mode": "name"
+        },
+        "text": ":palm_tree: *PTO Request*\n\n*From:* <@{{ $json.userId }}>\n*Dates:* {{ $json.startDate }} to {{ $json.endDate }}\n*Reason:* {{ $json.reason }}\n*Request ID:* {{ $json.requestId }}\n\nPlease approve or deny via the webhook:\n- Approve: `/approve {{ $json.requestId }}`\n- Deny: `/deny {{ $json.requestId }}`",
+        "otherOptions": {}
+      },
+      "name": "Message Manager",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [700, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pto-decision",
+        "options": {}
+      },
+      "name": "Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 540]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst body = items[0].json.body || items[0].json;\nconst approved = body.action === 'approve';\nconst requestId = body.requestId || '';\nconst managerId = body.user_id || '';\n\nreturn [{json: {\n  requestId,\n  approved,\n  managerId,\n  decision: approved ? 'Approved' : 'Denied',\n  decidedAt: new Date().toISOString(),\n  userId: body.requesterId || '',\n  startDate: body.startDate || '',\n  endDate: body.endDate || '',\n  reason: body.reason || ''\n}}];"
+      },
+      "name": "Process Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 540]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PTO Tracker",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Update PTO Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [700, 540],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": {
+          "__rl": true,
+          "value": "={{ $json.userId }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.approved ? ':white_check_mark: Your PTO request has been *approved*!' : ':x: Your PTO request has been *denied*.' }}\n\n*Dates:* {{ $json.startDate }} to {{ $json.endDate }}\n*Decision by:* <@{{ $json.managerId }}>\n*Request ID:* {{ $json.requestId }}",
+        "otherOptions": {}
+      },
+      "name": "Notify Requester",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [920, 540],
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Slack PTO Approval Workflow\n\nTwo-phase PTO request and approval system.\n\n**Phase 1 - Request:**\n1. Slash command triggers webhook\n2. Parse dates and reason\n3. Post approval request to managers\n\n**Phase 2 - Approval:**\n1. Manager responds via webhook\n2. Update Google Sheets tracker\n3. DM requester with decision\n\n**Usage:** `/pto 2024-03-15 2024-03-18 Family vacation`",
+        "width": 340,
+        "height": 300
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [20, 260]
+    }
+  ],
+  "connections": {
+    "PTO Slash Command": {
+      "main": [
+        [
+          {
+            "node": "Parse PTO Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PTO Request": {
+      "main": [
+        [
+          {
+            "node": "Message Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Webhook": {
+      "main": [
+        [
+          {
+            "node": "Process Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Decision": {
+      "main": [
+        [
+          {
+            "node": "Update PTO Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update PTO Sheet": {
+      "main": [
+        [
+          {
+            "node": "Notify Requester",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

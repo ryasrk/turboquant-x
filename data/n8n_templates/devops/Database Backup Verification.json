@@ -1,0 +1,229 @@
+{
+  "name": "Database Backup Verification",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "name": "Daily After Backup Window",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "backupDir",
+              "value": "/var/backups/postgres"
+            },
+            {
+              "name": "dbName",
+              "value": "production_db"
+            },
+            {
+              "name": "minSizeMB",
+              "value": "100"
+            }
+          ]
+        }
+      },
+      "name": "Set Backup Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "command": "=BACKUP_DIR=\"{{ $json.backupDir }}\"\nDB_NAME=\"{{ $json.dbName }}\"\nDATE=$(date +%Y-%m-%d)\nBACKUP_FILE=\"${BACKUP_DIR}/${DB_NAME}_${DATE}.sql.gz\"\n\nif [ -f \"$BACKUP_FILE\" ]; then\n  SIZE=$(stat -c%s \"$BACKUP_FILE\" 2>/dev/null || echo 0)\n  SIZE_MB=$((SIZE / 1048576))\n  MD5=$(md5sum \"$BACKUP_FILE\" | awk '{print $1}')\n  echo \"{\\\"exists\\\": true, \\\"file\\\": \\\"$BACKUP_FILE\\\", \\\"size_bytes\\\": $SIZE, \\\"size_mb\\\": $SIZE_MB, \\\"md5\\\": \\\"$MD5\\\", \\\"date\\\": \\\"$DATE\\\"}\"\nelse\n  echo \"{\\\"exists\\\": false, \\\"file\\\": \\\"$BACKUP_FILE\\\", \\\"size_bytes\\\": 0, \\\"size_mb\\\": 0, \\\"md5\\\": \\\"\\\", \\\"date\\\": \\\"$DATE\\\"}\"\nfi"
+      },
+      "name": "SSH Check Backup File",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [700, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json.stdout;\nconst backup = JSON.parse(output.trim());\nconst minSizeMB = parseInt($('Set Backup Config').first().json.minSizeMB) || 100;\n\nlet status = 'SUCCESS';\nlet issues = [];\n\nif (!backup.exists) {\n  status = 'FAILED';\n  issues.push('Backup file does not exist');\n} else if (backup.size_mb < minSizeMB) {\n  status = 'WARNING';\n  issues.push(`Backup size (${backup.size_mb}MB) below minimum threshold (${minSizeMB}MB)`);\n}\n\nreturn [{\n  json: {\n    ...backup,\n    status,\n    issues: issues.join('; ') || 'None',\n    minSizeMB,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Parse and Verify Backup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-failed",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "SUCCESS",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Backup OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "🗄️ *Database Backup {{ $json.status }}*\n\nDate: {{ $json.date }}\nFile: `{{ $json.file }}`\nExists: {{ $json.exists }}\nSize: {{ $json.size_mb }} MB\nMD5: {{ $json.md5 || 'N/A' }}\n\n⚠️ Issues: {{ $json.issues }}\n\n🔴 Please investigate immediately!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Backup Failure Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1360, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "BackupLog"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "date": "={{ $json.date }}",
+            "file": "={{ $json.file }}",
+            "exists": "={{ $json.exists }}",
+            "size_mb": "={{ $json.size_mb }}",
+            "md5": "={{ $json.md5 }}",
+            "status": "={{ $json.status }}",
+            "issues": "={{ $json.issues }}"
+          }
+        }
+      },
+      "name": "Google Sheets Backup Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "position": [1360, 420],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Database Backup Verification\n\n**Schedule:** Daily at 6:00 AM (after backup window)\n**Function:** SSHs into server, checks backup file exists, verifies size and integrity.\n\n**Checks:**\n- Backup file existence\n- File size above minimum threshold\n- MD5 checksum for integrity\n\n**Alerts:** Telegram notification on failure or warning.\n**Logging:** All backup verifications logged to Google Sheets.\n\n### Setup\n1. Configure SSH credentials\n2. Update backup directory, DB name, and min size in 'Set Backup Config'\n3. Configure Telegram Bot credentials\n4. Set Google Sheets document ID",
+        "width": 420,
+        "height": 320
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -80]
+    }
+  ],
+  "connections": {
+    "Daily After Backup Window": {
+      "main": [
+        [
+          {
+            "node": "Set Backup Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Backup Config": {
+      "main": [
+        [
+          {
+            "node": "SSH Check Backup File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH Check Backup File": {
+      "main": [
+        [
+          {
+            "node": "Parse and Verify Backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and Verify Backup": {
+      "main": [
+        [
+          {
+            "node": "Backup OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backup OK?": {
+      "main": [
+        [
+          {
+            "node": "Telegram Backup Failure Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets Backup Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

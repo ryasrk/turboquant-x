@@ -1,0 +1,192 @@
+{
+  "name": "Email Metrics Dashboard",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Schedule 6PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "labelIds": ["SENT"],
+          "receivedAfter": "={{ $now.startOf('day').toISO() }}"
+        },
+        "options": {}
+      },
+      "name": "Gmail Search Sent",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "labelIds": ["INBOX"],
+          "receivedAfter": "={{ $now.startOf('day').toISO() }}"
+        },
+        "options": {}
+      },
+      "name": "Gmail Search Received",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [500, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sentItems = $('Gmail Search Sent').all();\nconst receivedItems = $('Gmail Search Received').all();\n\nconst sentCount = sentItems.length;\nconst receivedCount = receivedItems.length;\n\n// Count replied (sent emails that are replies)\nlet repliedCount = 0;\nfor (const item of sentItems) {\n  const subject = (item.json.subject || '').toLowerCase();\n  if (subject.startsWith('re:')) {\n    repliedCount++;\n  }\n}\n\n// Count by sender domain\nconst domainCounts = {};\nfor (const item of receivedItems) {\n  const from = item.json.from || '';\n  const domainMatch = from.match(/@([^>\\s]+)/);\n  if (domainMatch) {\n    const domain = domainMatch[1];\n    domainCounts[domain] = (domainCounts[domain] || 0) + 1;\n  }\n}\n\nconst topDomains = Object.entries(domainCounts)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 10)\n  .map(([domain, count]) => `${domain}: ${count}`)\n  .join(', ');\n\nconst responseRate = receivedCount > 0 ? ((repliedCount / receivedCount) * 100).toFixed(1) : '0';\n\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    sentCount: sentCount,\n    receivedCount: receivedCount,\n    repliedCount: repliedCount,\n    responseRate: responseRate + '%',\n    topSenderDomains: topDomains,\n    totalActivity: sentCount + receivedCount\n  }\n}];"
+      },
+      "name": "Count Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "name": "Sheets Metrics Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "me",
+        "subject": "📊 Email Metrics - {{ $json.date }} | Sent: {{ $json.sentCount }} | Received: {{ $json.receivedCount }}",
+        "message": "Daily Email Metrics Report\n\n- **Date:** {{ $json.date }}\n- **Sent:** {{ $json.sentCount }}\n- **Received:** {{ $json.receivedCount }}\n- **Replied:** {{ $json.repliedCount }}\n- **Response Rate:** {{ $json.responseRate }}\n- **Total Activity:** {{ $json.totalActivity }}\n\n**Top Sender Domains:** {{ $json.topSenderDomains }}\n\nMetrics have been logged to your tracking spreadsheet.",
+        "options": {}
+      },
+      "name": "Gmail Weekly Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Email Metrics Dashboard\n\nDaily email activity tracking with metrics logging.\n\n**Flow:**\n1. Daily schedule at 6 PM\n2. Gmail searches sent and received emails for today\n3. Code counts sent/received/replied and calculates response rate\n4. Log metrics to Sheets\n5. Send summary report email\n\n**Metrics tracked:** sent count, received count, replied count, response rate, top sender domains, total activity",
+        "width": 400,
+        "height": 260
+      },
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, -50]
+    }
+  ],
+  "connections": {
+    "Daily Schedule 6PM": {
+      "main": [
+        [
+          {
+            "node": "Gmail Search Sent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail Search Received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Search Sent": {
+      "main": [
+        [
+          {
+            "node": "Count Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Search Received": {
+      "main": [
+        [
+          {
+            "node": "Count Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Metrics": {
+      "main": [
+        [
+          {
+            "node": "Sheets Metrics Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Metrics Log": {
+      "main": [
+        [
+          {
+            "node": "Gmail Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

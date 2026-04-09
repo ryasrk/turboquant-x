@@ -1,0 +1,132 @@
+{
+  "name": "Notion Meeting Notes Template",
+  "nodes": [
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [180, 120],
+      "parameters": {
+        "color": 4,
+        "width": 520,
+        "height": 200,
+        "content": "# Notion Meeting Notes Template\nAutomatically creates structured meeting notes in Notion when a meeting ends.\n\n**Setup:**\n1. Configure webhook URL in your calendar/meeting integration\n2. Set Notion database ID for meeting notes\n3. Set Gmail recipient for summary notifications"
+      },
+      "typeVersion": 1
+    },
+    {
+      "name": "Webhook Meeting Ended",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400],
+      "parameters": {
+        "path": "meeting-ended",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Format Meeting Data",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const data = item.json.body || item.json;\n  const title = data.meetingTitle || data.title || 'Untitled Meeting';\n  const attendees = data.attendees || [];\n  const agenda = data.agenda || [];\n  const date = data.startTime || new Date().toISOString();\n  const duration = data.duration || 'N/A';\n\n  const attendeeList = Array.isArray(attendees)\n    ? attendees.map(a => typeof a === 'string' ? a : a.email || a.name).join(', ')\n    : String(attendees);\n\n  const agendaItems = Array.isArray(agenda)\n    ? agenda.map((a, i) => `${i + 1}. ${typeof a === 'string' ? a : a.topic || a}`).join('\\n')\n    : String(agenda);\n\n  return {\n    json: {\n      title: title,\n      attendees: attendeeList,\n      agenda: agendaItems,\n      date: date,\n      duration: duration,\n      notesTemplate: `## Attendees\\n${attendeeList}\\n\\n## Agenda\\n${agendaItems}\\n\\n## Discussion Notes\\n- \\n\\n## Action Items\\n- [ ] \\n\\n## Decisions Made\\n- \\n\\n## Next Steps\\n- `\n    }\n  };\n});"
+      },
+      "typeVersion": 2
+    },
+    {
+      "name": "Notion Create Meeting Page",
+      "type": "n8n-nodes-base.notion",
+      "position": [680, 400],
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "properties": {
+          "assignments": [
+            {
+              "name": "Name",
+              "type": "title",
+              "title": "={{ $json.title }}"
+            },
+            {
+              "name": "Date",
+              "type": "date",
+              "date": "={{ $json.date }}"
+            },
+            {
+              "name": "Attendees",
+              "type": "rich_text",
+              "richText": "={{ $json.attendees }}"
+            },
+            {
+              "name": "Duration",
+              "type": "rich_text",
+              "richText": "={{ $json.duration }}"
+            },
+            {
+              "name": "Status",
+              "type": "select",
+              "select": "Completed"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "={{ $json.notesTemplate }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "name": "Gmail Send Summary",
+      "type": "n8n-nodes-base.gmail",
+      "position": [900, 400],
+      "parameters": {
+        "sendTo": "",
+        "subject": "=Meeting Notes Created: {{ $('Format Meeting Data').item.json.title }}",
+        "message": "=Meeting notes have been created in Notion.\n\nMeeting: {{ $('Format Meeting Data').item.json.title }}\nDate: {{ $('Format Meeting Data').item.json.date }}\nAttendees: {{ $('Format Meeting Data').item.json.attendees }}\nDuration: {{ $('Format Meeting Data').item.json.duration }}\n\nPlease review and fill in discussion notes, action items, and decisions.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": ""
+        }
+      },
+      "typeVersion": 2.1
+    }
+  ],
+  "connections": {
+    "Webhook Meeting Ended": {
+      "main": [
+        [{ "node": "Format Meeting Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Meeting Data": {
+      "main": [
+        [{ "node": "Notion Create Meeting Page", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notion Create Meeting Page": {
+      "main": [
+        [{ "node": "Gmail Send Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}
